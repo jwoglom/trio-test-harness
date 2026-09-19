@@ -64,7 +64,7 @@ def is_running() -> bool:
         return False
 
 
-def start(udid: str, timeout: float = 180) -> None:
+def start(udid: str, timeout: float = 600) -> None:
     if is_running():
         return
     xr = xctestrun() or build(udid)
