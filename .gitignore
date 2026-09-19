@@ -1,0 +1,10 @@
+.venv/
+runs/
+harness.env
+__pycache__/
+*.pyc
+.DS_Store
+build/
+*.ipa
+*.app
+.idb/

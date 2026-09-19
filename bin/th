@@ -1,0 +1,8 @@
+#!/bin/bash
+# Entry point for the Trio test harness. Uses the repo-local virtualenv.
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+PY="$HERE/.venv/bin/python"
+if [ ! -x "$PY" ]; then echo "th: virtualenv missing; run $HERE/install.sh" >&2; exit 1; fi
+export PATH="$HERE/.venv/bin:/usr/local/bin:/opt/homebrew/bin:$PATH"
+cd "$HERE" || exit 1
+exec "$PY" -m harness.cli "$@"

@@ -1,0 +1,5 @@
+vncdotool>=1.4
+pymobiledevice3>=6
+pillow>=10
+requests>=2
+fb-idb>=1.1
