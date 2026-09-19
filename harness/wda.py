@@ -159,6 +159,23 @@ class WDAClient:
     def source(self) -> dict:
         return self._req("GET", "/source?format=json", session=False, timeout=120)
 
+    def find_elements(self, text: str, exact: bool = False) -> list[dict]:
+        """Predicate search (fast, ~0.5s) -> [{label,name,value,type,enabled,rect(points)}]."""
+        esc = text.replace("'", "\\'")
+        op = "==" if exact else "CONTAINS[c]"
+        pred = f"label {op} '{esc}' OR name {op} '{esc}' OR value {op} '{esc}'"
+        els = self._req("POST", "/elements", {"using": "predicate string", "value": pred}, timeout=90)
+        out = []
+        for e in els[:25]:
+            eid = e.get("ELEMENT") or next(iter(e.values()))
+            try:
+                rect = self._req("GET", f"/element/{eid}/rect")
+                attrs = {k: self._req("GET", f"/element/{eid}/attribute/{k}") for k in ("label", "name", "value", "type", "enabled")}
+            except HarnessError:
+                continue
+            out.append({"rect": rect, **attrs})
+        return out
+
     def alert_text(self) -> str | None:
         try:
             return self._req("GET", "/alert/text")

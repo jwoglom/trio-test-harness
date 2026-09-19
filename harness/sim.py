@@ -205,6 +205,22 @@ class SimulatorDriver(Driver):
             walk(data)
         return nodes
 
+    def find(self, text: str, *, exact: bool = False, role: str | None = None) -> list[UINode]:
+        """Fast path via WDA predicate search; falls back to a full tree walk."""
+        if self.wda:
+            s = self.scale
+            nodes = []
+            for e in self.wda.find_elements(text, exact):
+                r = e["rect"]
+                nodes.append(UINode(label=e.get("label") or "", value=str(e.get("value") or ""),
+                                    identifier=e.get("name") or "", role=str(e.get("type") or "").replace("XCUIElementType", ""),
+                                    enabled=str(e.get("enabled")).lower() in ("true", "1"),
+                                    x=int(r["x"] * s), y=int(r["y"] * s), w=int(r["width"] * s), h=int(r["height"] * s)))
+            if role:
+                nodes = [n for n in nodes if role.lower() in n.role.lower()]
+            return nodes
+        return super().find(text, exact=exact, role=role)
+
     def _wda_tree(self) -> list[UINode]:
         s = self.scale
         nodes: list[UINode] = []
