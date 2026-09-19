@@ -235,6 +235,20 @@ def cmd_device(args):
     return 0
 
 
+def cmd_wda(args):
+    from . import wda as W
+    drv = get_driver("sim")
+    if args.sub == "build":
+        print(W.build(drv.udid))
+    elif args.sub == "start":
+        drv.boot(); W.start(drv.udid); print(f"WDA ready on :{W.PORT}")
+    elif args.sub == "stop":
+        W.stop(); print("stopped")
+    elif args.sub == "status":
+        print("running" if W.is_running() else "not running"); return 0 if W.is_running() else 1
+    return 0
+
+
 # ---------------- interaction primitives -----------------
 
 def cmd_shot(args):
@@ -499,6 +513,11 @@ def build_parser() -> argparse.ArgumentParser:
     vc = ds.add_parser("vnc-check"); vc.add_argument("--out")
     si = ds.add_parser("serve-ipa"); si.add_argument("ipa"); si.add_argument("--serve-seconds", type=int, default=600)
     dv.set_defaults(fn=cmd_device)
+
+    wd = sp.add_parser("wda", help="WebDriverAgent runner for the simulator"); wds = wd.add_subparsers(dest="sub", required=True)
+    for name in ("build", "start", "stop", "status"):
+        wds.add_parser(name)
+    wd.set_defaults(fn=cmd_wda)
 
     sh = sp.add_parser("shot", help="screenshot into the current run"); sh.add_argument("--name"); sh.add_argument("--note")
     sh.add_argument("--out"); sh.add_argument("--run"); sh.add_argument("--ocr", action="store_true"); sh.set_defaults(fn=cmd_shot)

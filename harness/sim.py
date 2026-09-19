@@ -23,6 +23,24 @@ class SimulatorDriver(Driver):
         self.udid = udid or xcode.ensure_simulator()["udid"]
         self._scale: float | None = None
         self._env = xcode.developer_env()
+        self._wda = None
+
+    # ---- backend: WebDriverAgent (preferred) or idb ----
+    @property
+    def wda(self):
+        """WDAClient if the runner is up (start it with `th wda start`), else None."""
+        if self._wda is None:
+            from . import wda as W
+            if W.is_running():
+                self._wda = W.WDAClient()
+        return self._wda
+
+    def ensure_wda(self):
+        from . import wda as W
+        if not W.is_running():
+            W.start(self.udid)
+        self._wda = W.WDAClient()
+        return self._wda
 
     # ---- lifecycle ----
     def boot(self) -> None:
@@ -44,6 +62,8 @@ class SimulatorDriver(Driver):
     # ---- scale factor (pixels per point) ----
     @property
     def scale(self) -> float:
+        if self._scale is None and self.wda:
+            self._scale = self.wda.scale
         if self._scale is None:
             try:
                 out = self._idb(["describe", "--json"], quiet=True).stdout
@@ -101,26 +121,53 @@ class SimulatorDriver(Driver):
         return path
 
     # ---- input (pixel coords) ----
+    def _need_input_backend(self) -> None:
+        if self.wda is None and not self.have_idb():
+            raise HarnessError("no input backend: run `th wda start` (WebDriverAgent) or install idb_companion")
+
     def tap(self, x: int, y: int, *, duration: float = 0.0) -> None:
+        self._need_input_backend()
+        if self.wda:
+            if duration:
+                self.wda.touch_and_hold(x / self.scale, y / self.scale, duration)
+            else:
+                self.wda.tap(x / self.scale, y / self.scale)
+            return
         args = ["ui", "tap", str(int(x / self.scale)), str(int(y / self.scale))]
         if duration:
             args += ["--duration", str(duration)]
         self._idb(args, quiet=True)
 
     def swipe(self, x1: int, y1: int, x2: int, y2: int, *, duration: float = 0.3) -> None:
+        self._need_input_backend()
         s = self.scale
+        if self.wda:
+            self.wda.drag(x1 / s, y1 / s, x2 / s, y2 / s, duration)
+            return
         self._idb(["ui", "swipe", str(int(x1 / s)), str(int(y1 / s)), str(int(x2 / s)), str(int(y2 / s)),
                    "--duration", str(duration)], quiet=True)
 
     def type_text(self, text: str) -> None:
+        self._need_input_backend()
+        if self.wda:
+            self.wda.keys(text)
+            return
         self._idb(["ui", "text", text], quiet=True)
 
     def key(self, name: str) -> None:
         # HID usage codes: https://source.android.com/... (idb takes numeric keycodes)
+        self._need_input_backend()
+        if self.wda:
+            chars = {"return": "\n", "enter": "\n", "backspace": "\b", "delete": "\b", "tab": "\t", "space": " "}
+            self.wda.keys(chars.get(name.lower(), name))
+            return
         codes = {"return": 40, "enter": 40, "backspace": 42, "delete": 42, "tab": 43, "space": 44, "escape": 41}
         self._idb(["ui", "key", str(codes[name.lower()])], quiet=True)
 
     def home(self) -> None:
+        if self.wda:
+            self.wda.home()
+            return
         self._idb(["ui", "button", "HOME"], quiet=True)
 
     def wake(self) -> None:
@@ -128,6 +175,10 @@ class SimulatorDriver(Driver):
 
     # ---- accessibility tree ----
     def ui_tree(self) -> list[UINode]:
+        if self.wda:
+            return self._wda_tree()
+        if not self.have_idb():
+            return []
         out = self._idb(["ui", "describe-all", "--json", "--nested"], quiet=True).stdout
         data = json.loads(out)
         nodes: list[UINode] = []
@@ -152,6 +203,23 @@ class SimulatorDriver(Driver):
                 walk(n)
         else:
             walk(data)
+        return nodes
+
+    def _wda_tree(self) -> list[UINode]:
+        s = self.scale
+        nodes: list[UINode] = []
+
+        def walk(n: dict):
+            r = n.get("rect") or {}
+            nodes.append(UINode(
+                label=n.get("label") or "", value=str(n.get("value") or ""), identifier=n.get("name") or "",
+                role=n.get("type") or "", enabled=bool(n.get("isEnabled", True)),
+                x=int(float(r.get("x", 0)) * s), y=int(float(r.get("y", 0)) * s),
+                w=int(float(r.get("width", 0)) * s), h=int(float(r.get("height", 0)) * s)))
+            for c in n.get("children") or []:
+                walk(c)
+
+        walk(self.wda.source())
         return nodes
 
     def describe_point(self, x: int, y: int) -> dict:

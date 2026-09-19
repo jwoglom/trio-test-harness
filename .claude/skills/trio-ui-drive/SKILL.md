@@ -43,7 +43,8 @@ The phone driver cannot kill or launch by bundle id: use the App Switcher / Spot
 - Only one `accessibilityIdentifier` exists in Trio (device picker rows); everything else is matched by visible label.
 
 ## Tips
-- Simulator taps require `idb_companion`; if `th tap` errors, `brew install facebook/fb/idb-companion`.
+- Simulator taps/tree need an input backend: run `th wda start` once per simulator boot (WebDriverAgent, built on first use
+  with `th wda build`; `th wda status` / `th wda stop`). idb is used automatically if installed instead.
 - On the phone, TrollVNC's right mouse button is Home and middle is Power (`th home`, `th device wake`). Text input types HID
   keys, so tap the text field first. If the screen is black, the phone is asleep: `th device wake`.
 - Alerts from iOS (permissions) are ordinary taps: `th tap-text Allow`.

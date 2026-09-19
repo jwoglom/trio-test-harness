@@ -21,7 +21,7 @@ Testing a TandemKit change means Trio on `feat/tandem` (or the branch the user n
 `th doctor`. Blockers and their fixes:
 - No Xcode → the user must run `./bootstrap-xcode.sh` (needs an Apple ID download and sudo; Xcode 26.3 is the newest that runs on this macOS 15 iMac). Stop and report; do everything not needing Xcode first.
 - No iOS runtime → `th sim install-runtime`.
-- `idb_companion` missing → `brew install facebook/fb/idb-companion` (simulator taps depend on it; screenshots don't).
+- Simulator input backend: `th wda start` (WebDriverAgent runner; first call builds it). Screenshots work without it.
 - No usbmuxd device → the phone is unplugged/locked/untrusted. Device tests cannot proceed; do the simulator part.
 - TrollVNC unreachable → phone must be unlocked with TrollVNC enabled (Settings ▸ TrollVNC). Check `TH_VNC_PASSWORD`.
 
@@ -39,6 +39,7 @@ finding: capture the errors for the report and stop.
 ## 3. Start a run, get to the home screen
 ```
 th --target sim run new "<short name>" --title "Trio <branch/PR>: <what>"
+th wda start                                       # sim only: input + accessibility backend
 th --target sim launch --preseed-onboarding        # sim only: skips onboarding by writing the flag into the app container
 th --target device launch                          # phone: Home → Spotlight → "Trio"
 th shot --name launch --note "after launch"

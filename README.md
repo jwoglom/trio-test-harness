@@ -20,8 +20,8 @@ th run finish passed --summary "..." ; th report html ; th report pr <pr-url>
 | Build | `xcodebuild`, ad-hoc signing (no Apple credentials), same flags as Trio CI | ad-hoc `.ipa` for **TrollStore**, or automatic signing with `TH_DEVELOPER_TEAM` + `devicectl` |
 | Install / launch | `simctl install` / `simctl launch` | TrollStore via `apple-magnifier://install?url=…` (harness serves the IPA), launch via Spotlight over VNC; or `devicectl` |
 | Screenshots | `simctl io screenshot` | **TrollVNC** framebuffer over USB (`iproxy 5901`) |
-| Taps / swipes / typing | **idb** (`idb ui tap/swipe/text`) | VNC pointer & keyboard events (TrollVNC maps right-click → Home, middle → Power) |
-| Find elements | idb accessibility tree (`th tree`, `th tap-text`) | OCR (tesseract) on the screenshot (`th tap-text`, `th find`) |
+| Taps / swipes / typing | **WebDriverAgent** (`th wda start`; idb if installed) | VNC pointer & keyboard events (TrollVNC maps right-click → Home, middle → Power) |
+| Find elements | WebDriverAgent accessibility tree (`th tree`, `th tap-text`) | OCR (tesseract) on the screenshot (`th tap-text`, `th find`) |
 | Skip onboarding | write `Documents/onboardingCompleted.plist` into the app container | click through with `th flow onboarding-walk` |
 
 All coordinates the CLI accepts are **screenshot pixels**, so an agent can look at a PNG and tap what it sees on both targets.
@@ -40,6 +40,11 @@ Python package `harness/` (CLI `bin/th`), Claude skills in `.claude/skills/` (sy
 ```
 
 `harness.env` (gitignored) holds machine-specific settings — Apple team id, VNC password, simulator model. See `harness.env.example`.
+
+### Simulator input backend
+`th wda build` compiles appium's WebDriverAgent (cloned into `vendor/`) for the simulator; `th wda start` keeps it running
+(`xcodebuild test-without-building`) on port 8100. The simulator driver uses it for taps, typing and the accessibility tree
+and falls back to idb when `idb_companion` is installed (Homebrew cannot build idb on this Intel/macOS 15 Mac).
 
 ### Xcode on this Mac
 The harness targets the 2017 Intel iMac running macOS 15.7. The newest Xcode that runs there is **26.3** (26.4+ needs macOS 26).
