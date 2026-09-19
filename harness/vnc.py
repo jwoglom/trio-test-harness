@@ -34,7 +34,10 @@ class VNCDriver(Driver):
         self.port = int(port or CONFIG.get("TH_VNC_PORT"))
         self.local_port = int(CONFIG.get("TH_VNC_LOCAL_PORT"))
         self.password = password if password is not None else (CONFIG.get("TH_VNC_PASSWORD") or None)
-        self.via_usb = CONFIG.bool("TH_VNC_VIA_USB") if via_usb is None else via_usb
+        if via_usb is None:
+            # A non-local TH_VNC_HOST means "connect over the network"; USB forwarding only makes sense for localhost.
+            via_usb = CONFIG.bool("TH_VNC_VIA_USB") and self.host in ("localhost", "127.0.0.1", "")
+        self.via_usb = via_usb
         self.udid = udid or CONFIG.get("TH_DEVICE_UDID") or None
         self._client = None
         self._iproxy: subprocess.Popen | None = None
@@ -63,29 +66,22 @@ class VNCDriver(Driver):
     def client(self):
         if self._client is None:
             self._ensure_iproxy()
-            from vncdotool import api
-            api.VNCDoToolFactory.protocol.MAX_DESKTOP_SIZE = 0x100000  # allow big framebuffers
-            addr = self._addr()
-            log(f"vnc connect {addr}")
+            from .rfb import RFBClient
+            host, port = ("127.0.0.1", self.local_port) if self.via_usb else (self.host, self.port)
+            log(f"vnc connect {host}:{port}")
             try:
-                self._client = api.connect(addr, password=self.password, timeout=15)
-                self._client.timeout = 30
-                # First framebuffer fetch; validates the connection.
-                self._client.refreshScreen(incremental=False)
-            except Exception as e:  # noqa: BLE001
+                self._client = RFBClient(host, port, self.password).connect()
+            except (OSError, HarnessError) as e:
                 self._client = None
                 raise HarnessError(
-                    f"could not connect to TrollVNC at {addr}: {e}\n"
-                    "Is the iPhone plugged in and unlocked, TrollVNC enabled (Settings > TrollVNC), "
+                    f"could not connect to TrollVNC at {host}:{port}: {e}\n"
+                    "Is the iPhone on, TrollVNC enabled (Settings > TrollVNC), reachable at TH_VNC_HOST / over USB, "
                     "and TH_VNC_PASSWORD set if you configured a password?") from e
         return self._client
 
     def close(self) -> None:
         if self._client is not None:
-            try:
-                self._client.disconnect()
-            except Exception:  # noqa: BLE001
-                pass
+            self._client.close()
             self._client = None
         if self._iproxy:
             self._iproxy.terminate()
@@ -117,73 +113,62 @@ class VNCDriver(Driver):
     # ---- screen ----
     def screen_size(self) -> tuple[int, int]:
         c = self.client
-        c.refreshScreen(incremental=True)
-        return c.screen.size
+        return c.width, c.height
 
     def screenshot(self, path: Path) -> Path:
         path.parent.mkdir(parents=True, exist_ok=True)
-        c = self.client
-        c.refreshScreen(incremental=True)
-        # Two incremental refreshes coalesce TrollVNC's deferred updates.
-        time.sleep(0.15)
-        c.refreshScreen(incremental=True)
-        c.screen.save(str(path))
+        self.client.capture(incremental=False).save(str(path))
         return path
 
     # ---- input ----
     def _press(self, x: int, y: int, button: int, hold: float) -> None:
         c = self.client
-        c.mouseMove(x, y)
-        c.mouseDown(button)
+        c.pointer(x, y, 0)
+        time.sleep(0.03)
+        c.pointer(x, y, button)
         time.sleep(hold)
-        c.mouseUp(button)
+        c.pointer(x, y, 0)
 
     def tap(self, x: int, y: int, *, duration: float = 0.0) -> None:
-        self._press(int(x), int(y), LEFT, duration or 0.06)
-        time.sleep(0.15)
+        self._press(int(x), int(y), LEFT, duration or 0.08)
+        time.sleep(0.2)
 
     def long_press(self, x: int, y: int, duration: float = 1.0) -> None:
         self._press(int(x), int(y), LEFT, duration)
 
     def swipe(self, x1: int, y1: int, x2: int, y2: int, *, duration: float = 0.3) -> None:
         c = self.client
-        steps = max(8, int(duration / 0.02))
-        c.mouseMove(int(x1), int(y1))
-        c.mouseDown(LEFT)
+        steps = max(10, int(duration / 0.02))
+        c.pointer(x1, y1, 0); time.sleep(0.03)
+        c.pointer(x1, y1, LEFT); time.sleep(0.05)
         for i in range(1, steps + 1):
             t = i / steps
-            c.mouseMove(int(x1 + (x2 - x1) * t), int(y1 + (y2 - y1) * t))
+            c.pointer(int(x1 + (x2 - x1) * t), int(y1 + (y2 - y1) * t), LEFT)
             time.sleep(duration / steps)
-        c.mouseUp(LEFT)
-        time.sleep(0.3)
+        c.pointer(x2, y2, 0)
+        time.sleep(0.4)
 
     def type_text(self, text: str) -> None:
         c = self.client
         for ch in text:
-            if ch == "\n":
-                c.keyPress("enter")
-            elif ch == " ":
-                c.keyPress("space")
-            else:
-                c.keyPress(ch)
-            time.sleep(0.04)
+            c.key_press("enter" if ch == "\n" else ch)
+            time.sleep(0.05)
 
     def key(self, name: str) -> None:
-        aliases = {"return": "enter", "backspace": "bsp", "delete": "del", "escape": "esc"}
-        self.client.keyPress(aliases.get(name.lower(), name))
+        self.client.key_press(name)
 
     def home(self) -> None:
         w, h = self.screen_size()
-        self._press(w // 2, h // 2, RIGHT, 0.08)
-        time.sleep(0.6)
+        self._press(w // 2, h // 2, RIGHT, 0.1)
+        time.sleep(0.8)
 
     def power(self) -> None:
         w, h = self.screen_size()
-        self._press(w // 2, h // 2, MIDDLE, 0.08)
+        self._press(w // 2, h // 2, MIDDLE, 0.1)
 
     def paste_text(self, text: str) -> None:
         """Push text to the iOS clipboard (TrollVNC clipboard sync), then long-press + Paste yourself."""
-        self.client.paste(text)
+        self.client.cut_text(text)
 
     # ---- app helpers (VNC-only: no process control on the device) ----
     def open_app_via_spotlight(self, name: str) -> None:

@@ -46,7 +46,7 @@ def _load_env_file(path: Path) -> dict[str, str]:
         if not line or line.startswith("#") or "=" not in line:
             continue
         k, v = line.split("=", 1)
-        v = v.strip().strip('"').strip("'")
+        v = v.split(" #", 1)[0].split("\t#", 1)[0].strip().strip('"').strip("'")
         out[k.strip()] = os.path.expanduser(v)
     return out
 
@@ -59,6 +59,7 @@ class Config:
     def load(cls) -> "Config":
         vals = dict(DEFAULTS)
         vals.update(_load_env_file(ENV_FILE))
+        vals.update(_load_env_file(REPO_ROOT / ".env"))   # optional overrides (also gitignored)
         for k in DEFAULTS:
             if k in os.environ:
                 vals[k] = os.environ[k]
