@@ -59,9 +59,9 @@ def simctl_json(args: list[str]) -> dict:
     return json.loads(cp.stdout)
 
 
-def list_runtimes() -> list[dict]:
+def list_runtimes(platform: str = "iOS") -> list[dict]:
     data = simctl_json(["list", "runtimes"])
-    return [r for r in data.get("runtimes", []) if r.get("platform") == "iOS" and r.get("isAvailable")]
+    return [r for r in data.get("runtimes", []) if r.get("platform") == platform and r.get("isAvailable")]
 
 
 def list_devicetypes() -> list[dict]:

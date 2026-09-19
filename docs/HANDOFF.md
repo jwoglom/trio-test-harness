@@ -34,6 +34,10 @@ and fake pump ("Pump Simulator") configured.
 - Trio submodules initialized in the user's `~/repos/Trio` (dev branch).
 
 ## NOT verified — do these first on the new Mac
+0. **Install both simulator runtimes**: `th sim install-runtime` (iOS) **and** `th sim install-runtime --platform watchOS`.
+   Verified on 2026-09-19: with the harness flags, `xcodebuild -resolvePackageDependencies` for Trio succeeds, and the build
+   then aborts immediately with "This scheme builds an embedded Apple Watch app. watchOS 11.0 must be installed" when the
+   watchOS runtime is missing. `th doctor` now checks for it.
 1. **A real Trio build** (`th --target sim build`). The first Mac only had Xcode 16 (iOS 18 SDK); Trio dev uses iOS 26 APIs
    (`.glassEffect` in `Trio/Sources/Modules/Home/View/GlassChrome.swift` and `Views/GlassActionSheet.swift`, AlarmKit behind
    `canImport`), so it needs Xcode 26.x. Trio CI uses Xcode 26.2/26.5; anything 26.2+ should do. Check the xcodebuild flags in

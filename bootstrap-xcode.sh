@@ -62,7 +62,11 @@ echo "== iOS simulator runtime (~8 GB download, no sudo)"
 if ! xcrun simctl list runtimes | grep -q "iOS .* - com.apple.CoreSimulator.SimRuntime.iOS"; then
   xcodebuild -downloadPlatform iOS
 fi
-xcrun simctl list runtimes | grep iOS || true
+echo "== watchOS simulator runtime (Trio's scheme embeds a Watch app; the build refuses to start without it)"
+if ! xcrun simctl list runtimes | grep -q "watchOS .* - com.apple.CoreSimulator.SimRuntime.watchOS"; then
+  xcodebuild -downloadPlatform watchOS
+fi
+xcrun simctl list runtimes | grep -E "iOS|watchOS" || true
 
 echo "== idb companion (simulator UI automation)"
 brew list --formula idb-companion >/dev/null 2>&1 || brew install facebook/fb/idb-companion || true

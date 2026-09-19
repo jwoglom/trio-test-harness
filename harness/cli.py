@@ -50,6 +50,9 @@ def cmd_doctor(args):
         try:
             rts = xcode.list_runtimes()
             item("iOS simulator runtime", rts, ", ".join(r["name"] for r in rts) or "th sim install-runtime")
+            wrts = xcode.list_runtimes("watchOS")
+            item("watchOS simulator runtime (Trio scheme embeds a Watch app)", wrts,
+                 ", ".join(r["name"] for r in wrts) or "th sim install-runtime --platform watchOS")
         except HarnessError as e:
             item("simctl", False, str(e)[:200])
     print("Tools")
@@ -191,7 +194,7 @@ def cmd_sim(args):
         for r in xcode.list_runtimes():
             print(f"{r['identifier']}  {r['name']}")
     elif sub == "install-runtime":
-        cmd = ["xcodebuild", "-downloadPlatform", "iOS"]
+        cmd = ["xcodebuild", "-downloadPlatform", args.platform]
         if args.version:
             cmd += ["-buildVersion", args.version]
         run(cmd, env=xcode.developer_env(), capture=False, timeout=7200)
@@ -513,6 +516,7 @@ def build_parser() -> argparse.ArgumentParser:
     for name in ("list", "runtimes", "boot", "shutdown", "erase"):
         ss.add_parser(name)
     ir = ss.add_parser("install-runtime"); ir.add_argument("version", nargs="?")
+    ir.add_argument("--platform", default="iOS", choices=["iOS", "watchOS"], help="Trio needs both: the scheme embeds a Watch app")
     c = ss.add_parser("container"); c.add_argument("--bundle-id")
     d = ss.add_parser("defaults"); d.add_argument("key"); d.add_argument("value"); d.add_argument("--type", default="-string"); d.add_argument("--bundle-id")
     ou = ss.add_parser("openurl"); ou.add_argument("url")

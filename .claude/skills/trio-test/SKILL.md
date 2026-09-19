@@ -20,7 +20,7 @@ Testing a TandemKit change means Trio on `feat/tandem` (or the branch the user n
 ## 1. Environment check
 `th doctor`. Blockers and their fixes:
 - No Xcode → the user must run `./bootstrap-xcode.sh` (needs an Apple ID download and sudo; Xcode 26.3 is the newest that runs on this macOS 15 iMac). Stop and report; do everything not needing Xcode first.
-- No iOS runtime → `th sim install-runtime`.
+- No iOS/watchOS runtime → `th sim install-runtime` and `th sim install-runtime --platform watchOS` (Trio embeds a Watch app; xcodebuild refuses to start without the watchOS runtime).
 - Simulator input backend: `th wda start` (WebDriverAgent runner; first call builds it). Screenshots work without it.
 - No usbmuxd device → the phone is unplugged/locked/untrusted. Device tests cannot proceed; do the simulator part.
 - TrollVNC unreachable → phone must be unlocked with TrollVNC enabled (Settings ▸ TrollVNC). Check `TH_VNC_PASSWORD`.

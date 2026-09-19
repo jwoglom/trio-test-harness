@@ -5,7 +5,7 @@ description: Build and install the Trio iOS app from any branch, PR, or submodul
 
 # trio-build
 
-`cd ~/repos/trio-test-harness`; `th` = `./bin/th`. Requires Xcode (see `th doctor`; if missing, the user runs `./bootstrap-xcode.sh`).
+`cd ~/repos/trio-test-harness`; `th` = `./bin/th`. Requires Xcode 26.2+ plus the iOS **and watchOS** simulator runtimes (see `th doctor`; `th sim install-runtime [--platform watchOS]`).
 
 ## Source selection (`th build`)
 | Want | Flags |
