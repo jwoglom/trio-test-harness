@@ -1,0 +1,82 @@
+# Handoff: state of the Trio test harness (2026-09-19)
+
+Written for the next agent, who will run on a **newer Mac (macOS 26)**. Everything below was learned on the
+first machine (2017 Intel iMac, macOS 15.7) — read "Machine-specific notes" to know what changes.
+
+## Goal (from the user)
+Given a Trio branch or PR — or a branch of a Trio submodule such as **TandemKit** (Trio must then be on `feat/tandem`) —
+build Trio, install it on the iOS Simulator and/or the user's iPhone, drive the app to test the requested functionality,
+save screenshots, and deliver them as artifacts: an HTML page for the user, and PR comments/description when a PR is given.
+First validation target: Trio launches and reaches the home screen on **both** targets, with the fake CGM ("Glucose Simulator")
+and fake pump ("Pump Simulator") configured.
+
+## What exists
+- `bin/th` CLI + `harness/` package (see README for the command list). Skills in `.claude/skills/`.
+- Source selection & build: `harness/build.py` (in-place checkout, branch, PR, fork, submodule overrides, ad-hoc simulator
+  signing identical to Trio CI, device signing or ad-hoc IPA). Git calls rewrite `https://github.com/` → SSH and never prompt
+  (needed for the private `jwoglom/tandemkit` submodule).
+- Simulator driver `harness/sim.py`: simctl for boot/install/launch/screenshot; **WebDriverAgent** (`harness/wda.py`,
+  `th wda build|start|stop|status`, cloned into `vendor/`) for taps, typing, alerts and the accessibility tree; idb as an
+  alternative if `idb_companion` exists.
+- Phone driver `harness/vnc.py` + `harness/rfb.py`: TrollVNC over Wi-Fi or USB (`iproxy`). OCR fallback `harness/ocr.py`.
+- Reporting `harness/report.py`: runs under `runs/`, `report.html` (self-contained), PR comment/description via `gh` with
+  screenshots uploaded to `TH_ARTIFACT_REPO` (public repo, created on first use — GitHub's API cannot attach images).
+- Trio flows `harness/flows/trio.py`: onboarding walk, pre-seeding the onboarding flag, add CGM/pump simulator, back-to-home,
+  `th test smoke` composing them.
+- `install.sh` (deps, venv, skills), `bootstrap-xcode.sh` (Xcode install helper), `harness.env.example`.
+
+## Verified (actually ran)
+- Checkout of `feat/tandem` incl. TandemKit submodule; `--submodule TandemKit@main` override; `th build --checkout-only`.
+- Simulator: create/boot (`TrioHarness`), screenshots, WDA build + start, coordinate tap, `tap-text`, `find` (fast predicate
+  search with correct pixel rects), `home`.
+- Phone: RFB connect + VNC auth, screenshot, Home press. `th device list` via pymobiledevice3.
+- OCR: phrase search incl. white-on-blue button text on synthetic iPhone-size images; run/report HTML + markdown rendering.
+- Trio submodules initialized in the user's `~/repos/Trio` (dev branch).
+
+## NOT verified — do these first on the new Mac
+1. **A real Trio build** (`th --target sim build`). The first Mac only had Xcode 16 (iOS 18 SDK); Trio dev uses iOS 26 APIs
+   (`.glassEffect` in `Trio/Sources/Modules/Home/View/GlassChrome.swift` and `Views/GlassActionSheet.swift`, AlarmKit behind
+   `canImport`), so it needs Xcode 26.x. Trio CI uses Xcode 26.2/26.5; anything 26.2+ should do. Check the xcodebuild flags in
+   `harness/build.py` against `.github/workflows/unit_tests.yml` in Trio if the build fails for signing reasons.
+2. `th install` + `th launch --preseed-onboarding` on the simulator, then `th flow at-home`. The pre-seed writes
+   `Documents/onboardingCompleted.plist` (binary plist, root Bool true) into the app container — confirm Trio honours it.
+3. The onboarding walk (`th flow onboarding-walk`) and the fake-device flows (`th flow add-cgm-sim`, `add-pump-sim`) — written
+   from code reading, never run. Expect to adjust labels/timings. Facts they rely on are listed at the top of
+   `harness/flows/trio.py` and in `.claude/skills/trio-ui-drive/SKILL.md`. Watch for: Bluetooth "required" view on the CGM
+   screen in the simulator, iOS notification permission alert, version-check alert, the "chapter complete" interstitials.
+4. `th test smoke` end to end, then `th report html` → publish as an Artifact.
+5. Phone: install **AppSync Unified** over VNC (see `docs/phone-setup.md`), then `th --target device build --trollstore`
+   (produces the ad-hoc IPA), `th --target device install --appsync`, `th launch --target device`, walk onboarding via OCR.
+6. `th report pr` against a real PR (creates `TH_ARTIFACT_REPO` on first use — confirm the repo name with the user first).
+
+## Machine-specific notes (what to redo on the new Mac)
+- Run `./install.sh` (brew: libusbmuxd, tesseract, coreutils, idb-companion if it builds; venv; skills symlinks), then
+  copy `harness.env.example` → `harness.env` and recreate `.env` with `TH_VNC_HOST` (phone IP from Settings ▸ TrollVNC) and
+  `TH_VNC_PASSWORD`. These are not in git.
+- Xcode: on macOS 26 just install the current Xcode (App Store or `xcodes install --latest`); `bootstrap-xcode.sh`'s
+  Intel/macOS-15 constraints no longer apply. The harness never needs `xcode-select`; it sets `DEVELOPER_DIR` from
+  `TH_XCODE_APP` or the newest `/Applications/Xcode*.app`.
+- iOS simulator runtime: `th sim install-runtime` (or Xcode ▸ Settings ▸ Components). Set `TH_SIM_DEVICE` to a model the
+  runtime has (default "iPhone 16"; Trio CI uses "iPhone 17"). Trio deployment target is iOS 17.
+- `th wda build` once per Xcode/runtime; `th wda start` after each simulator boot. If WDA fails with "Timed out waiting for AX
+  loaded notification", run `xcrun simctl spawn <udid> defaults write com.apple.Accessibility AccessibilityEnabled -bool true`
+  (and `ApplicationAccessibilityEnabled`), reboot the simulator, retry. Startup can take minutes on slow Macs.
+- On Apple silicon `brew install facebook/fb/idb-companion` should work (it needs Xcode 26); the harness then also accepts idb.
+- The phone must be on the same network (or USB) as the new Mac. TrollVNC only allows what the RFB client asks for; our
+  client requests raw encoding, 32bpp.
+- GitHub: `gh auth login` as jwoglom (repo scope). Trio origin is `git@github.com:jwoglom/Trio`; upstream `nightscout/Trio`.
+
+## Known quirks
+- vncdotool (Twisted) hangs against TrollVNC after auth → we use `harness/rfb.py`. Keep it.
+- WDA `/source` dumps of SpringBoard report zero frames for icons; the predicate `find` path returns correct rects. Inside apps
+  both work. `/source` takes ~10 s; prefer `th find`/`th tap-text`.
+- `/tmp` writes were blocked in the agent sandbox; scratch files go to `runs/.tmp/` (`util.tmp_path`).
+- OCR on the whole 1179×2556 screenshot takes 1–5 s per pass; passes stop at the first hit.
+- Trio's `ConfigOverride.xcconfig` is gitignored in Trio; the harness writes one (team placeholder `TRIOSIMTST` for the
+  simulator, `DEV_BRANCH_WARNING_DISABLED` like CI) unless a non-harness one already exists.
+- The `--trollstore` install path exists but is irrelevant for an iOS 18 phone; the IPA it builds is what `--appsync` installs.
+
+## Open questions for the user
+- Name of the public screenshot repo (`TH_ARTIFACT_REPO`, default `jwoglom/trio-test-screenshots`).
+- Whether AppSync Unified is acceptable on the phone (user said yes on 2026-09-19) and which package manager is installed.
+- For PRs: comment by default; only edit the description when asked.

@@ -117,6 +117,14 @@ def cmd_install(args):
         return 0
     # device
     from . import devices as D
+    if args.appsync:
+        ipa = Path(args.ipa) if args.ipa else (Path(bi.ipa_path) if bi and bi.ipa_path else None)
+        if not ipa or not ipa.exists():
+            from .build import package_ipa
+            ipa = package_ipa(app, CONFIG.build_dir / "Trio.ipa")
+        D.appsync_install(ipa, CONFIG.get("TH_DEVICE_UDID") or None)
+        log(f"installed {ipa.name} via installd (AppSync Unified)")
+        return 0
     if args.trollstore or (bi and bi.target == "device-trollstore"):
         ipa = Path(args.ipa) if args.ipa else (Path(bi.ipa_path) if bi and bi.ipa_path else None)
         if not ipa or not ipa.exists():
@@ -489,7 +497,9 @@ def build_parser() -> argparse.ArgumentParser:
 
     i = sp.add_parser("install", help="install the last build")
     i.add_argument("--app"); i.add_argument("--ipa"); i.add_argument("--reinstall", action="store_true")
-    i.add_argument("--trollstore", action="store_true"); i.add_argument("--open-on-device", action="store_true",
+    i.add_argument("--trollstore", action="store_true"); i.add_argument("--appsync", action="store_true",
+                   help="device: install the ad-hoc IPA with pymobiledevice3 (phone has AppSync Unified)")
+    i.add_argument("--open-on-device", action="store_true",
                                                                           help="type the TrollStore link into Safari via VNC")
     i.add_argument("--serve-seconds", type=int, default=600)
     i.set_defaults(fn=cmd_install)

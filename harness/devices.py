@@ -81,6 +81,19 @@ def trollstore_install_url(ipa: Path) -> tuple[str, socketserver.TCPServer]:
     return f"apple-magnifier://install?url={ipa_url}", httpd
 
 
+# ---------------- AppSync Unified path (jailbroken phone, unsigned IPA) -----------------
+
+def appsync_install(ipa: Path, udid: str | None = None) -> None:
+    """Install an (ad-hoc signed) IPA through installd; works once AppSync Unified is on the phone."""
+    exe = which("pymobiledevice3")
+    if not exe:
+        raise HarnessError("pymobiledevice3 missing in .venv")
+    cmd = [exe, "apps", "install", str(ipa)]
+    if udid:
+        cmd += ["--udid", udid]
+    run(cmd, timeout=900, capture=False)
+
+
 # ---------------- devicectl path (signed builds) -----------------
 
 def devicectl_install(udid: str, app_or_ipa: Path) -> None:

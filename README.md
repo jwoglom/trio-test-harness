@@ -17,8 +17,8 @@ th run finish passed --summary "..." ; th report html ; th report pr <pr-url>
 
 | Piece | Simulator | Physical iPhone |
 |---|---|---|
-| Build | `xcodebuild`, ad-hoc signing (no Apple credentials), same flags as Trio CI | ad-hoc `.ipa` for **TrollStore**, or automatic signing with `TH_DEVELOPER_TEAM` + `devicectl` |
-| Install / launch | `simctl install` / `simctl launch` | TrollStore via `apple-magnifier://install?url=…` (harness serves the IPA), launch via Spotlight over VNC; or `devicectl` |
+| Build | `xcodebuild`, ad-hoc signing (no Apple credentials), same flags as Trio CI | ad-hoc `.ipa` installed via **AppSync Unified** (or TrollStore on iOS ≤ 17), or automatic signing with `TH_DEVELOPER_TEAM` + `devicectl` |
+| Install / launch | `simctl install` / `simctl launch` | `pymobiledevice3 apps install` (AppSync), or TrollStore link, or `devicectl`; launch via Spotlight over VNC |
 | Screenshots | `simctl io screenshot` | **TrollVNC** framebuffer over USB (`iproxy 5901`) |
 | Taps / swipes / typing | **WebDriverAgent** (`th wda start`; idb if installed) | VNC pointer & keyboard events (TrollVNC maps right-click → Home, middle → Power) |
 | Find elements | WebDriverAgent accessibility tree (`th tree`, `th tap-text`) | OCR (tesseract) on the screenshot (`th tap-text`, `th find`) |
@@ -46,18 +46,20 @@ Python package `harness/` (CLI `bin/th`), Claude skills in `.claude/skills/` (sy
 (`xcodebuild test-without-building`) on port 8100. The simulator driver uses it for taps, typing and the accessibility tree
 and falls back to idb when `idb_companion` is installed (Homebrew cannot build idb on this Intel/macOS 15 Mac).
 
-### Xcode on this Mac
-The harness targets the 2017 Intel iMac running macOS 15.7. The newest Xcode that runs there is **26.3** (26.4+ needs macOS 26).
-Apple gates Xcode downloads behind an Apple ID, so `bootstrap-xcode.sh` either expands an `Xcode_26.3_Universal.xip` you
-drop into `~/Downloads`, or uses `xcodes` (interactive Apple ID login). It then accepts the license / first-launch
-components (sudo), downloads the iOS simulator runtime, and installs `idb-companion`. Budget ~30 GB of disk.
-The harness never needs `xcode-select`; it sets `DEVELOPER_DIR` per command.
+### Xcode
+Trio dev needs **Xcode 26.2 or newer** (iOS 26 SDK APIs). On macOS 26 install the current Xcode from the App Store or
+`xcodes install --latest`, then `th sim install-runtime`. `bootstrap-xcode.sh` automates the xip/xcodes install, license,
+first-launch components and runtime download (it was written for a macOS 15 Intel Mac, where 26.3 was the ceiling).
+The harness never needs `xcode-select`; it sets `DEVELOPER_DIR` per command (`TH_XCODE_APP` or newest `/Applications/Xcode*.app`).
+
+See `docs/HANDOFF.md` for the current state and `docs/phone-setup.md` for the iPhone.
 
 ### Phone prerequisites
-- TrollStore + **TrollVNC** installed and enabled (Settings ▸ TrollVNC). Default port 5901; set `TH_VNC_PASSWORD` if you set one.
-- Plugged in over USB, unlocked, trusted. `th device list` shows it; `th device vnc-check` grabs a frame.
-- For TrollStore installs the phone must reach the Mac over the LAN (or set `TH_IPA_HTTP_HOST`, e.g. a Tailscale IP).
-- For signed installs instead: `TH_DEVELOPER_TEAM`, Apple ID signed into Xcode, Developer Mode on the phone.
+- Jailbroken iPhone with **TrollVNC** enabled (Settings ▸ TrollVNC), port 5901. Put `TH_VNC_HOST` and `TH_VNC_PASSWORD` in `.env`.
+- `th device vnc-check` grabs a frame; `th device list` shows the USB/usbmuxd view.
+- Installing builds: **AppSync Unified** on the phone + `th --target device install --appsync` (pymobiledevice3 over USB);
+  or TrollStore (iOS ≤ 17 only) via `--trollstore`; or signed builds (`TH_DEVELOPER_TEAM`, Apple ID in Xcode, Developer Mode) via devicectl.
+- Details: `docs/phone-setup.md`.
 
 ## CLI overview (`th --help`)
 `doctor` · `build` · `install` · `launch` · `sim {list,runtimes,install-runtime,boot,shutdown,erase,container,defaults,openurl}` ·

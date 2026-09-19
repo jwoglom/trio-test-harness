@@ -23,10 +23,10 @@ Branch/PR builds use a disposable clone at `build/Trio-src` (never the user's ch
   simulator (created on demand from `TH_SIM_DEVICE`/`TH_SIM_RUNTIME`).
 - `--target device` **signed**: needs `TH_DEVELOPER_TEAM` in `harness.env` and an Apple ID signed into Xcode (or ASC API
   key). Installs with `xcrun devicectl`. Requires Developer Mode on the phone.
-- `--target device --trollstore`: ad-hoc signed `.ipa` for the phone's TrollStore (no Apple credentials).
-  `th --target device install --trollstore --open-on-device` serves the IPA over HTTP and types the
-  `apple-magnifier://install?url=…` link into Safari via VNC; then confirm "Open in TrollStore" → "Install" with
-  `th shot` / `th tap-text`. The phone must reach the Mac's LAN IP (or set `TH_IPA_HTTP_HOST`).
+- `--target device --trollstore`: ad-hoc signed `.ipa` (no Apple credentials). Install it with
+  `th --target device install --appsync` (phone has AppSync Unified; uses pymobiledevice3 over USB — the user's iOS 18
+  phone), or `--trollstore --open-on-device` on an iOS ≤ 17 TrollStore phone (serves the IPA over HTTP and types the
+  `apple-magnifier://install?url=…` link into Safari via VNC). See `docs/phone-setup.md`.
 
 ## Notes
 - Build output: `build/last-build.json` (app path, bundle id, git sha, submodule shas) — `th run new` copies it into the run.

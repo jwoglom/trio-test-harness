@@ -1,8 +1,9 @@
 #!/bin/bash
-# Install Xcode on this Mac without the App Store.
+# Install Xcode without the App Store, plus first-launch components, an iOS simulator runtime and idb.
+# Set XCODE_VERSION (default 26.3) to the version you want; on macOS 26 use the newest (e.g. 27.0) or just the App Store.
 #
-# Facts for this machine (iMac18,1, macOS 15.7.x): the newest Xcode that runs on macOS 15 is
-# Xcode 26.3 (build 17C529). Xcode 26.4+ and 27 require macOS 26, which this iMac cannot run.
+# History: written for a 2017 Intel iMac on macOS 15.7, where Xcode 26.3 (build 17C529) was the newest that runs
+# (Xcode 26.4+ and 27 require macOS 26). Trio dev needs Xcode 26.2 or newer.
 # Downloading Xcode requires an Apple ID, so this script needs ONE of:
 #   a) an Xcode xip already in ~/Downloads  (https://developer.apple.com/download/all/?q=Xcode%2026.3
 #      -> "Xcode 26.3" -> Xcode_26.3_Universal.xip  — Universal, not Apple_silicon, for this Intel Mac)
