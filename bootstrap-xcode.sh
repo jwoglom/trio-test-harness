@@ -6,7 +6,8 @@
 # Downloading Xcode requires an Apple ID, so this script needs ONE of:
 #   a) an Xcode xip already in ~/Downloads  (https://developer.apple.com/download/all/?q=Xcode%2026.3
 #      -> "Xcode 26.3" -> Xcode_26.3_Universal.xip  — Universal, not Apple_silicon, for this Intel Mac)
-#   b) `xcodes` (brew install xcodesorg/made/xcodes) — it will prompt for your Apple ID + 2FA
+#   b) `xcodes` (installed at ~/.local/bin/xcodes from the GitHub release; brew cannot build it without Xcode)
+#      — it will prompt for your Apple ID + 2FA:  xcodes install 26.3 --experimental-unxip --directory /Applications
 #
 # Steps marked (sudo) prompt for your password.
 set -euo pipefail
@@ -43,7 +44,7 @@ No Xcode xip found in ~/Downloads and 'xcodes' is not installed.
 Either:
   1) download Xcode_${WANT}_Universal.xip from https://developer.apple.com/download/all/?q=Xcode%20${WANT}
      into ~/Downloads and re-run this script, or
-  2) brew install xcodesorg/made/xcodes && ./bootstrap-xcode.sh   (interactive Apple ID login)
+  2) ~/.local/bin/xcodes install ${WANT} --experimental-unxip --directory /Applications   (interactive Apple ID login)
 MSG
     exit 1
   fi
