@@ -10,6 +10,14 @@ save screenshots, and deliver them as artifacts: an HTML page for the user, and 
 First validation target: Trio launches and reaches the home screen on **both** targets, with the fake CGM ("Glucose Simulator")
 and fake pump ("Pump Simulator") configured.
 
+## Entry points (2026-09-20)
+- `bin/trio-test [--mode simulator|vnc] [--pr URL | --branch B] [--trio-branch B] [--onboarding preseed|walk] [--skip-build]
+  [--no-smoke] [--comment ask|auto|never] [--artifact-url URL] [--agent|--no-agent] [--yes]` — prompts for anything missing on
+  a TTY. Submodule PRs are resolved via `.gitmodules` (verified with jwoglom/TandemKit#395 → Trio feat/tandem).
+- Skills: `trio-e2e` (thin wrapper around the script) and `trio-test` (the chain), plus one skill per stage.
+- `TRIO_REPO` on this machine is the user's `~/repos/Trio` (their choice); PR/branch checkouts happen there (detached HEAD,
+  `git clean -fd` keeps ignored files). Elsewhere the default is `<harness>/Trio`.
+
 ## What exists
 - `bin/th` CLI + `harness/` package (see README for the command list). Skills in `.claude/skills/`.
 - Source selection & build: `harness/build.py` (in-place checkout, branch, PR, fork, submodule overrides, ad-hoc simulator

@@ -10,12 +10,14 @@ description: Build and install the Trio iOS app from any branch, PR, or submodul
 ## Source selection (`th build`)
 | Want | Flags |
 |---|---|
-| The user's checkout as-is (`~/repos/Trio`, uncommitted changes included) | *(no flags)* or `--in-place ~/repos/Trio` |
+| The harness checkout as-is (`$TRIO_REPO`, default `~/repos/trio-test-harness/Trio`) | *(no flags)* |
+| The user's own working copy with local changes | `--in-place ~/repos/Trio` |
+| A PR on a submodule (TandemKit, LoopKit…) | `--pr <submodule PR URL>` (Trio switches to the branch pinning it; `--trio-branch` to force) |
 | A branch of Trio's origin (jwoglom/Trio) | `--branch feat/tandem` |
 | A branch of another fork | `--branch nightscout/Trio@dev` or `--branch https://github.com/x/Trio#branch` |
 | A pull request | `--pr 4321` (nightscout/Trio), `--pr jwoglom/Trio#12`, or `--pr <URL>` |
 | A submodule at a branch/PR/fork | add `--submodule TandemKit@feat/x`, `--submodule TandemKit@pr/12`, `--submodule TandemKit=https://github.com/fork/TandemKit#br` (repeatable) |
-Branch/PR builds use a disposable clone at `build/Trio-src` (never the user's checkout). Submodules are synced with
+Branch/PR builds use the harness's own clone (`$TRIO_REPO`, a reference clone of `~/repos/Trio`), never the user's working copy. Submodules are synced with
 `git submodule update --init --recursive` — the first time this downloads LoopKit & friends (minutes). `--no-fetch` skips it.
 
 ## Targets
@@ -23,7 +25,7 @@ Branch/PR builds use a disposable clone at `build/Trio-src` (never the user's ch
   simulator (created on demand from `TH_SIM_DEVICE`/`TH_SIM_RUNTIME`).
 - `--target device` **signed**: needs `TH_DEVELOPER_TEAM` in `harness.env` and an Apple ID signed into Xcode (or ASC API
   key). Installs with `xcrun devicectl`. Requires Developer Mode on the phone.
-- `--target device --trollstore`: ad-hoc signed `.ipa` (no Apple credentials). Install it with
+- `--target device --trollstore`: unsigned build fake-signed with `codesign -s -` (every dylib incl. Trio.debug.dylib) + Trio's entitlements → `build/Trio.ipa` (no Apple credentials). Install it with
   `th --target device install --appsync` (phone has AppSync Unified; uses pymobiledevice3 over USB — the user's iOS 18
   phone), or `--trollstore --open-on-device` on an iOS ≤ 17 TrollStore phone (serves the IPA over HTTP and types the
   `apple-magnifier://install?url=…` link into Safari via VNC). See `docs/phone-setup.md`.

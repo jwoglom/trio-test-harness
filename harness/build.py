@@ -23,8 +23,35 @@ from .util import HarnessError, log, run, write_json, read_json
 from . import xcode
 
 DEFAULT_GH_REPO = "nightscout/Trio"
-SRC_DIR = REPO_ROOT / "build" / "Trio-src"
 LAST_BUILD = REPO_ROOT / "build" / "last-build.json"
+
+
+def checkout_dir() -> Path:
+    """The Trio checkout the harness builds from: $TRIO_REPO, default <harness>/Trio (gitignored)."""
+    return Path(CONFIG.get("TRIO_REPO")).expanduser().resolve()
+
+
+def ensure_checkout(dest: Path | None = None) -> Path:
+    """Clone Trio into the checkout dir if it is missing (fast local reference clone when TH_TRIO_REFERENCE exists)."""
+    dest = dest or checkout_dir()
+    if (dest / ".git").exists():
+        return dest
+    ref = Path(CONFIG.get("TH_TRIO_REFERENCE")).expanduser()
+    url = _gh_repo_url(DEFAULT_GH_REPO)
+    cmd = ["clone", "--no-checkout"]
+    if (ref / ".git").exists():
+        try:
+            url = _origin_url(ref)
+        except HarnessError:
+            pass
+        cmd += ["--reference-if-able", str(ref)]
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    log(f"cloning Trio into {dest} (origin {url})")
+    _git([*cmd, url, str(dest)], REPO_ROOT, timeout=1800)
+    remotes = _git(["remote"], dest, quiet=True).stdout.split()
+    if "upstream" not in remotes and url != _gh_repo_url(DEFAULT_GH_REPO):
+        _git(["remote", "add", "upstream", _gh_repo_url(DEFAULT_GH_REPO)], dest, check=False)
+    return dest
 
 
 @dataclass
@@ -112,51 +139,98 @@ def resolve_pr(pr: str) -> tuple[str, int]:
     raise HarnessError(f"cannot parse PR reference {pr!r}")
 
 
+def _parse_gitmodules(text: str) -> dict[str, dict]:
+    mods: dict[str, dict] = {}
+    cur = None
+    for line in text.splitlines():
+        line = line.strip()
+        m = re.match(r'\[submodule "(.+)"\]', line)
+        if m:
+            cur = m.group(1); mods[cur] = {}
+        elif "=" in line and cur:
+            k, v = [x.strip() for x in line.split("=", 1)]
+            mods[cur][k] = v
+    return mods
+
+
+def _repo_name(url_or_slug: str) -> str:
+    return re.sub(r"\.git$", "", url_or_slug.rstrip("/").rsplit("/", 1)[-1]).lower()
+
+
+def resolve_pr_target(pr: str, src: Path, trio_branch: str | None = None) -> dict:
+    """Classify a PR: Trio itself, or one of Trio's submodules (found via .gitmodules on candidate Trio branches).
+
+    Returns {"kind": "trio"|"submodule", "slug", "number", "submodule"?: name, "trio_branch"?: branch}.
+    """
+    slug, num = resolve_pr(pr)
+    if _repo_name(slug) == "trio":
+        return {"kind": "trio", "slug": slug, "number": num}
+    candidates = [b for b in [trio_branch, CONFIG.get("TH_TRIO_BASE_BRANCH"), "dev", "feat/tandem", "main"] if b]
+    _git(["fetch", "--quiet", "origin"], src, timeout=900, check=False)
+    seen = []
+    for br in candidates:
+        if br in seen:
+            continue
+        seen.append(br)
+        cp = _git(["show", f"origin/{br}:.gitmodules"], src, check=False, quiet=True)
+        if cp.returncode != 0:
+            continue
+        for name, m in _parse_gitmodules(cp.stdout).items():
+            if _repo_name(m.get("url", "")) == _repo_name(slug):
+                return {"kind": "submodule", "slug": slug, "number": num, "submodule": name, "trio_branch": br}
+    raise HarnessError(f"{slug} is not Trio and no submodule with that repo was found on branches {seen}; "
+                       "pass --trio-branch <branch that contains the submodule>")
+
+
 def prepare_source(*, branch: str | None = None, pr: str | None = None, repo: str | None = None,
                    in_place: Path | None = None, submodules: list[str] | None = None,
-                   fetch: bool = True) -> tuple[Path, dict]:
-    """Return (source_dir, git_info)."""
+                   fetch: bool = True, trio_branch: str | None = None) -> tuple[Path, dict]:
+    """Return (source_dir, git_info).
+
+    * no branch/pr: build the checkout as-is (cloned first if missing)
+    * --branch / --pr for Trio: fetched and checked out (detached) in the checkout dir
+    * --pr for a submodule repo (e.g. TandemKit): Trio is checked out at the branch that pins that submodule
+      (--trio-branch, else TH_TRIO_BASE_BRANCH, dev, feat/tandem, main) and the submodule is switched to the PR head
+    """
     info: dict = {}
+    src = Path(in_place).expanduser().resolve() if in_place else ensure_checkout()
+    if not (src / "Trio.xcworkspace").exists() and not branch and not pr:
+        # fresh --no-checkout clone: materialize the default branch
+        _git(["checkout", "--force", CONFIG.get("TH_TRIO_BASE_BRANCH") or "dev"], src, check=False)
     if in_place or (not branch and not pr):
-        src = Path(in_place or CONFIG.trio_repo).expanduser().resolve()
         if not (src / "Trio.xcworkspace").exists():
             raise HarnessError(f"{src} does not look like a Trio checkout")
-        log(f"building in place from {src} (current checkout, uncommitted changes included)")
+        log(f"building {src} as-is (current checkout, uncommitted changes included)")
+        submodules = list(submodules or [])
     else:
-        src = SRC_DIR
         base_url = _gh_repo_url(repo) if repo and "/" in repo else (repo or None)
-        if not src.exists():
-            src.parent.mkdir(parents=True, exist_ok=True)
-            local = CONFIG.trio_repo
-            if local.exists():
-                # local clone shares objects (fast), then point origin at the real remote
-                _git(["clone", "--no-checkout", str(local), str(src)], REPO_ROOT)
-                _git(["remote", "set-url", "origin", base_url or _origin_url(local)], src)
-            else:
-                _git(["clone", "--no-checkout", base_url or _gh_repo_url(DEFAULT_GH_REPO), str(src)], REPO_ROOT)
-        elif base_url:
+        if base_url:
             _git(["remote", "set-url", "origin", base_url], src)
-        # make sure the canonical upstream is available too
-        remotes = _git(["remote"], src, quiet=True).stdout.split()
-        if "upstream" not in remotes:
-            _git(["remote", "add", "upstream", _gh_repo_url(DEFAULT_GH_REPO)], src, check=False)
+        submodules = list(submodules or [])
         if pr:
-            slug, num = resolve_pr(pr)
-            remote_url = _gh_repo_url(slug)
-            _git(["fetch", "--force", remote_url, f"pull/{num}/head:refs/th/pr-{num}"], src, timeout=900)
-            _git(["checkout", "--force", "--detach", f"refs/th/pr-{num}"], src)
-            info["pr"] = f"{slug}#{num}"
+            target = resolve_pr_target(pr, src, trio_branch)
+            info["pr"] = f"{target['slug']}#{target['number']}"
             try:
-                meta = json.loads(run(["gh", "pr", "view", str(num), "--repo", slug, "--json",
-                                       "title,headRefName,headRepositoryOwner,url"], quiet=True).stdout)
-                info["pr_title"] = meta.get("title")
+                meta = json.loads(run(["gh", "pr", "view", str(target["number"]), "--repo", target["slug"], "--json",
+                                       "title,headRefName,headRepositoryOwner,url,body"], quiet=True).stdout)
+                info["pr_title"] = meta.get("title"); info["pr_url"] = meta.get("url"); info["pr_body"] = meta.get("body")
                 info["branch"] = f"{meta.get('headRepositoryOwner', {}).get('login')}:{meta.get('headRefName')}"
-                info["pr_url"] = meta.get("url")
             except HarnessError:
                 pass
+            if target["kind"] == "trio":
+                remote_url = _gh_repo_url(target["slug"])
+                _git(["fetch", "--force", remote_url, f"pull/{target['number']}/head:refs/th/pr-{target['number']}"], src, timeout=900)
+                _git(["checkout", "--force", "--detach", f"refs/th/pr-{target['number']}"], src)
+            else:
+                br = target["trio_branch"]
+                log(f"{target['slug']}#{target['number']} is a PR on submodule {target['submodule']}; using Trio {br}")
+                _git(["fetch", "--force", "origin", br], src, timeout=900)
+                _git(["checkout", "--force", "--detach", f"origin/{br}"], src)
+                info["trio_branch"] = br
+                info["submodule_pr"] = target
+                submodules.append(f"{target['submodule']}={_gh_repo_url(target['slug'])}#pull/{target['number']}/head")
         else:
             assert branch
-            # branch may be 'owner/repo@branch' or 'URL#branch' or plain 'branch'
             m = re.match(r"^(.+?)#(.+)$", branch) or re.match(r"^([\w.-]+/[\w.-]+)@(.+)$", branch)
             if m:
                 url = m.group(1) if "://" in m.group(1) or m.group(1).startswith("git@") else _gh_repo_url(m.group(1))
@@ -166,7 +240,9 @@ def prepare_source(*, branch: str | None = None, pr: str | None = None, repo: st
             _git(["fetch", "--force", url, f"{br}:refs/th/branch"], src, timeout=900)
             _git(["checkout", "--force", "--detach", "refs/th/branch"], src)
             info["branch"] = branch
-        _git(["clean", "-fdx", "-e", "ConfigOverride.xcconfig"], src, quiet=True)
+        # remove leftovers from a previous PR/branch (e.g. a submodule dir that does not exist on this branch),
+        # but keep ignored files (ConfigOverride.xcconfig, Xcode user data) — the checkout may be the user's own clone
+        _git(["clean", "-fd", "-e", "ConfigOverride.xcconfig"], src, quiet=True)
     if fetch:
         log("syncing git submodules (first run downloads LoopKit & friends; several minutes)")
         _git(["submodule", "sync", "--recursive"], src, quiet=True)

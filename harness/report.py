@@ -209,7 +209,8 @@ def run_api_put(slug: str, rel: str, body: str):
     return cp
 
 
-def render_markdown(run: Run, urls: dict[str, str], *, columns: int = 3, max_shots: int | None = None) -> str:
+def render_markdown(run: Run, urls: dict[str, str], *, columns: int = 3, max_shots: int | None = None,
+                    artifact_url: str | None = None) -> str:
     meta = run.meta
     build = meta.get("build", {})
     git = build.get("git", {})
@@ -221,6 +222,8 @@ def render_markdown(run: Run, urls: dict[str, str], *, columns: int = 3, max_sho
     if git.get("submodule_overrides"):
         lines.append("- **Submodules:** " + "; ".join(f"`{o['name']}` @ `{o['ref']}`" for o in git["submodule_overrides"]) + "  ")
     lines.append(f"- **Xcode:** {build.get('xcode','?')} · **Result:** {status}")
+    if artifact_url:
+        lines.append(f"- **Full report:** {artifact_url}")
     if meta.get("summary"):
         lines += ["", meta["summary"]]
     steps = [s for s in run.steps() if s.get("screenshot") in urls]
@@ -237,11 +240,11 @@ def render_markdown(run: Run, urls: dict[str, str], *, columns: int = 3, max_sho
 
 
 def post_to_pr(run: Run, pr: str, *, mode: str = "comment", repo: str | None = None,
-               columns: int = 3, max_shots: int | None = None) -> str:
+               columns: int = 3, max_shots: int | None = None, artifact_url: str | None = None) -> str:
     from .build import resolve_pr
     slug, num = resolve_pr(pr) if not repo else (repo, int(pr))
     urls = upload_screenshots(run)
-    md = render_markdown(run, urls, columns=columns, max_shots=max_shots)
+    md = render_markdown(run, urls, columns=columns, max_shots=max_shots, artifact_url=artifact_url)
     if mode == "comment":
         out = _gh(["pr", "comment", str(num), "--repo", slug, "--body", md])
         log(f"commented on {slug}#{num}")

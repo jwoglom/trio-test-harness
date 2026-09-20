@@ -5,12 +5,23 @@ the iOS Simulator or a USB-attached iPhone, from any Trio branch / PR / submodul
 turn the screenshots into an HTML report (claude.ai Artifact) or a GitHub PR comment.
 
 ```
-th build --branch feat/tandem --submodule TandemKit@my-change      # or --pr <url>
-th install --reinstall
-th launch --preseed-onboarding
-th shot --name home --note "home after launch"
-th tap-text Settings ; th tap-text Devices ; th shot --name devices
-th run finish passed --summary "..." ; th report html ; th report pr <pr-url>
+bin/trio-test --mode simulator --pr https://github.com/nightscout/Trio/pull/1234     # Trio PR
+bin/trio-test --mode vnc --pr https://github.com/jwoglom/TandemKit/pull/395          # submodule PR (Trio @ feat/tandem)
+bin/trio-test                                                                        # prompts for mode and PR/branch
+```
+`trio-test` runs checkout → build → install → launch (onboarding pre-seeded) → home screen → Glucose Simulator +
+Pump Simulator → `report.html`, writes `runs/<run>/pr.md` with the PR description and a test-plan stub, then hands off to
+Claude Code (from a terminal) or to the `trio-e2e` skill (inside Claude) for the PR-specific testing, the report artifact
+and the optional PR comment. Every stage is also a `th` command and a Claude skill:
+
+```
+th build --pr <url> --checkout-only        # trio-checkout
+th --target sim build --pr <url>           # trio-build
+th --target sim install --reinstall        # trio-install
+th --target sim launch --preseed-onboarding  # trio-launch (or: th flow onboarding-walk)
+th flow add-cgm-sim ; th flow add-pump-sim # trio-fake-devices
+th shot / tap-text / type / find / tree    # trio-ui-drive
+th run finish passed --summary "..." ; th report html ; th report pr <url> --artifact-url <link>   # trio-report
 ```
 
 ## How it works
@@ -26,10 +37,16 @@ th run finish passed --summary "..." ; th report html ; th report pr <pr-url>
 
 All coordinates the CLI accepts are **screenshot pixels**, so an agent can look at a PNG and tap what it sees on both targets.
 
-Python package `harness/` (CLI `bin/th`), Claude skills in `.claude/skills/` (symlinked into `~/.claude/skills` by `install.sh`):
+Python package `harness/` (CLIs `bin/trio-test`, `bin/th`), Claude skills in `.claude/skills/` (symlinked into `~/.claude/skills` by `install.sh`):
 
-- `trio-test` — the orchestration skill (parse request → build → drive → report)
-- `trio-build`, `trio-ui-drive`, `trio-report` — the supporting skills
+- `trio-e2e` — runs `bin/trio-test`, then the PR-specific testing + report + comment prompt
+- `trio-test` — the chained workflow, stage by stage, pointing at the per-stage skills
+- per stage: `trio-sim-setup`, `trio-phone-setup`, `trio-checkout`, `trio-build`, `trio-install`, `trio-launch`,
+  `trio-fake-devices`, `trio-pr-plan`, `trio-ui-drive`, `trio-report`
+
+Source selection: `TRIO_REPO` is the checkout the harness uses (this machine: `~/repos/Trio`; default elsewhere:
+`<harness>/Trio`, cloned on demand with `TH_TRIO_REFERENCE` as a git reference). A PR on a submodule repo is detected
+through `.gitmodules` of the candidate Trio branches (`--trio-branch`, `TH_TRIO_BASE_BRANCH`, dev, feat/tandem, main).
 
 ## Setup
 

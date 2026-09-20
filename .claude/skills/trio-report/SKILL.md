@@ -13,8 +13,8 @@ description: Turn a trio-test-harness run (screenshots + step log) into delivera
    Add observations first with `th run note "…"` if needed.
 2. `th report html` → `runs/<run>/report.html` (dark/light aware, screenshots embedded as JPEG thumbnails, < 16 MB).
    Publish it with the **Artifact** tool (`file_path` = that HTML, icon `phone`) and give the user the link. One artifact per run.
-3. PR delivery (only when the user gave a PR or asked):
-   - `th report pr <PR URL | owner/repo#N | N> --mode comment` posts a comment: verdict, commit, submodule overrides, Xcode, summary,
+3. PR delivery — always ask first (AskUserQuestion: post a comment with the report? yes/no), then:
+   - `th report pr <PR URL | owner/repo#N | N> --mode comment --artifact-url <claude.ai artifact link>` posts a comment: verdict, commit, submodule overrides, Xcode, summary, report link,
      and a 3-column screenshot table. Images are uploaded to `TH_ARTIFACT_REPO` (public GitHub repo, created on first use) and
      referenced by raw URL — GitHub's API cannot attach images directly.
    - `--mode description` appends/replaces a `<!-- trio-test-harness -->` section in the PR body instead.

@@ -100,7 +100,7 @@ def cmd_build(args):
     from . import build as B
     src, info = B.prepare_source(branch=args.branch, pr=args.pr, repo=args.repo,
                                  in_place=Path(args.in_place) if args.in_place else None,
-                                 submodules=args.submodule, fetch=not args.no_fetch)
+                                 submodules=args.submodule, fetch=not args.no_fetch, trio_branch=args.trio_branch)
     if args.checkout_only:
         print(json.dumps(info, indent=2)); return 0
     bi = B.build(src, _target(args), configuration=args.configuration, clean=args.clean, git_info=info,
@@ -440,7 +440,8 @@ def cmd_report(args):
     if args.sub == "html":
         print(render_html(r, Path(args.out) if args.out else None))
     elif args.sub == "pr":
-        print(post_to_pr(r, args.pr, mode=args.mode, columns=args.columns, max_shots=args.max_shots))
+        print(post_to_pr(r, args.pr, mode=args.mode, columns=args.columns, max_shots=args.max_shots,
+                         artifact_url=args.artifact_url))
     elif args.sub == "markdown":
         from .report import upload_screenshots, render_markdown
         urls = upload_screenshots(r) if args.upload else {s: s for s in [x.get("screenshot") for x in r.steps()] if s}
@@ -532,7 +533,8 @@ def build_parser() -> argparse.ArgumentParser:
     b.add_argument("--branch", help="branch | owner/repo@branch | URL#branch")
     b.add_argument("--pr", help="PR number | owner/repo#N | PR URL")
     b.add_argument("--repo", help="GitHub owner/repo to fetch --branch from (default: Trio origin)")
-    b.add_argument("--in-place", help="build this existing checkout as-is (default when no --branch/--pr: $TRIO_REPO)")
+    b.add_argument("--trio-branch", help="for submodule PRs: the Trio branch that pins that submodule")
+    b.add_argument("--in-place", help="build this existing checkout as-is (e.g. ~/repos/Trio with local changes)")
     b.add_argument("--submodule", action="append", default=[], help="NAME@REF | NAME@pr/N | NAME=URL#REF (repeatable)")
     b.add_argument("--configuration", default="Debug")
     b.add_argument("--clean", action="store_true")
@@ -613,6 +615,7 @@ def build_parser() -> argparse.ArgumentParser:
     rh = rps.add_parser("html"); rh.add_argument("--run"); rh.add_argument("--out")
     rpr = rps.add_parser("pr"); rpr.add_argument("pr"); rpr.add_argument("--run"); rpr.add_argument("--mode", choices=["comment", "description"], default="comment")
     rpr.add_argument("--columns", type=int, default=3); rpr.add_argument("--max-shots", type=int)
+    rpr.add_argument("--artifact-url", help="claude.ai artifact link to include in the comment")
     rm = rps.add_parser("markdown"); rm.add_argument("--run"); rm.add_argument("--upload", action="store_true"); rm.add_argument("--columns", type=int, default=3)
     rp.set_defaults(fn=cmd_report)
 
