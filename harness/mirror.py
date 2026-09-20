@@ -122,15 +122,15 @@ class MirrorDriver(Driver):
 
     # ---- text lookup: Vision OCR (pixel coords) ----
     def ui_tree(self) -> list[UINode]:
+        """Vision OCR boxes as UINodes. phone-harness returns box *centers in screen points*; convert to capture pixels."""
         shot = self._capture(tmp_path("mirror-ocr.png"))
+        win = self._win
+        iw, ih = self._img_size
+        sx, sy = iw / win["w"], ih / win["h"]
         nodes = []
-        for o in self.vision.recognize(str(shot), self._win):
-            # phone-harness returns tap-ready *screen* coords plus pixel boxes when available; prefer pixels
-            box = o.get("pixel") or o.get("box") or {}
-            try:
-                x, y, w, h = int(box["x"]), int(box["y"]), int(box["w"]), int(box["h"])
-            except (KeyError, TypeError, ValueError):
-                continue
-            nodes.append(UINode(label=o.get("text", ""), value="", identifier="", role="Text",
-                                enabled=True, x=x, y=y, w=w, h=h))
+        for o in self.vision.recognize(str(shot), win):
+            w = int(o["w"] * sx); h = int(o["h"] * sy)
+            cx = (o["x"] - win["x"]) * sx; cy = (o["y"] - win["y"]) * sy
+            nodes.append(UINode(label=o.get("text", ""), value=f"conf={o.get('confidence', 0)}", identifier="", role="Text",
+                                enabled=True, x=int(cx - w / 2), y=int(cy - h / 2), w=w, h=h))
         return nodes
