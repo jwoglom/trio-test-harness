@@ -19,6 +19,6 @@ Conventions:
 - All UI coordinates are **screenshot pixels** for both targets. Look at the PNG before tapping.
 - Secrets/machine settings live in `harness.env` and `.env` (both gitignored). Never commit them, never print the VNC password.
 - Screenshots may contain only fake data (Trio's Glucose Simulator / Pump Simulator). No UDIDs, Apple IDs, tokens, or real CGM data in reports or PRs.
-- Don't push or commit inside the Trio checkouts the harness builds from. `build/Trio-src` is disposable.
+- Don't push or commit inside the Trio checkout the harness builds from (`$TRIO_REPO`; on this Mac that is the user's ~/repos/Trio — PR/branch checkouts leave it on a detached HEAD, so `git checkout dev` restores it).
 - Trio itself is the repo under test; reference its code by path when documenting flows (see the facts in `harness/flows/trio.py`).
 - Run `./bin/th doctor` first on a new machine. Verify flows against real screenshots before trusting them (see HANDOFF "Unverified").
