@@ -29,9 +29,9 @@ for d in "$HERE"/.claude/skills/*/; do
 done
 
 echo "== th on PATH (optional)"
-echo "   add to your shell rc:  export PATH=\"$HERE/bin:\$PATH\""
+echo "   add to your shell rc:  export PATH=\"$HERE/bin:\$PATH\"   (gives you trio-test-harness, trio-e2e and the th alias)"
 
 echo
-./bin/th doctor || true
+./trio-test-harness doctor || true
 echo
 echo "Next: ./bootstrap-xcode.sh if Xcode is missing, then: th build && th install && th test smoke"

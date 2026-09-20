@@ -5,7 +5,7 @@ description: Chained end-to-end Trio test workflow — checkout (Trio or submodu
 
 # trio-test — the chain
 
-Fastest route: the `trio-e2e` skill (`bin/trio-test --mode simulator|vnc --pr <URL>`) runs stages 1–6 in one go and
+Fastest route: the `trio-e2e` skill (`./trio-e2e --mode simulator|vnc --pr <URL>`) runs stages 1–6 in one go and
 prints where the run is. Use the per-stage skills when the user wants only one part, when the script stops, or to redo a stage.
 
 | # | Stage | Skill | Command |

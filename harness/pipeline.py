@@ -1,13 +1,13 @@
-"""`trio-test`: one entry point for the whole workflow, usable with flags or interactively.
+"""`trio-e2e`: one entry point for the whole workflow, usable with flags or interactively.
 
-    trio-test --mode simulator --pr https://github.com/nightscout/Trio/pull/1234
-    trio-test --mode vnc --pr https://github.com/jwoglom/TandemKit/pull/395     # submodule PR
-    trio-test                                                                    # prompts for everything
+    ./trio-e2e --mode simulator --pr https://github.com/nightscout/Trio/pull/1234
+    ./trio-e2e --mode vnc --pr https://github.com/jwoglom/TandemKit/pull/395     # submodule PR
+    ./trio-e2e                                                                    # prompts for everything
 
-Stages (each also available on its own via `th ...` and as a Claude skill):
+Stages (each also available on its own via `./trio-test-harness ...` and as a Claude skill):
   checkout -> build -> install -> launch (+onboarding) -> smoke (home + fake CGM/pump) -> report -> [PR comment]
 The exploratory part — reading the PR description and exercising what it changes — is done by Claude with the
-`trio-test` skill; this script prepares everything, writes runs/<run>/pr.md with the PR description and a test-plan
+`trio-e2e` skill; this script prepares everything, writes runs/<run>/pr.md with the PR description and a test-plan
 stub, and can hand off to Claude with --agent.
 """
 from __future__ import annotations
@@ -74,7 +74,7 @@ def write_pr_notes(run, info: dict) -> Path:
     if info.get("pr_body"):
         lines += ["## PR description", "", info["pr_body"].strip(), ""]
     lines += ["## Test plan (fill in from the description)", "",
-              "1. Smoke: launch, home screen, Glucose Simulator + Pump Simulator (automated by trio-test).",
+              "1. Smoke: launch, home screen, Glucose Simulator + Pump Simulator (automated by trio-e2e).",
               "2. Exercise every user-visible change the description mentions; screenshot before/after each.",
               "3. Note anything that looks wrong with `th run note`.", ""]
     p = run.path / "pr.md"
@@ -167,16 +167,16 @@ def hand_off_to_agent(run, pr_url: str | None, mode: str) -> None:
     claude = shutil.which("claude")
     if not claude:
         raise HarnessError("claude CLI not found on PATH")
-    prompt = (f"Use the trio-test skill. A Trio run has already been prepared by `trio-test`: run dir {run.path} "
+    prompt = (f"Use the trio-e2e skill. A Trio run has already been prepared by `trio-e2e`: run dir {run.path} "
               f"(mode {mode}{', PR ' + pr_url if pr_url else ''}). The app is installed, launched, on the home screen with "
-              f"fake CGM/pump configured. Read {run.path}/pr.md, exercise what the PR description says with `th` commands, "
+              f"fake CGM/pump configured. Read {run.path}/pr.md, exercise what the PR description says with `./trio-test-harness` commands, "
               f"screenshot each step into this run, finish the run, publish report.html as an Artifact, and ask me whether "
-              f"to post the PR comment (th report pr --artifact-url ...).")
+              f"to post the PR comment (./trio-test-harness report pr --artifact-url ...).")
     os.execv(claude, [claude, prompt])
 
 
 def main(argv=None) -> int:
-    p = argparse.ArgumentParser(prog="trio-test", description="End-to-end Trio test: checkout → build → install → smoke → report")
+    p = argparse.ArgumentParser(prog="trio-e2e", description="End-to-end Trio test: checkout → build → install → smoke → report")
     p.add_argument("--mode", choices=sorted(MODES), help="simulator | vnc (the USB iPhone)")
     p.add_argument("--pr", help="Trio PR or submodule PR (URL, owner/repo#N)")
     p.add_argument("--branch", help="Trio branch instead of a PR")
@@ -194,7 +194,7 @@ def main(argv=None) -> int:
     p.add_argument("--comment", choices=["ask", "auto", "never"], default="ask")
     p.add_argument("--artifact-url", help="claude.ai artifact link to include in the PR comment")
     p.add_argument("--agent", dest="agent", action="store_true", default=None,
-                   help="after the smoke test, open Claude Code with the trio-test skill (default when run from a terminal "
+                   help="after the smoke test, open Claude Code with the trio-e2e skill (default when run from a terminal "
                         "outside Claude Code and `claude` is installed)")
     p.add_argument("--no-agent", dest="agent", action="store_false")
     p.add_argument("--yes", "-y", action="store_true", help="no prompts; defaults everywhere")
@@ -246,8 +246,8 @@ def main(argv=None) -> int:
         stage_comment(args, run, pr_url) if args.comment == "auto" else None
         hand_off_to_agent(run, pr_url, args.mode)   # execs claude; the PR-comment question is asked there
     stage_comment(args, run, pr_url)
-    print("\nNext (Claude / trio-test skill): read pr.md, exercise the described changes with `th`, then publish report.html "
-          "as an Artifact and `th report pr <PR> --artifact-url <link>` if the user agrees.")
+    print("\nNext (Claude / trio-e2e skill): read pr.md, exercise the described changes with ./trio-test-harness, then publish "
+          "report.html as an Artifact and `./trio-test-harness report pr <PR> --artifact-url <link>` if the user agrees.")
     return 0
 
 

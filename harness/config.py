@@ -34,7 +34,6 @@ DEFAULTS = {
     "TH_SSH_PORT": "22",
     "TH_IPA_HTTP_PORT": "8765",       # local HTTP server used for TrollStore installs
     "TH_IPA_HTTP_HOST": "",           # IP/hostname the iPhone can reach; blank = auto (LAN IP)
-    "TH_ARTIFACT_REPO": "jwoglom/trio-test-screenshots",  # GitHub repo that hosts screenshots for PR comments
     "TH_RUNS_DIR": str(REPO_ROOT / "runs"),
     "TH_DERIVED_DATA": str(Path.home() / "Library/Developer/Xcode/DerivedData/trio-test-harness"),
     "TH_BUILD_DIR": str(REPO_ROOT / "build"),

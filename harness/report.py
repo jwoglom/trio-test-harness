@@ -3,7 +3,7 @@
 A *run* is a directory under runs/ holding numbered screenshots, a step log
 (steps.jsonl) and run.json metadata. From a run we can render:
   * report.html  – self-contained page with embedded screenshots (publish as a claude.ai Artifact)
-  * a GitHub PR comment / description section with the screenshots hosted in TH_ARTIFACT_REPO
+  * a GitHub PR comment / description section with the screenshots attached inline (gh --attach)
 """
 from __future__ import annotations
 
@@ -155,70 +155,39 @@ figcaption{{padding:8px 10px;font-size:13px;display:flex;flex-direction:column;g
 
 
 # ---------------- GitHub PR reporting -----------------
+# Screenshots are uploaded *into* the comment with `gh pr comment --attach` (gh ≥ 2.99): each `![alt](./path.png)`
+# reference in the body is rewritten to the uploaded asset URL. No side repo, no external hosting.
+
+MAX_ATTACH = 50   # GitHub's per-command limit
+
 
 def _gh(args: list[str], **kw) -> str:
     return run(["gh", *args], **kw).stdout
 
 
-def ensure_artifact_repo(slug: str) -> None:
-    cp = run(["gh", "repo", "view", slug, "--json", "name"], check=False, quiet=True)
-    if cp.returncode == 0:
-        return
-    log(f"creating public screenshot repo {slug}")
-    _gh(["repo", "create", slug, "--public", "--description",
-         "Screenshots from automated Trio app test runs (simulator/fake devices only)"])
-    # a README so the default branch exists
-    _gh(["api", "-X", "PUT", f"repos/{slug}/contents/README.md", "-f", "message=init",
-         "-f", "content=" + base64.b64encode(b"# Trio test screenshots\n\nUploaded by trio-test-harness.\n").decode()], quiet=True)
+def select_steps(run: Run, max_shots: int | None) -> list[dict]:
+    """Steps with screenshots, evenly thinned to max_shots (first and last always kept)."""
+    steps = [s for s in run.steps() if s.get("screenshot") and (run.path / s["screenshot"]).exists()]
+    limit = min(max_shots or MAX_ATTACH, MAX_ATTACH)
+    if len(steps) <= limit:
+        return steps
+    idx = sorted({round(i * (len(steps) - 1) / (limit - 1)) for i in range(limit)})
+    return [steps[i] for i in idx]
 
 
-def upload_screenshots(run: Run, slug: str | None = None) -> dict[str, str]:
-    """Upload run screenshots to the artifact repo; return {relative_path: raw_url}."""
-    slug = slug or CONFIG.get("TH_ARTIFACT_REPO")
-    ensure_artifact_repo(slug)
-    branch = json.loads(_gh(["repo", "view", slug, "--json", "defaultBranchRef"], quiet=True))["defaultBranchRef"]["name"]
-    urls: dict[str, str] = {}
-    for png in sorted(run.shots.glob("*.png")):
-        rel = f"runs/{run.path.name}/{png.name}"
-        # shrink to keep the repo small (max 900px wide)
-        from PIL import Image
-        im = Image.open(png)
-        if im.width > 900:
-            im = im.resize((900, int(im.height * 900 / im.width)))
-        buf = io.BytesIO()
-        im.save(buf, format="PNG", optimize=True)
-        body = json.dumps({"message": f"screenshot {png.name} ({run.path.name})",
-                           "content": base64.b64encode(buf.getvalue()).decode(), "branch": branch})
-        cp = run_api_put(slug, rel, body)
-        if cp is None:
-            continue
-        urls[str(png.relative_to(run.path))] = f"https://raw.githubusercontent.com/{slug}/{branch}/{rel}"
-    return urls
-
-
-def run_api_put(slug: str, rel: str, body: str):
-    cp = run(["gh", "api", "-X", "PUT", f"repos/{slug}/contents/{rel}", "--input", "-"], input=body, check=False, quiet=True)
-    if cp.returncode != 0 and "sha" in (cp.stderr + cp.stdout):
-        # exists -> fetch sha and overwrite
-        sha = json.loads(_gh(["api", f"repos/{slug}/contents/{rel}"], quiet=True))["sha"]
-        b = json.loads(body); b["sha"] = sha
-        cp = run(["gh", "api", "-X", "PUT", f"repos/{slug}/contents/{rel}", "--input", "-"], input=json.dumps(b), check=False, quiet=True)
-    if cp.returncode != 0:
-        log(f"upload failed for {rel}: {cp.stderr[-300:]}")
-        return None
-    return cp
-
-
-def render_markdown(run: Run, urls: dict[str, str], *, columns: int = 3, max_shots: int | None = None,
-                    artifact_url: str | None = None) -> str:
+def render_markdown(run: Run, *, columns: int = 3, max_shots: int | None = None,
+                    artifact_url: str | None = None) -> tuple[str, list[Path]]:
+    """Comment body (relative image paths) + the files to attach, in order."""
     meta = run.meta
     build = meta.get("build", {})
     git = build.get("git", {})
     status = meta.get("status", "running")
     icon = {"passed": "✅", "failed": "❌"}.get(status, "🟡")
     lines = [f"### {icon} Trio test run: {meta.get('name','')}", ""]
-    lines.append(f"- **Target:** {meta.get('target', build.get('target','?'))}  ")
+    lines.append(f"- **Target:** {meta.get('mode') or meta.get('target', build.get('target','?'))}  ")
     lines.append(f"- **Commit:** `{git.get('sha','?')}` {git.get('describe','')}  ")
+    if git.get("trio_branch"):
+        lines.append(f"- **Trio branch:** `{git['trio_branch']}`  ")
     if git.get("submodule_overrides"):
         lines.append("- **Submodules:** " + "; ".join(f"`{o['name']}` @ `{o['ref']}`" for o in git["submodule_overrides"]) + "  ")
     lines.append(f"- **Xcode:** {build.get('xcode','?')} · **Result:** {status}")
@@ -226,38 +195,52 @@ def render_markdown(run: Run, urls: dict[str, str], *, columns: int = 3, max_sho
         lines.append(f"- **Full report:** {artifact_url}")
     if meta.get("summary"):
         lines += ["", meta["summary"]]
-    steps = [s for s in run.steps() if s.get("screenshot") in urls]
-    if max_shots:
-        steps = steps[:max_shots]
+    steps = select_steps(run, max_shots)
+    files: list[Path] = []
     if steps:
-        lines += ["", "<details open><summary>Screenshots</summary>", "", "<table>"]
+        total = len([s for s in run.steps() if s.get("screenshot")])
+        note = f" ({len(steps)} of {total} screenshots)" if len(steps) < total else ""
+        lines += ["", f"<details open><summary>Screenshots{note}</summary>", ""]
+        header = "| " + " | ".join([" "] * columns) + " |"
+        lines += [header, "|" + "---|" * columns]
         for i in range(0, len(steps), columns):
             row = steps[i:i + columns]
-            lines.append("<tr>" + "".join(f'<td align="center" width="{100//columns}%"><img src="{urls[s["screenshot"]]}" width="230"><br><sub><b>{html.escape(s.get("action",""))}</b><br>{html.escape(s.get("note",""))}</sub></td>' for s in row) + "</tr>")
-        lines += ["</table>", "", "</details>"]
+            cells = []
+            for s in row:
+                rel = s["screenshot"]
+                files.append(run.path / rel)
+                cap = html.escape(f"{s.get('action','')}: {s.get('note','')}".strip(": "))
+                cells.append(f"![{cap}](./{rel})<br><sub>{cap}</sub>")
+            cells += [" "] * (columns - len(row))
+            lines.append("| " + " | ".join(cells) + " |")
+        lines += ["", "</details>"]
     lines += ["", "<sub>Posted by trio-test-harness (simulator CGM/pump, no real patient data).</sub>"]
-    return "\n".join(lines)
+    return "\n".join(lines), files
 
 
 def post_to_pr(run: Run, pr: str, *, mode: str = "comment", repo: str | None = None,
                columns: int = 3, max_shots: int | None = None, artifact_url: str | None = None) -> str:
+    """Comment on (or append to the description of) a PR with the run's screenshots attached inline."""
     from .build import resolve_pr
     slug, num = resolve_pr(pr) if not repo else (repo, int(pr))
-    urls = upload_screenshots(run)
-    md = render_markdown(run, urls, columns=columns, max_shots=max_shots, artifact_url=artifact_url)
+    md, files = render_markdown(run, columns=columns, max_shots=max_shots, artifact_url=artifact_url)
+    body = run.path / "pr-comment.md"
+    body.write_text(md)
+    attach = []
+    for f in files:
+        rel = f.relative_to(run.path)
+        attach += ["--attach", f"./{rel}"]
     if mode == "comment":
-        out = _gh(["pr", "comment", str(num), "--repo", slug, "--body", md])
-        log(f"commented on {slug}#{num}")
+        out = run(["gh", "pr", "comment", str(num), "--repo", slug, "--body-file", str(body), *attach],
+                  cwd=run.path, timeout=900).stdout
+        log(f"commented on {slug}#{num} with {len(files)} screenshots attached")
         return out.strip()
     if mode == "description":
-        body = json.loads(_gh(["pr", "view", str(num), "--repo", slug, "--json", "body"], quiet=True))["body"] or ""
         marker = "<!-- trio-test-harness -->"
-        section = f"\n\n{marker}\n{md}\n"
-        if marker in body:
-            body = body.split(marker)[0].rstrip() + section
-        else:
-            body = body.rstrip() + section
-        _gh(["pr", "edit", str(num), "--repo", slug, "--body", body])
+        current = json.loads(_gh(["pr", "view", str(num), "--repo", slug, "--json", "body"], quiet=True))["body"] or ""
+        new_body = (current.split(marker)[0].rstrip() if marker in current else current.rstrip()) + f"\n\n{marker}\n{md}\n"
+        body.write_text(new_body)
+        run(["gh", "pr", "edit", str(num), "--repo", slug, "--body-file", str(body), *attach], cwd=run.path, timeout=900)
         log(f"updated description of {slug}#{num}")
         return f"https://github.com/{slug}/pull/{num}"
     raise HarnessError(f"unknown mode {mode}")

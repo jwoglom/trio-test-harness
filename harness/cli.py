@@ -443,9 +443,9 @@ def cmd_report(args):
         print(post_to_pr(r, args.pr, mode=args.mode, columns=args.columns, max_shots=args.max_shots,
                          artifact_url=args.artifact_url))
     elif args.sub == "markdown":
-        from .report import upload_screenshots, render_markdown
-        urls = upload_screenshots(r) if args.upload else {s: s for s in [x.get("screenshot") for x in r.steps()] if s}
-        print(render_markdown(r, urls, columns=args.columns))
+        from .report import render_markdown
+        md, files = render_markdown(r, columns=args.columns, max_shots=args.max_shots, artifact_url=args.artifact_url)
+        print(md); print(f"\n<!-- {len(files)} screenshots would be attached -->")
     return 0
 
 
@@ -523,7 +523,7 @@ def cmd_test(args):
 # ---------------- argparse -----------------
 
 def build_parser() -> argparse.ArgumentParser:
-    p = argparse.ArgumentParser(prog="th", description="Trio test harness")
+    p = argparse.ArgumentParser(prog="trio-test-harness", description="Trio test harness toolbox (short alias: th)")
     p.add_argument("--target", choices=["sim", "device"], help="default: $TH_TARGET or sim")
     sp = p.add_subparsers(dest="cmd", required=True)
 
@@ -616,7 +616,8 @@ def build_parser() -> argparse.ArgumentParser:
     rpr = rps.add_parser("pr"); rpr.add_argument("pr"); rpr.add_argument("--run"); rpr.add_argument("--mode", choices=["comment", "description"], default="comment")
     rpr.add_argument("--columns", type=int, default=3); rpr.add_argument("--max-shots", type=int)
     rpr.add_argument("--artifact-url", help="claude.ai artifact link to include in the comment")
-    rm = rps.add_parser("markdown"); rm.add_argument("--run"); rm.add_argument("--upload", action="store_true"); rm.add_argument("--columns", type=int, default=3)
+    rm = rps.add_parser("markdown", help="preview the PR comment body"); rm.add_argument("--run"); rm.add_argument("--columns", type=int, default=3)
+    rm.add_argument("--max-shots", type=int); rm.add_argument("--artifact-url")
     rp.set_defaults(fn=cmd_report)
 
     fl = sp.add_parser("flow", help="Trio UI flows"); fls = fl.add_subparsers(dest="sub", required=True)

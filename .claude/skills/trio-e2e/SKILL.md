@@ -1,18 +1,18 @@
 ---
 name: trio-e2e
-description: One-shot end-to-end Trio test by running `bin/trio-test` (checkout a Trio or submodule PR/branch → build → install → launch → home screen → fake CGM/pump → HTML report), then exercising the PR's changes and offering a PR comment. Use when the user says "run trio-test", "test this PR end to end", "e2e test Trio on the simulator/phone", or gives a PR link and a target and wants the whole thing done.
+description: One-shot end-to-end Trio test by running `trio-e2e` (checkout a Trio or submodule PR/branch → build → install → launch → home screen → fake CGM/pump → HTML report), then exercising the PR's changes and offering a PR comment. Use when the user says "run trio-e2e", "test this PR end to end", "e2e test Trio on the simulator/phone", or gives a PR link and a target and wants the whole thing done.
 ---
 
-# trio-e2e — invoke `bin/trio-test`
+# trio-e2e — invoke `trio-e2e`
 
 The deterministic stages live in one script; you run it, then do the exploratory part.
 
 1. Build the command from the request (ask only for what is missing; the script also prompts on a TTY):
    ```
    cd ~/repos/trio-test-harness
-   ./bin/trio-test --mode simulator|vnc --pr <Trio or submodule PR URL> [--trio-branch feat/tandem] [--onboarding walk] [--yes]
-   ./bin/trio-test --mode simulator --branch dev            # a branch instead of a PR
-   ./bin/trio-test --mode vnc --skip-build --skip-install   # reuse the last build
+   ./trio-e2e --mode simulator|vnc --pr <Trio or submodule PR URL> [--trio-branch feat/tandem] [--onboarding walk] [--yes]
+   ./trio-e2e --mode simulator --branch dev            # a branch instead of a PR
+   ./trio-e2e --mode vnc --skip-build --skip-install   # reuse the last build
    ```
    `vnc` = the USB/Wi-Fi iPhone (TrollVNC). Inside Claude Code the script never spawns another Claude (it checks
    `CLAUDECODE`); from a plain terminal it hands off to `claude` with this workflow after the smoke test.
@@ -25,5 +25,5 @@ The deterministic stages live in one script; you run it, then do the exploratory
    (`th --target <sim|device> shot --name … --note …`; `th run note "…"` for observations).
 4. `th run finish passed|failed|partial --summary "…"`, `th report html`, publish `report.html` as an Artifact.
 5. Ask the user (AskUserQuestion) whether to post the PR comment; if yes:
-   `th report pr <PR URL> --artifact-url <artifact link>` (uploads screenshots to `TH_ARTIFACT_REPO`, links the artifact).
+   `th report pr <PR URL> --artifact-url <artifact link>` (screenshots are attached inline with `gh --attach`; the artifact link goes in the header).
 6. Summarize: verdict, commit, what was exercised, what was not, links.

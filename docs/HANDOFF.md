@@ -11,7 +11,7 @@ First validation target: Trio launches and reaches the home screen on **both** t
 and fake pump ("Pump Simulator") configured.
 
 ## Entry points (2026-09-20)
-- `bin/trio-test [--mode simulator|vnc] [--pr URL | --branch B] [--trio-branch B] [--onboarding preseed|walk] [--skip-build]
+- `./trio-e2e [--mode simulator|vnc] [--pr URL | --branch B] [--trio-branch B] [--onboarding preseed|walk] [--skip-build]
   [--no-smoke] [--comment ask|auto|never] [--artifact-url URL] [--agent|--no-agent] [--yes]` — prompts for anything missing on
   a TTY. Submodule PRs are resolved via `.gitmodules` (verified with jwoglom/TandemKit#395 → Trio feat/tandem).
 - Skills: `trio-e2e` (thin wrapper around the script) and `trio-test` (the chain), plus one skill per stage.
@@ -28,7 +28,7 @@ and fake pump ("Pump Simulator") configured.
   alternative if `idb_companion` exists.
 - Phone driver `harness/vnc.py` + `harness/rfb.py`: TrollVNC over Wi-Fi or USB (`iproxy`). OCR fallback `harness/ocr.py`.
 - Reporting `harness/report.py`: runs under `runs/`, `report.html` (self-contained), PR comment/description via `gh` with
-  screenshots uploaded to `TH_ARTIFACT_REPO` (public repo, created on first use — GitHub's API cannot attach images).
+  screenshots attached inline with `gh pr comment --attach` (gh ≥ 2.99, installed: 2.100).
 - Trio flows `harness/flows/trio.py`: onboarding walk, pre-seeding the onboarding flag, add CGM/pump simulator, back-to-home,
   `th test smoke` composing them.
 - `install.sh` (deps, venv, skills), `bootstrap-xcode.sh` (Xcode install helper), `harness.env.example`.
@@ -52,7 +52,7 @@ and fake pump ("Pump Simulator") configured.
 - Trio submodules initialized in the user's `~/repos/Trio` (dev branch).
 
 ## Still unverified
-- `th report pr` against a real PR (creates the public screenshot repo on first use — confirm the name with the user).
+- `th report pr` against a real PR (gh --attach inline uploads; ask before posting).
 - `th test smoke` as a single command (the pieces were run individually).
 - Onboarding walk fully unattended on the phone: the iOS alert "Allow" and the "Next" under a dimmed alert are now handled
   (isolated-word OCR, banded passes, alerts checked before Next) but that exact combination has not been re-run end to end.
@@ -75,7 +75,7 @@ and fake pump ("Pump Simulator") configured.
 4. `th test smoke` end to end, then `th report html` → publish as an Artifact.
 5. Phone: AppSync Unified is installed (2026-09-20, see `docs/phone-setup.md`). Next: `th --target device build --trollstore`
    (produces the ad-hoc IPA), `th --target device install --appsync`, `th launch --target device`, walk onboarding via OCR.
-6. `th report pr` against a real PR (creates `TH_ARTIFACT_REPO` on first use — confirm the repo name with the user first).
+6. `th report pr` against a real PR (uses `gh --attach`; ask the user before posting).
 
 ## Machine-specific notes (what to redo on the new Mac)
 - Run `./install.sh` (brew: libusbmuxd, tesseract, coreutils, idb-companion if it builds; venv; skills symlinks), then
@@ -109,6 +109,5 @@ and fake pump ("Pump Simulator") configured.
 - The `--trollstore` install path exists but is irrelevant for an iOS 18 phone; the IPA it builds is what `--appsync` installs.
 
 ## Open questions for the user
-- Name of the public screenshot repo (`TH_ARTIFACT_REPO`, default `jwoglom/trio-test-screenshots`).
 - Whether AppSync Unified is acceptable on the phone (user said yes on 2026-09-19) and which package manager is installed.
 - For PRs: comment by default; only edit the description when asked.

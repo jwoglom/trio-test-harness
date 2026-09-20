@@ -5,7 +5,7 @@ description: Drive and screenshot the Trio app (or any iOS UI) on the iOS Simula
 
 # trio-ui-drive
 
-`cd ~/repos/trio-test-harness`; `th` = `./bin/th`. Pick the target with `--target sim|device` (or `export TH_TARGET=…`).
+`cd ~/repos/trio-test-harness`; `th` = `./trio-test-harness` (short alias `bin/th`). Pick the target with `--target sim|device` (or `export TH_TARGET=…`).
 **All coordinates are screenshot pixels** (same for both targets). Look at every screenshot before acting.
 
 ## Loop

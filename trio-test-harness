@@ -1,0 +1,3 @@
+#!/bin/bash
+# Toolbox: every stage and primitive of the Trio test harness as subcommands (`./trio-test-harness --help`).
+exec "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/bin/trio-test-harness" "$@"

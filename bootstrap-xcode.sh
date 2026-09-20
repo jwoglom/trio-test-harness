@@ -73,4 +73,4 @@ brew list --formula idb-companion >/dev/null 2>&1 || brew install facebook/fb/id
 
 echo
 echo "Done. Xcode: $existing"
-echo "Next: cd $(dirname "$0") && ./bin/th doctor && ./bin/th build && ./bin/th install && ./bin/th test smoke"
+echo "Next: cd $(dirname "$0") && ./trio-test-harness doctor && ./trio-test-harness build && ./trio-test-harness install && ./trio-test-harness test smoke"

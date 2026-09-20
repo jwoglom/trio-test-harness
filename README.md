@@ -5,11 +5,11 @@ the iOS Simulator or a USB-attached iPhone, from any Trio branch / PR / submodul
 turn the screenshots into an HTML report (claude.ai Artifact) or a GitHub PR comment.
 
 ```
-bin/trio-test --mode simulator --pr https://github.com/nightscout/Trio/pull/1234     # Trio PR
-bin/trio-test --mode vnc --pr https://github.com/jwoglom/TandemKit/pull/395          # submodule PR (Trio @ feat/tandem)
-bin/trio-test                                                                        # prompts for mode and PR/branch
+./trio-e2e --mode simulator --pr https://github.com/nightscout/Trio/pull/1234     # Trio PR
+./trio-e2e --mode vnc --pr https://github.com/jwoglom/TandemKit/pull/395          # submodule PR (Trio @ feat/tandem)
+./trio-e2e                                                                        # prompts for mode and PR/branch
 ```
-`trio-test` runs checkout → build → install → launch (onboarding pre-seeded) → home screen → Glucose Simulator +
+`./trio-e2e` runs checkout → build → install → launch (onboarding pre-seeded) → home screen → Glucose Simulator +
 Pump Simulator → `report.html`, writes `runs/<run>/pr.md` with the PR description and a test-plan stub, then hands off to
 Claude Code (from a terminal) or to the `trio-e2e` skill (inside Claude) for the PR-specific testing, the report artifact
 and the optional PR comment. Every stage is also a `th` command and a Claude skill:
@@ -37,9 +37,9 @@ th run finish passed --summary "..." ; th report html ; th report pr <url> --art
 
 All coordinates the CLI accepts are **screenshot pixels**, so an agent can look at a PNG and tap what it sees on both targets.
 
-Python package `harness/` (CLIs `bin/trio-test`, `bin/th`), Claude skills in `.claude/skills/` (symlinked into `~/.claude/skills` by `install.sh`):
+Python package `harness/` (CLIs `trio-e2e`, `bin/th`), Claude skills in `.claude/skills/` (symlinked into `~/.claude/skills` by `install.sh`):
 
-- `trio-e2e` — runs `bin/trio-test`, then the PR-specific testing + report + comment prompt
+- `trio-e2e` — runs `trio-e2e`, then the PR-specific testing + report + comment prompt
 - `trio-test` — the chained workflow, stage by stage, pointing at the per-stage skills
 - per stage: `trio-sim-setup`, `trio-phone-setup`, `trio-checkout`, `trio-build`, `trio-install`, `trio-launch`,
   `trio-fake-devices`, `trio-pr-plan`, `trio-ui-drive`, `trio-report`
@@ -53,7 +53,7 @@ through `.gitmodules` of the candidate Trio branches (`--trio-branch`, `TH_TRIO_
 ```
 ./install.sh            # brew deps (libusbmuxd, tesseract, idb-companion), .venv, harness.env, skill symlinks
 ./bootstrap-xcode.sh    # if Xcode is missing (see below)
-./bin/th doctor
+./trio-test-harness doctor
 ```
 
 `harness.env` (gitignored) holds machine-specific settings — Apple team id, VNC password, simulator model. See `harness.env.example`.
@@ -78,7 +78,7 @@ See `docs/HANDOFF.md` for the current state and `docs/phone-setup.md` for the iP
   or TrollStore (iOS ≤ 17 only) via `--trollstore`; or signed builds (`TH_DEVELOPER_TEAM`, Apple ID in Xcode, Developer Mode) via devicectl.
 - Details: `docs/phone-setup.md`.
 
-## CLI overview (`th --help`)
+## CLI overview (`./trio-test-harness --help`; `th` = short alias in `bin/`)
 `doctor` · `build` · `install` · `launch` · `sim {list,runtimes,install-runtime,boot,shutdown,erase,container,defaults,openurl}` ·
 `device {list,vnc-check,serve-ipa,wake,ssh,diag,vnc-restart,kill,apps}` · `daemon {start,stop,status,restart}` · `wda {build,start,stop,status}` · `shot` · `tap` · `swipe` · `scroll` · `type` · `key` · `home` · `tap-text` · `find` ·
 `tree` · `wait-text` · `ocr` · `run {new,current,use,note,finish,list,steps}` · `report {html,pr,markdown}` ·
@@ -87,9 +87,9 @@ See `docs/HANDOFF.md` for the current state and `docs/phone-setup.md` for the iP
 Runs live in `runs/<timestamp>-<name>/` (`screenshots/`, `steps.jsonl`, `run.json`, `report.html`).
 
 ## PR reporting
-GitHub's API cannot attach images to comments, so `th report pr` uploads the run's screenshots to the public repo
-`TH_ARTIFACT_REPO` (default `jwoglom/trio-test-screenshots`, created on first use) and posts a comment with a screenshot
-table. `--mode description` maintains a `<!-- trio-test-harness -->` section in the PR body instead.
+`./trio-test-harness report pr <PR> [--artifact-url <link>] [--max-shots N]` posts a comment whose screenshots are uploaded
+*into* the comment with `gh pr comment --attach` (gh ≥ 2.99; up to 50 files, evenly thinned when a run has more). No extra
+repo or hosting. `--mode description` maintains a `<!-- trio-test-harness -->` section in the PR body instead.
 
 ## Safety
 Only Trio's simulator CGM/pump and made-up values are used. Reports must not contain real health data, device identifiers,
