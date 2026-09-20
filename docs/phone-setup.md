@@ -16,29 +16,35 @@ Device (as of 2026-09-19): the user's test iPhone, iOS 18.6.1, **rootless jailbr
 - No accessibility tree over VNC. `th tap-text` / `th find` fall back to OCR (`harness/ocr.py`, tesseract, handles
   white-on-colour buttons via an inverted pass). Verified on synthetic iPhone-sized screenshots; validate on real Trio screens.
 
-## Installing apps: AppSync Unified (planned, not yet done)
-TrollStore does **not** exist for iOS 18, so the `--trollstore` install path in the harness does not apply to this phone.
-The user's chosen route: install **AppSync Unified** (https://github.com/akemin-dayo/AppSync, supports iOS 18) via the
-jailbreak's package manager, driven over VNC. Then unsigned/ad-hoc IPAs install through the normal installd service.
+## Installing apps: AppSync Unified (installed 2026-09-20)
+TrollStore does **not** exist for iOS 18, so the `--trollstore` install path does not apply to this phone. AppSync Unified
+116.0 (https://github.com/akemin-dayo/AppSync) is now installed, so unsigned/ad-hoc IPAs install through installd:
+```
+th --target device build --trollstore        # ad-hoc signed arm64 Trio.ipa (flag name kept; it just means "no Apple signing")
+th --target device install --appsync         # pymobiledevice3 apps install build/Trio.ipa (phone on USB, trusted)
+th launch --target device                    # uiopen --bundleid <id> over SSH (falls back to Spotlight over VNC)
+```
+How it was installed (for the record / if it ever needs redoing): Karen's repo (https://cydia.akemi.ai/) was returning
+Cloudflare 522, so the deb came from the GitHub release. Its `Depends: firmware (<= 18.2)` blocked iOS 18.6.1 in Sileo
+("Depends firmware"), so the control file was repacked with `firmware (<= 18.9)` (`ar x` / edit / `tar czf` / `ar rc`; the tweak
+itself declares iOS 18 support). Delivery to the phone: the phone (192.168.14.x) **cannot reach the Mac's subnet**
+(192.168.4.x), so `uiopen http://<mac-ip>` fails; use an SSH reverse tunnel instead:
+`ssh -N -R 8765:127.0.0.1:8765 mobile@<phone>` + `python3 -m http.server 8765` on the Mac, then
+`uiopen http://127.0.0.1:8765/file.deb` on the phone → Safari download → Downloads → share sheet → Sileo → GET → Confirm →
+Restart SpringBoard. `uiopen file:///...` does not open Sileo, and `dpkg -i` needs root (no passwordless sudo for mobile).
 
-Steps for the agent (all over VNC, screenshot after each step):
-1. `th --target device home`, find the package manager (Sileo or Zebra; swipe pages / use Spotlight: `th launch --target device --app-name Sileo`).
-2. Sources ▸ Add: `https://cydia.akemi.ai/` (Karen's repo — hosts AppSync Unified). Refresh.
-3. Search "AppSync Unified" ▸ Install ▸ confirm ▸ respring if prompted.
-4. From the Mac, install an IPA over USB (no signing needed once AppSync is active):
-   ```
-   th --target device build --trollstore        # builds an ad-hoc signed Trio.ipa (name kept for compatibility)
-   th --target device install --appsync         # = pymobiledevice3 apps install build/Trio.ipa
-   ```
-   `--appsync` uses `pymobiledevice3 apps install`, which needs the phone paired/trusted over USB.
-5. Launch: `th launch --target device` (Home ▸ Spotlight ▸ "Trio" ▸ return). Trio's first launch shows onboarding;
-   `th flow onboarding-walk` clicks through with defaults, or drive it with `th shot` / `th tap-text`.
-Alternative if AppSync is unwanted: sign with an Apple ID in Xcode (`TH_DEVELOPER_TEAM`, Developer Mode on the phone) and
-`th --target device build && th --target device install` (devicectl).
+## SSH access (works, key-based, user `mobile`)
+`th device ssh <cmd>`, `th device diag` (uptime, VNC process/port, top, disk), `th device vnc-restart` (killall
+trollvncserver; it runs as mobile and launchd respawns it), `th device kill Trio`, `th device apps`. `sudo` needs a password,
+so anything root-only is off the table unless the user adds a NOPASSWD rule. Tools present on the phone: uiopen, killall,
+launchctl, dpkg (no curl, nc, plutil). TrollVNC prefs live at
+`/var/jb/var/mobile/Library/Preferences/com.82flex.trollvnc.plist` (binary; edit on the Mac with plutil, scp back, restart).
 
-Caveats to check on first use: Trio needs Bluetooth, HealthKit, App Group and Notification entitlements; ad-hoc signing
-embeds them, but confirm the app actually launches and that the App Group container resolves (Trio's onboarding and settings
-storage depend on it). If the app crashes at launch, look at `pymobiledevice3 syslog live` filtered on "Trio".
+## Persistent connection: `th daemon`
+`th --target device daemon start` keeps one VNC connection open in a background process (socket `runs/.tmp/daemon-device.sock`);
+every `th` command uses it automatically (2–3 s per screenshot instead of a reconnect each time, and no connect/disconnect
+banners on the phone). `th daemon status|stop|restart`. The daemon reconnects once if the phone drops the connection.
+Same for the simulator: `th --target sim daemon start` holds the WDA session.
 
 ## Other useful device commands
 - `th device list` — usbmuxd + devicectl view. `pymobiledevice3 usbmux list` for raw details.

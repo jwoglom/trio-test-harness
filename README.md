@@ -63,7 +63,7 @@ See `docs/HANDOFF.md` for the current state and `docs/phone-setup.md` for the iP
 
 ## CLI overview (`th --help`)
 `doctor` · `build` · `install` · `launch` · `sim {list,runtimes,install-runtime,boot,shutdown,erase,container,defaults,openurl}` ·
-`device {list,vnc-check,serve-ipa,wake}` · `shot` · `tap` · `swipe` · `scroll` · `type` · `key` · `home` · `tap-text` · `find` ·
+`device {list,vnc-check,serve-ipa,wake,ssh,diag,vnc-restart,kill,apps}` · `daemon {start,stop,status,restart}` · `wda {build,start,stop,status}` · `shot` · `tap` · `swipe` · `scroll` · `type` · `key` · `home` · `tap-text` · `find` ·
 `tree` · `wait-text` · `ocr` · `run {new,current,use,note,finish,list,steps}` · `report {html,pr,markdown}` ·
 `flow {onboarding-walk,add-cgm-sim,add-pump-sim,back-home,dismiss,at-home}` · `test smoke`
 

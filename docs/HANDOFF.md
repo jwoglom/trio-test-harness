@@ -49,7 +49,7 @@ and fake pump ("Pump Simulator") configured.
    `harness/flows/trio.py` and in `.claude/skills/trio-ui-drive/SKILL.md`. Watch for: Bluetooth "required" view on the CGM
    screen in the simulator, iOS notification permission alert, version-check alert, the "chapter complete" interstitials.
 4. `th test smoke` end to end, then `th report html` → publish as an Artifact.
-5. Phone: install **AppSync Unified** over VNC (see `docs/phone-setup.md`), then `th --target device build --trollstore`
+5. Phone: AppSync Unified is installed (2026-09-20, see `docs/phone-setup.md`). Next: `th --target device build --trollstore`
    (produces the ad-hoc IPA), `th --target device install --appsync`, `th launch --target device`, walk onboarding via OCR.
 6. `th report pr` against a real PR (creates `TH_ARTIFACT_REPO` on first use — confirm the repo name with the user first).
 
@@ -71,6 +71,10 @@ and fake pump ("Pump Simulator") configured.
 - GitHub: `gh auth login` as jwoglom (repo scope). Trio origin is `git@github.com:jwoglom/Trio`; upstream `nightscout/Trio`.
 
 ## Known quirks
+- **Load**: the iOS 26 simulator on this Intel iMac is heavy (Metal shader compilers, indexing). Booting it while xcodebuild
+  runs pushed the load average past 300 and stalled everything, including the phone connection. Shut the simulator down
+  during builds; boot it only to install/test. Never `pkill -f harness.cli` broadly — it kills a running `th build` too.
+- Phone cannot reach the Mac's subnet; use `ssh -R` tunnels for phone→Mac transfers (details in phone-setup.md).
 - vncdotool (Twisted) hangs against TrollVNC after auth → we use `harness/rfb.py`. Keep it.
 - WDA `/source` dumps of SpringBoard report zero frames for icons; the predicate `find` path returns correct rects. Inside apps
   both work. `/source` takes ~10 s; prefer `th find`/`th tap-text`.
