@@ -129,7 +129,8 @@ def find_text(path: Path, needle: str, *, min_conf: float = 30, isolated: bool =
             if isolated:
                 gap = max(h.h, 10) * 1.2
                 same_line = [w for w in ws if abs((w.y + w.h / 2) - (h.y + h.h / 2)) < max(h.h, 10) * 0.6
-                             and not (w.x >= h.x and w.x + w.w <= h.x + h.w)]
+                             and not (w.x >= h.x and w.x + w.w <= h.x + h.w)
+                             and re.search(r"[A-Za-z0-9]{2,}", w.text)]   # ignore chevrons / punctuation neighbours
                 if any((0 <= h.x - (w.x + w.w) < gap) or (0 <= w.x - (h.x + h.w) < gap) for w in same_line):
                     continue
             if not any(abs(o.x - h.x) < 25 and abs(o.y - h.y) < 25 for o in out):

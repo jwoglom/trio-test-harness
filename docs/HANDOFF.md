@@ -25,6 +25,16 @@ and fake pump ("Pump Simulator") configured.
   `th test smoke` composing them.
 - `install.sh` (deps, venv, skills), `bootstrap-xcode.sh` (Xcode install helper), `harness.env.example`.
 
+## Verified end to end on 2026-09-20 (both targets)
+- **Simulator** (iPhone 17 / iOS 26.3, Xcode 26.3): build → install → launch with pre-seeded onboarding → home →
+  Glucose Simulator + Pump Simulator via the home shortcuts, driven through WebDriverAgent. Report artifact published.
+- **Phone** (iOS 18.6.1, rootless jailbreak): unsigned build + codesign fake-sign (every dylib incl. Trio.debug.dylib) →
+  `th --target device install --appsync` (24 s) → `uiopen` over SSH → full onboarding via `th flow onboarding-walk`
+  (OCR over VNC; the two Bluetooth alerts and one Next were tapped by hand while the OCR was being fixed) → home →
+  Glucose Simulator + Pump Simulator. Crash fixes on the way: Trio.debug.dylib must be signed; Crashlytics dies with
+  EXC_GUARD on the jailbroken phone, so `crashlyticsSharingEnabled=false` is pre-seeded by `th launch --preseed-onboarding`.
+  Phone unlock works with `th device unlock` (keypad taps, one fast sequence — the phone re-locks within seconds).
+
 ## Verified (actually ran)
 - Checkout of `feat/tandem` incl. TandemKit submodule; `--submodule TandemKit@main` override; `th build --checkout-only`.
 - Simulator: create/boot (`TrioHarness`), screenshots, WDA build + start, coordinate tap, `tap-text`, `find` (fast predicate
@@ -33,7 +43,13 @@ and fake pump ("Pump Simulator") configured.
 - OCR: phrase search incl. white-on-blue button text on synthetic iPhone-size images; run/report HTML + markdown rendering.
 - Trio submodules initialized in the user's `~/repos/Trio` (dev branch).
 
-## NOT verified — do these first on the new Mac
+## Still unverified
+- `th report pr` against a real PR (creates the public screenshot repo on first use — confirm the name with the user).
+- `th test smoke` as a single command (the pieces were run individually).
+- Onboarding walk fully unattended on the phone: the iOS alert "Allow" and the "Next" under a dimmed alert are now handled
+  (isolated-word OCR, banded passes, alerts checked before Next) but that exact combination has not been re-run end to end.
+
+## Earlier checklist (kept for reference; most items are now done)
 0. **Install both simulator runtimes**: `th sim install-runtime` (iOS) **and** `th sim install-runtime --platform watchOS`.
    Verified on 2026-09-19: with the harness flags, `xcodebuild -resolvePackageDependencies` for Trio succeeds, and the build
    then aborts immediately with "This scheme builds an embedded Apple Watch app. watchOS 11.0 must be installed" when the
