@@ -29,7 +29,8 @@ class OCRHit:
 _CACHE: dict[tuple, list] = {}
 
 
-def _tsv(path: Path, upscale: float = 1.0, invert: bool = False, psm: int = 11) -> list[OCRHit]:
+def _tsv(path: Path, upscale: float = 1.0, invert: bool | str = False, psm: int = 11) -> list[OCRHit]:
+    """invert: False | True | 'bright' (keep only bright pixels as black text on white; catches white-on-colour buttons)."""
     key = (str(path), path.stat().st_mtime_ns, upscale, invert, psm)
     if key in _CACHE:
         return _CACHE[key]
@@ -40,7 +41,7 @@ def _tsv(path: Path, upscale: float = 1.0, invert: bool = False, psm: int = 11) 
     return hits
 
 
-def _tsv_uncached(path: Path, upscale: float, invert: bool, psm: int) -> list[OCRHit]:
+def _tsv_uncached(path: Path, upscale: float, invert, psm: int) -> list[OCRHit]:
     if not which("tesseract"):
         raise HarnessError("tesseract not installed (brew install tesseract)")
     src = path
@@ -49,9 +50,12 @@ def _tsv_uncached(path: Path, upscale: float, invert: bool, psm: int) -> list[OC
         im = Image.open(path).convert("RGB")
         if upscale != 1.0:
             im = im.resize((int(im.width * upscale), int(im.height * upscale)))
-        if invert:
+        if invert == "bright":
+            g = im.convert("L")
+            im = g.point(lambda v: 0 if v > 190 else 255).convert("RGB")   # bright text -> black on white
+        elif invert:
             im = ImageOps.invert(im)
-        src = tmp_path(f"ocr-{upscale}-{int(invert)}.png")
+        src = tmp_path(f"ocr-{upscale}-{invert}.png")
         im.save(src)
     cp = run(["tesseract", str(src), "stdout", "--psm", str(psm), "tsv"], quiet=True,
              env={"OMP_THREAD_LIMIT": "1"})
@@ -106,9 +110,9 @@ def find_text(path: Path, needle: str, *, min_conf: float = 30) -> list[OCRHit]:
     from PIL import Image
     width = Image.open(path).width
     # psm 11 = sparse text (fast, good for labels); psm 6 = uniform block (catches text inside filled buttons)
-    passes = [(1.0, False, 11), (1.0, True, 6), (1.0, False, 6), (1.0, True, 11)]
+    passes = [(1.0, False, 11), (1.0, "bright", 11), (1.0, True, 6), (1.0, False, 6), (1.0, "bright", 6), (1.0, True, 11)]
     if width < 900:
-        passes += [(2.0, False, 11), (2.0, True, 6)]
+        passes += [(2.0, False, 11), (2.0, "bright", 11), (2.0, True, 6)]
     for upscale, invert, psm in passes:
         ws = [w for w in _tsv(path, upscale, invert, psm) if w.conf >= min_conf]
         out = _match_words(ws, parts)

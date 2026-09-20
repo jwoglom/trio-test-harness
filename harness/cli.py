@@ -180,6 +180,10 @@ def cmd_launch(args):
         drv.launch(bundle)
         return 0
     from . import devices as D
+    if args.preseed_onboarding and D.ssh_ok():
+        c = D.ssh_preseed_flags(bundle, {"onboardingCompleted": True, "hasSeenFatProteinOrderChange": True,
+                                         "crashlyticsSharingEnabled": False, "telemetrySharingEnabled": False})
+        log(f"pre-seeded onboarding/diagnostics flags in {c}/Documents over SSH")
     if args.via == "devicectl":
         D.devicectl_launch(D.pick_udid(), bundle)
     elif args.via == "ssh" or (args.via == "auto" and D.ssh_ok()):

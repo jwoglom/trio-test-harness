@@ -333,9 +333,13 @@ def fakesign_app(app: Path, src: Path, team: str, bundle_id: str) -> None:
     """codesign -s - (ad-hoc) every nested bundle, innermost first, then the app itself."""
     app_group = f"group.{bundle_id}.trio-app-group"
     nested: list[Path] = []
-    for pattern in ("Frameworks/*.framework", "Frameworks/*.dylib", "PlugIns/*.appex", "Watch/*.app/PlugIns/*.appex",
-                    "Watch/*.app/Frameworks/*.framework", "Watch/*.app", "Extensions/*.appex"):
-        nested += sorted(app.glob(pattern))
+    # every nested code object, innermost first: dylibs anywhere (incl. Xcode's Trio.debug.dylib at the app root),
+    # frameworks, app extensions, the watch app
+    for pattern in ("**/*.dylib", "Watch/*.app/Frameworks/*.framework", "Watch/*.app/PlugIns/*.appex", "Watch/*.app",
+                    "Frameworks/*.framework", "PlugIns/*.appex", "Extensions/*.appex"):
+        for b in sorted(app.glob(pattern)):
+            if b not in nested and not any(str(b).startswith(str(n) + "/") for n in nested if n.suffix == ".framework"):
+                nested.append(b)
     log(f"fake-signing {len(nested)} nested bundles + {app.name} (team {team})")
     for b in nested + [app]:
         cmd = ["codesign", "--force", "--sign", "-", "--timestamp=none", "--generate-entitlement-der"]

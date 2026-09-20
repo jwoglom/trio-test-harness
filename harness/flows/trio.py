@@ -62,23 +62,42 @@ def preseed_onboarding(container: Path) -> list[Path]:
 
 
 def _visible(drv: Driver, labels: list[str], shot: Path | None = None) -> str | None:
+    """First label visible on screen. With an accessibility tree: exact node match. Otherwise OCR on `shot`
+    (one screenshot, cached per pass) — button labels only count when they are the whole OCR phrase."""
     nodes = drv.ui_tree()
     if nodes:
         for lab in labels:
             if any(n.matches(lab, exact=True) and n.w > 0 for n in nodes):
                 return lab
         return None
-    # OCR route (VNC)
     from ..ocr import find_text
-    shot = shot or tmp_path("flow.png")
-    drv.screenshot(shot)
+    shot = shot or drv.screenshot(tmp_path("flow.png"))
     for lab in labels:
-        if find_text(shot, lab):
+        hits = [h for h in find_text(shot, lab) if len(h.text.split()) == len(lab.split())]
+        if hits:
             return lab
     return None
 
 
-def at_home(drv: Driver) -> bool:
+def _ocr_hits(drv: Driver, shot: Path, label: str):
+    from ..ocr import find_text
+    return [h for h in find_text(shot, label) if len(h.text.split()) == len(label.split())]
+
+
+def _tap_label(drv: Driver, label: str, shot: Path | None) -> None:
+    """Tap a label; on OCR targets prefer the lowest hit on screen (buttons live at the bottom, body text above)."""
+    if drv.ui_tree() or shot is None:
+        drv.tap_text(label, exact=True)
+        return
+    hits = _ocr_hits(drv, shot, label)
+    if not hits:
+        drv.tap_text(label, exact=True)
+        return
+    x, y = max(hits, key=lambda h: h.y).center
+    drv.tap(x, y)
+
+
+def at_home(drv: Driver, shot: Path | None = None) -> bool:
     found = 0
     nodes = drv.ui_tree()
     if nodes:
@@ -86,25 +105,35 @@ def at_home(drv: Driver) -> bool:
             if any(n.matches(m, exact=True) for n in nodes):
                 found += 1
         return found >= 2
-    from ..ocr import find_text
-    shot = tmp_path("home.png")
-    drv.screenshot(shot)
-    return sum(1 for m in HOME_MARKERS if find_text(shot, m)) >= 2
+    shot = shot or drv.screenshot(tmp_path("home.png"))
+    return sum(1 for m in HOME_MARKERS if _ocr_hits(drv, shot, m)) >= 2
 
 
-def walk_onboarding(drv: Driver, run: Run | None = None, *, max_steps: int = 70, settle: float = 1.2) -> None:
-    """Click through onboarding with defaults until the home screen appears."""
+def walk_onboarding(drv: Driver, run: Run | None = None, *, max_steps: int = 70, settle: float = 1.0) -> None:
+    """Click through onboarding with defaults until the home screen appears.
+
+    One screenshot per step (OCR results are cached per image). Order: skip Nightscout, then Next/Continue/Get Started,
+    and only if no such button is visible, permission buttons (Allow) — otherwise body text like "You must allow…" wins.
+    """
     for i in range(max_steps):
         time.sleep(settle)
-        if at_home(drv):
-            step(run, drv, "home", "Reached the home screen")
+        shot = run.shot_path(f"onboarding-{i:02d}") if run else tmp_path("flow.png")
+        drv.screenshot(shot)
+        if at_home(drv, shot):
+            if run:
+                run.log_step("home", "Reached the home screen", shot)
+            log("step: home")
             return
-        label = _visible(drv, ["Skip Nightscout Setup"]) or _visible(drv, PERMISSION_LABELS[:2]) or _visible(drv, NEXT_LABELS)
+        label = (_visible(drv, ["Skip Nightscout Setup"], shot) or _visible(drv, NEXT_LABELS, shot)
+                 or _visible(drv, PERMISSION_LABELS[:2], shot))
         if label is None:
-            step(run, drv, f"onboarding-{i:02d}-stuck", "No Next/Continue/Allow button found")
+            if run:
+                run.log_step(f"onboarding-{i:02d}-stuck", "No Next/Continue/Allow button found", shot)
             raise HarnessError("onboarding: no actionable button visible; drive manually with th shot / th tap-text")
-        step(run, drv, f"onboarding-{i:02d}", f"tap '{label}'")
-        drv.tap_text(label, exact=True)
+        if run:
+            run.log_step(f"onboarding-{i:02d}", f"tap '{label}'", shot)
+        log(f"step: onboarding-{i:02d} tap '{label}'")
+        _tap_label(drv, label, shot)
         if label == "Skip Nightscout Setup":
             time.sleep(settle)
             try:

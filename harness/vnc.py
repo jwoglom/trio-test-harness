@@ -114,25 +114,34 @@ class VNCDriver(Driver):
         from PIL import ImageStat
         return ImageStat.Stat(self.client.capture().convert("L")).mean[0] < 8
 
-    def unlock(self, passcode: str | None = None) -> bool:
-        """Wake, swipe up, type the passcode (TH_DEVICE_PASSCODE), return True if the lock screen is gone."""
-        passcode = passcode or CONFIG.get("TH_DEVICE_PASSCODE")
-        w, h = self.screen_size()
-        if self.is_dark():
-            self.power(); time.sleep(1.0)
-        self.swipe(w // 2, int(h * 0.92), w // 2, int(h * 0.25), duration=0.25)
-        time.sleep(1.2)
+    def _passcode_screen(self) -> bool:
         from .ocr import find_text
         shot = self.screenshot(tmp_path("unlock.png"))
-        if not find_text(shot, "Enter Passcode"):
-            return True
+        return bool(find_text(shot, "Passcode") or find_text(shot, "Emergency"))
+
+    def unlock(self, passcode: str | None = None) -> bool:
+        """Wake, long swipe up, tap the passcode digits — all in one fast sequence (the phone re-locks in seconds).
+        Returns True when the passcode pad is no longer showing."""
+        passcode = passcode or CONFIG.get("TH_DEVICE_PASSCODE")
         if not passcode:
-            raise HarnessError("phone is locked and TH_DEVICE_PASSCODE is not set (put it in .env)")
+            raise HarnessError("TH_DEVICE_PASSCODE is not set (put it in .env)")
+        w, h = self.screen_size()
+        if self.is_dark():
+            self.power(); time.sleep(0.8)
+        # long, quick swipe from the very bottom to the top to reach the passcode pad
+        self.swipe(w // 2, int(h * 0.96), w // 2, int(h * 0.08), duration=0.2)
+        time.sleep(0.7)
+        cols = {0: 0.222, 1: 0.5, 2: 0.778}
+        rows = {0: 0.415, 1: 0.526, 2: 0.638}
         for ch in passcode:
-            self.client.key_press(ch); time.sleep(0.12)
-        time.sleep(1.5)
-        shot = self.screenshot(tmp_path("unlock2.png"))
-        return not find_text(shot, "Enter Passcode")
+            if ch == "0":
+                x, y = cols[1], 0.75
+            else:
+                d = int(ch) - 1
+                x, y = cols[d % 3], rows[d // 3]
+            self._press(int(w * x), int(h * y), LEFT, 0.1); time.sleep(0.15)
+        time.sleep(1.0)
+        return not self._passcode_screen()
 
     # ---- screen ----
     def screen_size(self) -> tuple[int, int]:

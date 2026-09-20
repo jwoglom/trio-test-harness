@@ -174,3 +174,26 @@ def ssh_kill(process_name: str) -> None:
 def ssh_installed_apps() -> str:
     cp = ssh_run("uiopen --list 2>/dev/null || ls /var/containers/Bundle/Application/*/ 2>/dev/null", check=False, timeout=30)
     return cp.stdout
+
+
+def ssh_app_container(bundle_id: str) -> str:
+    """Data container of an app on the jailbroken phone (grep the container metadata plists)."""
+    cp = ssh_run(f"grep -l '{bundle_id}' /var/mobile/Containers/Data/Application/*/.com.apple.mobile_container_manager.metadata.plist 2>/dev/null | head -1",
+                 check=False, timeout=30)
+    path = cp.stdout.strip()
+    if not path:
+        raise HarnessError(f"no data container for {bundle_id} on the phone (is it installed?)")
+    return path.rsplit("/", 1)[0]
+
+
+def ssh_preseed_flags(bundle_id: str, flags: dict[str, bool]) -> str:
+    """Write Trio's PersistedProperty plists (Documents/<key>.plist, root Bool) into the app container over SSH."""
+    import plistlib, tempfile, subprocess
+    container = ssh_app_container(bundle_id)
+    user, host, port = ssh_target()
+    ssh_run(f"mkdir -p '{container}/Documents'", timeout=20)
+    for key, value in flags.items():
+        with tempfile.NamedTemporaryFile(suffix=".plist", delete=False) as tf:
+            tf.write(plistlib.dumps(value, fmt=plistlib.FMT_BINARY)); local = tf.name
+        run(["scp", "-o", "BatchMode=yes", "-q", "-P", port, local, f"{user}@{host}:{container}/Documents/{key}.plist"], timeout=60, quiet=True)
+    return container
