@@ -26,6 +26,7 @@ DEFAULTS = {
     "TH_VNC_LOCAL_PORT": "5901",      # local port iproxy listens on
     "TH_VNC_PASSWORD": "",
     "TH_VNC_VIA_USB": "1",
+    "TH_DEVICE_PASSCODE": "",         # phone passcode for `th device unlock` (put it in .env only; never commit)
     "TH_SSH_HOST": "",                # jailbroken phone SSH host; blank = TH_VNC_HOST
     "TH_SSH_USER": "mobile",
     "TH_SSH_PORT": "22",

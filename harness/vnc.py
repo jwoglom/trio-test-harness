@@ -110,6 +110,30 @@ class VNCDriver(Driver):
             self.swipe(w // 2, int(h * 0.9), w // 2, int(h * 0.3), duration=0.3)
             time.sleep(1.0)
 
+    def is_dark(self) -> bool:
+        from PIL import ImageStat
+        return ImageStat.Stat(self.client.capture().convert("L")).mean[0] < 8
+
+    def unlock(self, passcode: str | None = None) -> bool:
+        """Wake, swipe up, type the passcode (TH_DEVICE_PASSCODE), return True if the lock screen is gone."""
+        passcode = passcode or CONFIG.get("TH_DEVICE_PASSCODE")
+        w, h = self.screen_size()
+        if self.is_dark():
+            self.power(); time.sleep(1.0)
+        self.swipe(w // 2, int(h * 0.92), w // 2, int(h * 0.25), duration=0.25)
+        time.sleep(1.2)
+        from .ocr import find_text
+        shot = self.screenshot(tmp_path("unlock.png"))
+        if not find_text(shot, "Enter Passcode"):
+            return True
+        if not passcode:
+            raise HarnessError("phone is locked and TH_DEVICE_PASSCODE is not set (put it in .env)")
+        for ch in passcode:
+            self.client.key_press(ch); time.sleep(0.12)
+        time.sleep(1.5)
+        shot = self.screenshot(tmp_path("unlock2.png"))
+        return not find_text(shot, "Enter Passcode")
+
     # ---- screen ----
     def screen_size(self) -> tuple[int, int]:
         c = self.client

@@ -250,6 +250,8 @@ def cmd_device(args):
         httpd.shutdown()
     elif args.sub == "wake":
         get_driver("device").wake()
+    elif args.sub == "unlock":
+        ok = get_driver("device").unlock(); print("unlocked" if ok else "still locked"); return 0 if ok else 1
     elif args.sub == "ssh":
         cp = D.ssh_run(" ".join(args.cmd), check=False, timeout=args.timeout)
         sys.stdout.write(cp.stdout); sys.stderr.write(cp.stderr); return cp.returncode
@@ -560,7 +562,7 @@ def build_parser() -> argparse.ArgumentParser:
     s.set_defaults(fn=cmd_sim)
 
     dv = sp.add_parser("device", help="physical iPhone utilities"); ds = dv.add_subparsers(dest="sub", required=True)
-    ds.add_parser("list"); ds.add_parser("wake"); ds.add_parser("diag"); ds.add_parser("vnc-restart"); ds.add_parser("apps")
+    ds.add_parser("list"); ds.add_parser("wake"); ds.add_parser("unlock"); ds.add_parser("diag"); ds.add_parser("vnc-restart"); ds.add_parser("apps")
     sshp = ds.add_parser("ssh", help="run a command on the phone over SSH"); sshp.add_argument("cmd", nargs="+"); sshp.add_argument("--timeout", type=int, default=60)
     kp = ds.add_parser("kill"); kp.add_argument("name")
     vc = ds.add_parser("vnc-check"); vc.add_argument("--out")
