@@ -45,17 +45,24 @@ def _tsv_uncached(path: Path, upscale: float, invert, psm: int) -> list[OCRHit]:
     if not which("tesseract"):
         raise HarnessError("tesseract not installed (brew install tesseract)")
     src = path
+    band_off = 0
     if upscale != 1.0 or invert:
         from PIL import Image, ImageOps
         im = Image.open(path).convert("RGB")
         if upscale != 1.0:
             im = im.resize((int(im.width * upscale), int(im.height * upscale)))
-        if invert == "bright":
+        band_off = 0
+        if isinstance(invert, str) and invert.startswith("band:"):
+            i, n = int(invert[5:]), 3
+            step = im.height // n
+            top = max(0, i * step - step // 4); bottom = min(im.height, (i + 1) * step + step // 4)
+            im = im.crop((0, top, im.width, bottom)); band_off = top
+        elif invert == "bright":
             g = im.convert("L")
             im = g.point(lambda v: 0 if v > 190 else 255).convert("RGB")   # bright text -> black on white
         elif invert:
             im = ImageOps.invert(im)
-        src = tmp_path(f"ocr-{upscale}-{invert}.png")
+        src = tmp_path(f"ocr-{upscale}-{str(invert).replace(':', '_')}.png")
         im.save(src)
     cp = run(["tesseract", str(src), "stdout", "--psm", str(psm), "tsv"], quiet=True,
              env={"OMP_THREAD_LIMIT": "1"})
@@ -68,7 +75,7 @@ def _tsv_uncached(path: Path, upscale: float, invert, psm: int) -> list[OCRHit]:
             conf = float(row.get("conf", "0"))
         except ValueError:
             conf = 0.0
-        hits.append(OCRHit(txt, int(int(row["left"]) / upscale), int(int(row["top"]) / upscale),
+        hits.append(OCRHit(txt, int(int(row["left"]) / upscale), int(int(row["top"]) / upscale) + band_off,
                            int(int(row["width"]) / upscale), int(int(row["height"]) / upscale), conf,
                            (int(row.get("block_num", 0)), int(row.get("par_num", 0)), int(row.get("line_num", 0)))))
     return hits
@@ -101,24 +108,33 @@ def _match_words(ws: list[OCRHit], parts: list[str]) -> list[OCRHit]:
     return out
 
 
-def find_text(path: Path, needle: str, *, min_conf: float = 30) -> list[OCRHit]:
+def find_text(path: Path, needle: str, *, min_conf: float = 30, isolated: bool = False) -> list[OCRHit]:
     """Find a word or phrase. Multi-word needles match consecutive words on the same line.
 
-    Passes: normal, inverted (white-on-color buttons), then 2x upscaled variants for small images.
+    All 1x passes are run and merged (normal / bright-mask / inverted, psm 11 and 6) so that dark text, white-on-colour
+    buttons and alert buttons are all found; hits closer than 25px are de-duplicated. `isolated=True` keeps only hits
+    with no other word immediately left/right on the same line (a standalone button label, not part of a sentence).
     """
     parts = [p.lower() for p in needle.split()]
     from PIL import Image
     width = Image.open(path).width
-    # psm 11 = sparse text (fast, good for labels); psm 6 = uniform block (catches text inside filled buttons)
-    passes = [(1.0, False, 11), (1.0, "bright", 11), (1.0, True, 6), (1.0, False, 6), (1.0, "bright", 6), (1.0, True, 11)]
+    passes = [(1.0, False, 11), (1.0, "bright", 11), (1.0, True, 6), (1.0, False, 6),
+              (1.0, "band:0", 6), (1.0, "band:1", 6), (1.0, "band:2", 6)]   # bands catch alerts / small regions
     if width < 900:
-        passes += [(2.0, False, 11), (2.0, "bright", 11), (2.0, True, 6)]
+        passes += [(2.0, False, 11), (2.0, "bright", 11)]
+    out: list[OCRHit] = []
     for upscale, invert, psm in passes:
         ws = [w for w in _tsv(path, upscale, invert, psm) if w.conf >= min_conf]
-        out = _match_words(ws, parts)
-        if out:
-            return out
-    return []
+        for h in _match_words(ws, parts):
+            if isolated:
+                gap = max(h.h, 10) * 1.2
+                same_line = [w for w in ws if abs((w.y + w.h / 2) - (h.y + h.h / 2)) < max(h.h, 10) * 0.6
+                             and not (w.x >= h.x and w.x + w.w <= h.x + h.w)]
+                if any((0 <= h.x - (w.x + w.w) < gap) or (0 <= w.x - (h.x + h.w) < gap) for w in same_line):
+                    continue
+            if not any(abs(o.x - h.x) < 25 and abs(o.y - h.y) < 25 for o in out):
+                out.append(h)
+    return out
 
 
 def dump_text(path: Path, *, invert_too: bool = True) -> str:

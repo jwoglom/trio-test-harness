@@ -70,18 +70,27 @@ def _visible(drv: Driver, labels: list[str], shot: Path | None = None) -> str | 
             if any(n.matches(lab, exact=True) and n.w > 0 for n in nodes):
                 return lab
         return None
-    from ..ocr import find_text
     shot = shot or drv.screenshot(tmp_path("flow.png"))
     for lab in labels:
-        hits = [h for h in find_text(shot, lab) if len(h.text.split()) == len(lab.split())]
-        if hits:
+        if _ocr_hits(drv, shot, lab, buttons_only=(lab in NEXT_LABELS)):
             return lab
     return None
 
 
-def _ocr_hits(drv: Driver, shot: Path, label: str):
+BUTTON_ZONE = 0.78   # onboarding/nav buttons live below this fraction of the screen height
+
+
+def _ocr_hits(drv: Driver, shot: Path, label: str, *, buttons_only: bool = False):
+    """OCR hits whose phrase is exactly the label (case-sensitive first letter, so body text like
+    'In the next few steps' does not match the 'Next' button). buttons_only keeps the bottom button zone."""
     from ..ocr import find_text
-    return [h for h in find_text(shot, label) if len(h.text.split()) == len(label.split())]
+    from PIL import Image
+    hits = [h for h in find_text(shot, label, isolated=True)
+            if len(h.text.split()) == len(label.split()) and h.text[:1] == label[:1]]
+    if buttons_only:
+        h_img = Image.open(shot).height
+        hits = [h for h in hits if h.y > h_img * BUTTON_ZONE]
+    return hits
 
 
 def _tap_label(drv: Driver, label: str, shot: Path | None) -> None:
@@ -89,7 +98,7 @@ def _tap_label(drv: Driver, label: str, shot: Path | None) -> None:
     if drv.ui_tree() or shot is None:
         drv.tap_text(label, exact=True)
         return
-    hits = _ocr_hits(drv, shot, label)
+    hits = _ocr_hits(drv, shot, label, buttons_only=(label in NEXT_LABELS))
     if not hits:
         drv.tap_text(label, exact=True)
         return
@@ -124,8 +133,9 @@ def walk_onboarding(drv: Driver, run: Run | None = None, *, max_steps: int = 70,
                 run.log_step("home", "Reached the home screen", shot)
             log("step: home")
             return
-        label = (_visible(drv, ["Skip Nightscout Setup"], shot) or _visible(drv, NEXT_LABELS, shot)
-                 or _visible(drv, PERMISSION_LABELS[:2], shot))
+        # iOS permission alerts sit on top of the page: their exact-word "Allow" wins over the dimmed Next below.
+        label = (_visible(drv, PERMISSION_LABELS[:2], shot) or _visible(drv, ["Skip Nightscout Setup"], shot)
+                 or _visible(drv, NEXT_LABELS, shot))
         if label is None:
             if run:
                 run.log_step(f"onboarding-{i:02d}-stuck", "No Next/Continue/Allow button found", shot)
