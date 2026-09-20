@@ -13,7 +13,12 @@ from .config import CONFIG, ENV_FILE, REPO_ROOT
 from .util import tmp_path, HarnessError, log, run, which, port_open
 
 
-def get_driver(target: str):
+def get_driver(target: str, *, local: bool = False):
+    """Local driver, or a proxy to `th daemon` when one is running for this target."""
+    if not local and not os.environ.get("TH_NO_DAEMON"):
+        from . import daemon as D
+        if D.is_running(target):
+            return D.RemoteDriver(target)
     if target == "sim":
         from .sim import SimulatorDriver
         return SimulatorDriver()
@@ -177,6 +182,8 @@ def cmd_launch(args):
     from . import devices as D
     if args.via == "devicectl":
         D.devicectl_launch(D.pick_udid(), bundle)
+    elif args.via == "ssh" or (args.via == "auto" and D.ssh_ok()):
+        D.ssh_launch(bundle); log(f"launched {bundle} via uiopen over SSH")
     else:
         drv = get_driver("device"); drv.wake(); drv.open_app_via_spotlight(args.app_name)
     return 0
@@ -243,6 +250,36 @@ def cmd_device(args):
         httpd.shutdown()
     elif args.sub == "wake":
         get_driver("device").wake()
+    elif args.sub == "ssh":
+        cp = D.ssh_run(" ".join(args.cmd), check=False, timeout=args.timeout)
+        sys.stdout.write(cp.stdout); sys.stderr.write(cp.stderr); return cp.returncode
+    elif args.sub == "diag":
+        print(D.diag())
+    elif args.sub == "vnc-restart":
+        print(D.vnc_restart())
+        from . import daemon as DM
+        if DM.is_running("device"):
+            DM.stop("device"); time.sleep(1); DM.start("device")
+            print("device daemon restarted")
+    elif args.sub == "kill":
+        D.ssh_kill(args.name); print("ok")
+    elif args.sub == "apps":
+        print(D.ssh_installed_apps())
+    return 0
+
+
+def cmd_daemon(args):
+    from . import daemon as D
+    t = _target(args)
+    if args.sub == "start":
+        D.start(t, foreground=args.foreground); print(f"daemon[{t}] running" if not args.foreground else "")
+    elif args.sub == "stop":
+        D.stop(t); print(f"daemon[{t}] stopped")
+    elif args.sub == "status":
+        for tt in ("sim", "device"):
+            print(f"{tt}: {'running' if D.is_running(tt) else 'not running'}")
+    elif args.sub == "restart":
+        D.stop(t); time.sleep(0.5); D.start(t); print(f"daemon[{t}] restarted")
     return 0
 
 
@@ -509,7 +546,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     l = sp.add_parser("launch", help="launch Trio")
     l.add_argument("--bundle-id"); l.add_argument("--preseed-onboarding", action="store_true")
-    l.add_argument("--via", choices=["vnc", "devicectl"], default="vnc"); l.add_argument("--app-name", default="Trio")
+    l.add_argument("--via", choices=["auto", "ssh", "vnc", "devicectl"], default="auto"); l.add_argument("--app-name", default="Trio")
     l.set_defaults(fn=cmd_launch)
 
     s = sp.add_parser("sim", help="simulator management"); ss = s.add_subparsers(dest="sub", required=True)
@@ -523,10 +560,18 @@ def build_parser() -> argparse.ArgumentParser:
     s.set_defaults(fn=cmd_sim)
 
     dv = sp.add_parser("device", help="physical iPhone utilities"); ds = dv.add_subparsers(dest="sub", required=True)
-    ds.add_parser("list"); ds.add_parser("wake")
+    ds.add_parser("list"); ds.add_parser("wake"); ds.add_parser("diag"); ds.add_parser("vnc-restart"); ds.add_parser("apps")
+    sshp = ds.add_parser("ssh", help="run a command on the phone over SSH"); sshp.add_argument("cmd", nargs="+"); sshp.add_argument("--timeout", type=int, default=60)
+    kp = ds.add_parser("kill"); kp.add_argument("name")
     vc = ds.add_parser("vnc-check"); vc.add_argument("--out")
     si = ds.add_parser("serve-ipa"); si.add_argument("ipa"); si.add_argument("--serve-seconds", type=int, default=600)
     dv.set_defaults(fn=cmd_device)
+
+    dm = sp.add_parser("daemon", help="persistent driver connection reused by all commands"); dms = dm.add_subparsers(dest="sub", required=True)
+    st = dms.add_parser("start"); st.add_argument("--foreground", action="store_true")
+    for name in ("stop", "status", "restart"):
+        dms.add_parser(name)
+    dm.set_defaults(fn=cmd_daemon)
 
     wd = sp.add_parser("wda", help="WebDriverAgent runner for the simulator"); wds = wd.add_subparsers(dest="sub", required=True)
     for name in ("build", "start", "stop", "status"):

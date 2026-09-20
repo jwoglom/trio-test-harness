@@ -26,6 +26,9 @@ DEFAULTS = {
     "TH_VNC_LOCAL_PORT": "5901",      # local port iproxy listens on
     "TH_VNC_PASSWORD": "",
     "TH_VNC_VIA_USB": "1",
+    "TH_SSH_HOST": "",                # jailbroken phone SSH host; blank = TH_VNC_HOST
+    "TH_SSH_USER": "mobile",
+    "TH_SSH_PORT": "22",
     "TH_IPA_HTTP_PORT": "8765",       # local HTTP server used for TrollStore installs
     "TH_IPA_HTTP_HOST": "",           # IP/hostname the iPhone can reach; blank = auto (LAN IP)
     "TH_ARTIFACT_REPO": "jwoglom/trio-test-screenshots",  # GitHub repo that hosts screenshots for PR comments

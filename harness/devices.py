@@ -107,3 +107,70 @@ def devicectl_launch(udid: str, bundle_id: str, *args: str) -> None:
 def devicectl_open_url(udid: str, url: str) -> None:
     """Open a URL on the device by launching Safari with -u (works for custom schemes too)."""
     devicectl_launch(udid, "com.apple.mobilesafari", "-u", url)
+
+
+# ---------------- SSH to the jailbroken phone (diagnostics + recovery) -----------------
+
+def ssh_target() -> tuple[str, str, str]:
+    host = CONFIG.get("TH_SSH_HOST") or CONFIG.get("TH_VNC_HOST")
+    if not host or host in ("localhost", "127.0.0.1"):
+        host = "127.0.0.1"
+    return CONFIG.get("TH_SSH_USER") or "mobile", host, CONFIG.get("TH_SSH_PORT") or "22"
+
+
+def ssh_run(cmd: str, *, check: bool = True, timeout: int = 60, quiet: bool = True):
+    user, host, port = ssh_target()
+    return run(["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=8", "-o", "StrictHostKeyChecking=accept-new",
+                "-p", port, f"{user}@{host}", cmd], check=check, timeout=timeout, quiet=quiet)
+
+
+def ssh_ok() -> bool:
+    return ssh_run("echo ok", check=False, timeout=20).returncode == 0
+
+
+TROLLVNC_LABEL = "com.82flex.trollvnc"
+
+
+def vnc_restart() -> str:
+    """Restart TrollVNC on the phone. Tries launchctl (needs sudo for the system daemon), then killall
+    (launchd's KeepAlive respawns it)."""
+    attempts = [
+        f"sudo -n launchctl kickstart -k system/{TROLLVNC_LABEL}",
+        f"launchctl kickstart -k system/{TROLLVNC_LABEL}",
+        "sudo -n killall -9 trollvncserver",
+        "killall -9 trollvncserver",
+    ]
+    for cmd in attempts:
+        cp = ssh_run(cmd, check=False, timeout=30)
+        if cp.returncode == 0:
+            return f"ok: {cmd}"
+    raise HarnessError("could not restart TrollVNC over SSH; last error: " + (cp.stderr or cp.stdout)[-300:])
+
+
+def diag() -> str:
+    """One-shot health report from the phone: uptime, TrollVNC process/port, top CPU users, free disk."""
+    script = (
+        "echo '== uptime'; uptime; "
+        "echo '== trollvnc'; ps aux | grep -i [t]rollvnc | head -5; "
+        "echo '== listeners'; (netstat -an 2>/dev/null | grep -E 'LISTEN' | grep -E '5901|22' ) || true; "
+        "echo '== top'; ps aux -r 2>/dev/null | head -8 || ps aux | sort -rk3 | head -8; "
+        "echo '== disk'; df -h /var 2>/dev/null | tail -1; "
+        "echo '== tools'; for t in uiopen killall launchctl sudo; do printf '%s: ' $t; command -v $t || echo missing; done"
+    )
+    return ssh_run(script, check=False, timeout=60).stdout
+
+
+def ssh_launch(bundle_id: str) -> None:
+    """Launch an app by bundle id with Procursus' uiopen (rootless: /var/jb/usr/bin/uiopen)."""
+    cp = ssh_run(f"uiopen --bundleid {bundle_id} 2>&1 || /var/jb/usr/bin/uiopen --bundleid {bundle_id}", check=False, timeout=30)
+    if cp.returncode != 0:
+        raise HarnessError("uiopen failed: " + (cp.stdout + cp.stderr)[-300:])
+
+
+def ssh_kill(process_name: str) -> None:
+    ssh_run(f"killall {process_name}", check=False, timeout=20)
+
+
+def ssh_installed_apps() -> str:
+    cp = ssh_run("uiopen --list 2>/dev/null || ls /var/containers/Bundle/Application/*/ 2>/dev/null", check=False, timeout=30)
+    return cp.stdout

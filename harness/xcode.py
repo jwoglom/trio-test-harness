@@ -117,7 +117,7 @@ def boot_simulator(udid: str) -> None:
     state = {d["udid"]: d["state"] for d in list_devices()}.get(udid)
     if state != "Booted":
         xcrun(["simctl", "boot", udid])
-    xcrun(["simctl", "bootstatus", udid, "-b"], timeout=300)
+    xcrun(["simctl", "bootstatus", udid, "-b"], timeout=900)
     # Bring the Simulator.app UI up so screenshots include a live window (also needed by idb).
     app = find_xcode()
     run(["open", "-a", str(app / "Contents/Developer/Applications/Simulator.app"), "--args", "-CurrentDeviceUDID", udid],
