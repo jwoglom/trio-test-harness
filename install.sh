@@ -6,10 +6,10 @@ cd "$HERE"
 
 echo "== Homebrew packages"
 if ! command -v brew >/dev/null; then echo "Homebrew is required (https://brew.sh)"; exit 1; fi
-brew list --formula libusbmuxd >/dev/null 2>&1 || brew install libusbmuxd      # iproxy
-brew list --formula tesseract  >/dev/null 2>&1 || brew install tesseract       # OCR fallback
-brew list --formula coreutils  >/dev/null 2>&1 || brew install coreutils       # gtimeout
-brew list --formula idb-companion >/dev/null 2>&1 || brew install facebook/fb/idb-companion || \
+HOMEBREW_NO_AUTO_UPDATE=1 brew list --formula libusbmuxd >/dev/null 2>&1 || brew install libusbmuxd      # iproxy
+HOMEBREW_NO_AUTO_UPDATE=1 brew list --formula tesseract  >/dev/null 2>&1 || brew install tesseract       # OCR fallback
+HOMEBREW_NO_AUTO_UPDATE=1 brew list --formula coreutils  >/dev/null 2>&1 || brew install coreutils       # gtimeout
+HOMEBREW_NO_AUTO_UPDATE=1 brew list --formula idb-companion >/dev/null 2>&1 || brew install facebook/fb/idb-companion || \
   echo "!! idb-companion failed to install; simulator taps need it (retry after Xcode is installed)"
 
 echo "== Python virtualenv"
