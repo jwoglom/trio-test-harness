@@ -5,13 +5,13 @@ the iOS Simulator or a USB-attached iPhone, from any Trio branch / PR / submodul
 turn the screenshots into an HTML report (claude.ai Artifact) or a GitHub PR comment.
 
 ```
-./trio-e2e --mode simulator --pr https://github.com/nightscout/Trio/pull/1234     # Trio PR
-./trio-e2e --mode vnc --pr https://github.com/jwoglom/TandemKit/pull/395          # submodule PR (Trio @ feat/tandem)
-./trio-e2e                                                                        # prompts for mode and PR/branch
+./trio-test-e2e --mode simulator --pr https://github.com/nightscout/Trio/pull/1234     # Trio PR
+./trio-test-e2e --mode rooted-vnc --pr https://github.com/jwoglom/TandemKit/pull/395          # submodule PR (Trio @ feat/tandem)
+./trio-test-e2e                                                                        # prompts for mode and PR/branch
 ```
-`./trio-e2e` runs checkout → build → install → launch (onboarding pre-seeded) → home screen → Glucose Simulator +
+`./trio-test-e2e` runs checkout → build → install → launch (onboarding pre-seeded) → home screen → Glucose Simulator +
 Pump Simulator → `report.html`, writes `runs/<run>/pr.md` with the PR description and a test-plan stub, then hands off to
-Claude Code (from a terminal) or to the `trio-e2e` skill (inside Claude) for the PR-specific testing, the report artifact
+Claude Code (from a terminal) or to the `trio-test-e2e` skill (inside Claude) for the PR-specific testing, the report artifact
 and the optional PR comment. Every stage is also a `th` command and a Claude skill:
 
 ```
@@ -26,20 +26,23 @@ th run finish passed --summary "..." ; th report html ; th report pr <url> --art
 
 ## How it works
 
-| Piece | Simulator | Physical iPhone |
-|---|---|---|
-| Build | `xcodebuild`, ad-hoc signing (no Apple credentials), same flags as Trio CI | ad-hoc `.ipa` installed via **AppSync Unified** (or TrollStore on iOS ≤ 17), or automatic signing with `TH_DEVELOPER_TEAM` + `devicectl` |
-| Install / launch | `simctl install` / `simctl launch` | `pymobiledevice3 apps install` (AppSync), or TrollStore link, or `devicectl`; launch via Spotlight over VNC |
-| Screenshots | `simctl io screenshot` | **TrollVNC** framebuffer over USB (`iproxy 5901`) |
-| Taps / swipes / typing | **WebDriverAgent** (`th wda start`; idb if installed) | VNC pointer & keyboard events (TrollVNC maps right-click → Home, middle → Power) |
-| Find elements | WebDriverAgent accessibility tree (`th tree`, `th tap-text`) | OCR (tesseract) on the screenshot (`th tap-text`, `th find`) |
-| Skip onboarding | write `Documents/onboardingCompleted.plist` into the app container | click through with `th flow onboarding-walk` |
+Three connection modes (`--mode` / `--target`):
+
+| Piece | `simulator` | `rooted-vnc` (jailbroken iPhone) | `iphone-usb` (any iPhone, no root) |
+|---|---|---|---|
+| Build | `xcodebuild`, ad-hoc signing, same flags as Trio CI | unsigned build fake-signed with `codesign -s -` → `Trio.ipa` | automatic signing (`TH_DEVELOPER_TEAM`, Apple ID in Xcode) |
+| Install / launch | `simctl install/launch` | `pymobiledevice3 apps install` via **AppSync Unified**; `uiopen` over SSH | `xcrun devicectl` install; launch via Spotlight (⌘3) in the mirror |
+| Screenshots | `simctl io screenshot` | **TrollVNC** framebuffer (native px) over Wi-Fi or USB (`iproxy`) | **iPhone Mirroring** window capture (phone-harness, MIT) |
+| Taps / typing | **WebDriverAgent** | VNC pointer/keyboard (right-click Home, middle Power) | HID-level CGEvents into the mirror window |
+| Find elements | accessibility tree (`th tree`, `th tap-text`) | tesseract OCR | Apple Vision OCR (phone-harness) |
+| Skip onboarding | write `Documents/onboardingCompleted.plist` | same, over SSH (+ Crashlytics off) | not possible → `th flow onboarding-walk` |
+| Diagnostics | `th sim …`, `th wda …` | `th device ssh/diag/vnc-restart/unlock` | `th device mirror-status`; iPhone Mirroring must be paired and the phone locked |
 
 All coordinates the CLI accepts are **screenshot pixels**, so an agent can look at a PNG and tap what it sees on both targets.
 
-Python package `harness/` (CLIs `trio-e2e`, `bin/th`), Claude skills in `.claude/skills/` (symlinked into `~/.claude/skills` by `install.sh`):
+Python package `harness/` (CLIs `trio-test-e2e`, `bin/th`), Claude skills in `.claude/skills/` (symlinked into `~/.claude/skills` by `install.sh`):
 
-- `trio-e2e` — runs `trio-e2e`, then the PR-specific testing + report + comment prompt
+- `trio-test-e2e` — runs `trio-test-e2e`, then the PR-specific testing + report + comment prompt
 - `trio-test` — the chained workflow, stage by stage, pointing at the per-stage skills
 - per stage: `trio-sim-setup`, `trio-phone-setup`, `trio-checkout`, `trio-build`, `trio-install`, `trio-launch`,
   `trio-fake-devices`, `trio-pr-plan`, `trio-ui-drive`, `trio-report`
@@ -72,11 +75,17 @@ The harness never needs `xcode-select`; it sets `DEVELOPER_DIR` per command (`TH
 See `docs/HANDOFF.md` for the current state and `docs/phone-setup.md` for the iPhone.
 
 ### Phone prerequisites
-- Jailbroken iPhone with **TrollVNC** enabled (Settings ▸ TrollVNC), port 5901. Put `TH_VNC_HOST` and `TH_VNC_PASSWORD` in `.env`.
+`rooted-vnc`:
+- Jailbroken iPhone with **TrollVNC** enabled (Settings ▸ TrollVNC), port 5901. Put `TH_VNC_HOST`, `TH_VNC_PASSWORD`, `TH_DEVICE_PASSCODE` in `.env`.
 - `th device vnc-check` grabs a frame; `th device list` shows the USB/usbmuxd view.
-- Installing builds: **AppSync Unified** on the phone + `th --target device install --appsync` (pymobiledevice3 over USB);
+- Installing builds: **AppSync Unified** on the phone + `th --target rooted-vnc install --appsync` (pymobiledevice3 over USB);
   or TrollStore (iOS ≤ 17 only) via `--trollstore`; or signed builds (`TH_DEVELOPER_TEAM`, Apple ID in Xcode, Developer Mode) via devicectl.
 - Details: `docs/phone-setup.md`.
+
+`iphone-usb` (macOS iPhone Mirroring, built on [phone-harness](https://github.com/ShawnPana/phone-harness), vendored under `vendor/`):
+- Mac and iPhone on the **same Apple ID**, Bluetooth + Wi-Fi on, iPhone Mirroring paired once (open the app, confirm on the phone), phone **locked** while mirroring.
+- Terminal granted Accessibility + Screen Recording. `th device mirror-status` shows the window; `th --target iphone-usb shot` captures it.
+- Installing needs a properly signed build (`TH_DEVELOPER_TEAM`) and Developer Mode on the phone; onboarding is walked (no root to pre-seed).
 
 ## CLI overview (`./trio-test-harness --help`; `th` = short alias in `bin/`)
 `doctor` · `build` · `install` · `launch` · `sim {list,runtimes,install-runtime,boot,shutdown,erase,container,defaults,openurl}` ·

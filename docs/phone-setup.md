@@ -1,5 +1,9 @@
 # The iPhone: setup and control
 
+Two ways to drive a physical iPhone:
+- **`rooted-vnc`** — the jailbroken test phone: TrollVNC for screen/input, SSH for launch/diagnostics/pre-seeding, AppSync for installs. Everything below except the last section is about this mode.
+- **`iphone-usb`** — any iPhone through macOS **iPhone Mirroring**, no root (see the last section).
+
 Device (as of 2026-09-19): the user's test iPhone, iOS 18.6.1, **rootless jailbreak**, TrollVNC 3.2-272 installed
 (Settings ▸ TrollVNC). Framebuffer 828×1792. The Mac and phone are on the same Wi-Fi; the phone also connects over USB
 (usbmuxd sees it, and the user keeps `iproxy 2222:22` for SSH).
@@ -7,7 +11,7 @@ Device (as of 2026-09-19): the user's test iPhone, iOS 18.6.1, **rootless jailbr
 ## Control: TrollVNC (works, verified)
 - Configure `.env` (gitignored) with `TH_VNC_HOST=<phone LAN IP>` (shown in Settings ▸ TrollVNC) and `TH_VNC_PASSWORD=<full-access password>`.
   Or leave host empty/localhost with `TH_VNC_VIA_USB=1` to tunnel port 5901 over USB with `iproxy`.
-- `th device vnc-check` grabs a frame. `th --target device shot|tap|swipe|type|home` drive it. Right mouse button = Home,
+- `th device vnc-check` grabs a frame. `th --target rooted-vnc shot|tap|swipe|type|home` drive it. Right mouse button = Home,
   middle = Power (TrollVNC mapping). `th device wake` = power + swipe up when the screen is black.
 - Implementation: `harness/rfb.py`, our own minimal RFB 3.8 client (VNC auth, raw encoding, pointer/key events).
   vncdotool's Twisted client authenticated fine but never received a framebuffer from TrollVNC; do not go back to it.
@@ -20,9 +24,9 @@ Device (as of 2026-09-19): the user's test iPhone, iOS 18.6.1, **rootless jailbr
 TrollStore does **not** exist for iOS 18, so the `--trollstore` install path does not apply to this phone. AppSync Unified
 116.0 (https://github.com/akemin-dayo/AppSync) is now installed, so unsigned/ad-hoc IPAs install through installd:
 ```
-th --target device build --trollstore        # ad-hoc signed arm64 Trio.ipa (flag name kept; it just means "no Apple signing")
-th --target device install --appsync         # pymobiledevice3 apps install build/Trio.ipa (phone on USB, trusted)
-th launch --target device                    # uiopen --bundleid <id> over SSH (falls back to Spotlight over VNC)
+th --target rooted-vnc build --trollstore        # ad-hoc signed arm64 Trio.ipa (flag name kept; it just means "no Apple signing")
+th --target rooted-vnc install --appsync         # pymobiledevice3 apps install build/Trio.ipa (phone on USB, trusted)
+th launch --target rooted-vnc                    # uiopen --bundleid <id> over SSH (falls back to Spotlight over VNC)
 ```
 How it was installed (for the record / if it ever needs redoing): Karen's repo (https://cydia.akemi.ai/) was returning
 Cloudflare 522, so the deb came from the GitHub release. Its `Depends: firmware (<= 18.2)` blocked iOS 18.6.1 in Sileo
@@ -41,11 +45,11 @@ anything once the screen locks; alternatively set Settings ▸ Display & Brightn
 mean the display is off.
 
 ## Build + signing for the phone (verified 2026-09-20)
-Xcode 26 refuses `CODE_SIGN_IDENTITY=-` for the iphoneos SDK ("Ad Hoc code signing is not allowed"), so `th --target device
+Xcode 26 refuses `CODE_SIGN_IDENTITY=-` for the iphoneos SDK ("Ad Hoc code signing is not allowed"), so `th --target rooted-vnc
 build --trollstore` builds with `CODE_SIGNING_ALLOWED=NO` and then fake-signs every nested bundle and the app with
 `codesign --sign -` plus entitlements derived from `Trio/Resources/Trio.entitlements` (app group, HealthKit, NFC, APNs) and
 the identifier entitlements Xcode normally injects (see `harness/build.py: fakesign_app`). The resulting `build/Trio.ipa`
-installed through AppSync in ~25 s with `th --target device install --appsync`.
+installed through AppSync in ~25 s with `th --target rooted-vnc install --appsync`.
 
 ## SSH access (works, key-based, user `mobile`)
 `th device ssh <cmd>`, `th device diag` (uptime, VNC process/port, top, disk), `th device vnc-restart` (killall
@@ -55,7 +59,7 @@ launchctl, dpkg (no curl, nc, plutil). TrollVNC prefs live at
 `/var/jb/var/mobile/Library/Preferences/com.82flex.trollvnc.plist` (binary; edit on the Mac with plutil, scp back, restart).
 
 ## Persistent connection: `th daemon`
-`th --target device daemon start` keeps one VNC connection open in a background process (socket `runs/.tmp/daemon-device.sock`);
+`th --target rooted-vnc daemon start` keeps one VNC connection open in a background process (socket `runs/.tmp/daemon-device.sock`);
 every `th` command uses it automatically (2–3 s per screenshot instead of a reconnect each time, and no connect/disconnect
 banners on the phone). `th daemon status|stop|restart`. The daemon reconnects once if the phone drops the connection.
 Same for the simulator: `th --target sim daemon start` holds the WDA session.
@@ -64,3 +68,17 @@ Same for the simulator: `th --target sim daemon start` holds the WDA session.
 - `th device list` — usbmuxd + devicectl view. `pymobiledevice3 usbmux list` for raw details.
 - Screenshots via VNC are the reliable path; `pymobiledevice3 developer dvt screenshot` needs the developer disk image / tunnel.
 - The phone is the user's personal test device: don't change settings beyond what a test needs, and don't uninstall other apps.
+
+
+## `iphone-usb`: iPhone Mirroring (no jailbreak) — added 2026-09-20, not yet paired here
+Driver: `harness/mirror.py` on top of [phone-harness](https://github.com/ShawnPana/phone-harness) (MIT, `vendor/phone-harness`,
+pip-installed into `.venv`): `screencapture -l <window>` for frames, CGEvent HID taps/drags/keys, Apple Vision OCR for text.
+Shortcuts inside the mirror: ⌘1 Home, ⌘2 App Switcher, ⌘3 Spotlight (used by `th --target iphone-usb launch`).
+Requirements (user's hands): macOS 15+, iOS 18+, **same Apple ID on Mac and phone**, Bluetooth + Wi-Fi on both, phone near
+the Mac and **locked**, iPhone Mirroring paired once (open it → Continue → confirm on the phone → enter the Mac password).
+The terminal (iTerm) needs Accessibility + Screen Recording. Check with `th device mirror-status` and `th --target iphone-usb shot`.
+Status on 2026-09-20: iPhone Mirroring on this iMac looks for "James Woglom's iPhone" (the phone on the user's Apple ID),
+not the jailbroken test phone ("HackiPhone"), and reported "Unable to Connect" — the test phone would need to be signed into
+the same Apple ID (or another iPhone used). Installing Trio in this mode needs a signed build (`TH_DEVELOPER_TEAM`, Apple ID in
+Xcode, Developer Mode on the phone) and `devicectl`; onboarding cannot be pre-seeded, so `th flow onboarding-walk` runs (Vision OCR).
+Limits (from phone-harness): unlocking the phone pauses mirroring; OCR sees text not icons; no multi-touch.

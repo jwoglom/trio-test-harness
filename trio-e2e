@@ -1,4 +1,0 @@
-#!/bin/bash
-# One-shot end-to-end Trio test: checkout (PR/branch) → build → install → launch → home → fake devices → report,
-# then hands off to Claude for the PR-specific testing. Flags or interactive prompts (`./trio-e2e --help`).
-exec "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/bin/trio-e2e" "$@"

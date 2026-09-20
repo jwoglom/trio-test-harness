@@ -13,8 +13,27 @@ from .config import CONFIG, ENV_FILE, REPO_ROOT
 from .util import tmp_path, HarnessError, log, run, which, port_open
 
 
+TARGET_ALIASES = {"sim": "sim", "simulator": "sim",
+                  "device": "rooted-vnc", "rooted-vnc": "rooted-vnc", "vnc": "rooted-vnc", "phone": "rooted-vnc",
+                  "iphone-usb": "iphone-usb", "mirror": "iphone-usb", "mirroring": "iphone-usb"}
+TARGETS = ("sim", "rooted-vnc", "iphone-usb")
+
+
+def norm_target(t: str | None) -> str:
+    t = (t or os.environ.get("TH_TARGET") or "sim").lower()
+    if t not in TARGET_ALIASES:
+        raise HarnessError(f"unknown target {t!r} (sim | rooted-vnc | iphone-usb)")
+    return TARGET_ALIASES[t]
+
+
 def get_driver(target: str, *, local: bool = False):
-    """Local driver, or a proxy to `th daemon` when one is running for this target."""
+    """Local driver, or a proxy to `th daemon` when one is running for this target.
+
+    sim        — iOS Simulator (simctl + WebDriverAgent)
+    rooted-vnc — jailbroken iPhone over TrollVNC (+ SSH), screenshots/taps at native resolution
+    iphone-usb — any iPhone through macOS iPhone Mirroring (phone-harness), no root
+    """
+    target = norm_target(target)
     if not local and not os.environ.get("TH_NO_DAEMON"):
         from . import daemon as D
         if D.is_running(target):
@@ -22,14 +41,15 @@ def get_driver(target: str, *, local: bool = False):
     if target == "sim":
         from .sim import SimulatorDriver
         return SimulatorDriver()
-    if target == "device":
+    if target == "rooted-vnc":
         from .vnc import VNCDriver
         return VNCDriver()
-    raise HarnessError(f"unknown target {target!r} (sim|device)")
+    from .mirror import MirrorDriver
+    return MirrorDriver()
 
 
 def _target(args) -> str:
-    return getattr(args, "target", None) or os.environ.get("TH_TARGET") or "sim"
+    return norm_target(getattr(args, "target", None))
 
 
 def _run(args):
@@ -123,8 +143,13 @@ def cmd_install(args):
         drv.install(app)
         log(f"installed {app.name} on simulator {drv.udid}")
         return 0
-    # device
+    # physical phones
     from . import devices as D
+    if target == "iphone-usb" and not (args.appsync or args.trollstore):
+        udid = D.pick_udid()
+        D.devicectl_install(udid, app)      # needs a signed build (TH_DEVELOPER_TEAM) and Developer Mode
+        log(f"installed on device {udid} via devicectl")
+        return 0
     if args.appsync:
         ipa = Path(args.ipa) if args.ipa else (Path(bi.ipa_path) if bi and bi.ipa_path else None)
         if not ipa or not ipa.exists():
@@ -141,7 +166,7 @@ def cmd_install(args):
         url, httpd = D.trollstore_install_url(ipa)
         print(f"\nTrollStore install link (open on the phone):\n  {url}\n")
         if args.open_on_device:
-            drv = get_driver("device")
+            drv = get_driver("rooted-vnc")
             drv.wake()
             log("opening the link in Safari on the phone via VNC")
             drv.open_app_via_spotlight("Safari")
@@ -180,6 +205,10 @@ def cmd_launch(args):
         drv.launch(bundle)
         return 0
     from . import devices as D
+    if target == "iphone-usb":
+        drv = get_driver("iphone-usb"); drv.boot()
+        drv.open_app_via_spotlight(args.app_name)
+        return 0
     if args.preseed_onboarding and D.ssh_ok():
         c = D.ssh_preseed_flags(bundle, {"onboardingCompleted": True, "hasSeenFatProteinOrderChange": True,
                                          "crashlyticsSharingEnabled": False, "telemetrySharingEnabled": False})
@@ -240,7 +269,7 @@ def cmd_device(args):
                 print("devicectl:", d.get("deviceProperties", {}).get("name"), d.get("hardwareProperties", {}).get("udid"),
                       d.get("connectionProperties", {}).get("pairingState"))
     elif args.sub == "vnc-check":
-        drv = get_driver("device")
+        drv = get_driver("rooted-vnc")
         w, h = drv.screen_size()
         print(f"connected; framebuffer {w}x{h}")
         p = Path(args.out or str(tmp_path("vnc-check.png"))); drv.screenshot(p); print(p)
@@ -252,10 +281,13 @@ def cmd_device(args):
         except KeyboardInterrupt:
             pass
         httpd.shutdown()
+    elif args.sub == "mirror-status":
+        from .mirror import MirrorDriver
+        print(json.dumps(MirrorDriver().status(), default=str))
     elif args.sub == "wake":
-        get_driver("device").wake()
+        get_driver("rooted-vnc").wake()
     elif args.sub == "unlock":
-        ok = get_driver("device").unlock(); print("unlocked" if ok else "still locked"); return 0 if ok else 1
+        ok = get_driver("rooted-vnc").unlock(); print("unlocked" if ok else "still locked"); return 0 if ok else 1
     elif args.sub == "ssh":
         cp = D.ssh_run(" ".join(args.cmd), check=False, timeout=args.timeout)
         sys.stdout.write(cp.stdout); sys.stderr.write(cp.stderr); return cp.returncode
@@ -282,7 +314,7 @@ def cmd_daemon(args):
     elif args.sub == "stop":
         D.stop(t); print(f"daemon[{t}] stopped")
     elif args.sub == "status":
-        for tt in ("sim", "device"):
+        for tt in TARGETS:
             print(f"{tt}: {'running' if D.is_running(tt) else 'not running'}")
     elif args.sub == "restart":
         D.stop(t); time.sleep(0.5); D.start(t); print(f"daemon[{t}] restarted")
@@ -493,9 +525,12 @@ def cmd_test(args):
             if args.preseed:
                 F.preseed_onboarding(drv.app_data_container(bundle))
             drv.launch(bundle)
+        elif target == "rooted-vnc":
+            drv.unlock()
+            from . import devices as D
+            D.ssh_launch(bundle)
         else:
-            drv.wake()
-            drv.open_app_via_spotlight("Trio")
+            drv.boot(); drv.open_app_via_spotlight("Trio")
         time.sleep(4)
         F.step(r, drv, "launch", "Trio launched")
         F.dismiss_dialogs(drv, ["OK", "Continue", "Dismiss"])
@@ -524,7 +559,7 @@ def cmd_test(args):
 
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="trio-test-harness", description="Trio test harness toolbox (short alias: th)")
-    p.add_argument("--target", choices=["sim", "device"], help="default: $TH_TARGET or sim")
+    p.add_argument("--target", help="sim | rooted-vnc | iphone-usb (aliases: device=rooted-vnc, mirror=iphone-usb; default $TH_TARGET or sim)")
     sp = p.add_subparsers(dest="cmd", required=True)
 
     sp.add_parser("doctor", help="check the environment").set_defaults(fn=cmd_doctor)
@@ -568,7 +603,7 @@ def build_parser() -> argparse.ArgumentParser:
     s.set_defaults(fn=cmd_sim)
 
     dv = sp.add_parser("device", help="physical iPhone utilities"); ds = dv.add_subparsers(dest="sub", required=True)
-    ds.add_parser("list"); ds.add_parser("wake"); ds.add_parser("unlock"); ds.add_parser("diag"); ds.add_parser("vnc-restart"); ds.add_parser("apps")
+    ds.add_parser("list"); ds.add_parser("wake"); ds.add_parser("unlock"); ds.add_parser("mirror-status"); ds.add_parser("diag"); ds.add_parser("vnc-restart"); ds.add_parser("apps")
     sshp = ds.add_parser("ssh", help="run a command on the phone over SSH"); sshp.add_argument("cmd", nargs="+"); sshp.add_argument("--timeout", type=int, default=60)
     kp = ds.add_parser("kill"); kp.add_argument("name")
     vc = ds.add_parser("vnc-check"); vc.add_argument("--out")

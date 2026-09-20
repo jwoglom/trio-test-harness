@@ -7,7 +7,7 @@ description: Configure Trio's fake devices — the Glucose Simulator CGM and the
 
 `cd ~/repos/trio-test-harness`; Trio must be on its home screen (see `trio-launch`).
 
-Automated: `th --target <sim|device> flow add-cgm-sim` then `th --target <sim|device> flow add-pump-sim`
+Automated: `th --target <sim|rooted-vnc|iphone-usb> flow add-cgm-sim` then `th --target <sim|rooted-vnc|iphone-usb> flow add-pump-sim`
 (both use the home shortcuts when no device is configured, else Settings ▸ Devices). Then
 `th shot --name home-with-devices`: expect a glucose bubble (e.g. 77–120 mg/dL, wave pattern) and "200 U / 100 %".
 

@@ -26,7 +26,7 @@ from .driver import Driver, UINode
 from .util import HarnessError, log
 
 SOCK_DIR = REPO_ROOT / "runs" / ".tmp"
-ALLOWED_PRIVATE = {"unlock", "is_dark", "open_app_via_spotlight", "long_press", "power", "paste_text", "wake", "boot", "launch",
+ALLOWED_PRIVATE = {"unlock", "is_dark", "status", "spotlight", "open_app_via_spotlight", "long_press", "power", "paste_text", "wake", "boot", "launch",
                    "terminate", "install", "uninstall", "is_installed", "open_url", "app_data_container",
                    "defaults_write", "ensure_wda", "describe_point"}
 
@@ -79,6 +79,9 @@ def _make_driver(target: str) -> Driver:
     if target == "sim":
         from .sim import SimulatorDriver
         return SimulatorDriver()
+    if target == "iphone-usb":
+        from .mirror import MirrorDriver
+        return MirrorDriver()
     from .vnc import VNCDriver
     return VNCDriver()
 
@@ -159,7 +162,7 @@ class RemoteDriver(Driver):
 
     def __init__(self, target: str, timeout: float = 600.0):
         self.target = target
-        self.kind = "sim" if target == "sim" else "device"
+        self.kind = {"sim": "sim", "iphone-usb": "mirror"}.get(target, "device")
         self._timeout = timeout
 
     def _call(self, method: str, *args, **kwargs):

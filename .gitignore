@@ -9,5 +9,6 @@ build/
 *.app
 .idb/
 .env
-vendor/
+vendor/WebDriverAgent/
+vendor/phone-harness/
 Trio/

@@ -5,15 +5,15 @@ description: Chained end-to-end Trio test workflow — checkout (Trio or submodu
 
 # trio-test — the chain
 
-Fastest route: the `trio-e2e` skill (`./trio-e2e --mode simulator|vnc --pr <URL>`) runs stages 1–6 in one go and
+Fastest route: the `trio-test-e2e` skill (`./trio-test-e2e --mode simulator|rooted-vnc|iphone-usb --pr <URL>`) runs stages 1–6 in one go and
 prints where the run is. Use the per-stage skills when the user wants only one part, when the script stops, or to redo a stage.
 
 | # | Stage | Skill | Command |
 |---|---|---|---|
-| 0 | Environment | `trio-sim-setup` / `trio-phone-setup` | `th doctor`, `th sim boot`, `th wda start`, `th --target device device unlock`, daemons |
+| 0 | Environment | `trio-sim-setup` / `trio-phone-setup` | `th doctor`, `th sim boot`, `th wda start`, `th --target rooted-vnc device unlock`, daemons |
 | 1 | Checkout | `trio-checkout` | `th build --pr <URL> --checkout-only` (Trio or submodule PR; `--trio-branch` if needed) |
-| 2 | Build | `trio-build` | `th --target sim build --pr <URL>` / `th --target device build --pr <URL> --trollstore` |
-| 3 | Install | `trio-install` | `th --target sim install --reinstall` / `th --target device install --appsync` |
+| 2 | Build | `trio-build` | `th --target sim build --pr <URL>` / `th --target rooted-vnc build --pr <URL> --trollstore` |
+| 3 | Install | `trio-install` | `th --target sim install --reinstall` / `th --target rooted-vnc install --appsync` |
 | 4 | Launch + home | `trio-launch` | `th --target … launch --preseed-onboarding` or `flow onboarding-walk`; `th flow at-home` |
 | 5 | Fake devices | `trio-fake-devices` | `th flow add-cgm-sim`, `th flow add-pump-sim` |
 | 6 | Plan | `trio-pr-plan` | read `runs/<run>/pr.md`, `gh pr view/diff`, write numbered checks |

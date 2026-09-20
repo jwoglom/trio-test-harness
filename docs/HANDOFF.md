@@ -10,11 +10,16 @@ save screenshots, and deliver them as artifacts: an HTML page for the user, and 
 First validation target: Trio launches and reaches the home screen on **both** targets, with the fake CGM ("Glucose Simulator")
 and fake pump ("Pump Simulator") configured.
 
+## Connection modes (2026-09-20)
+`simulator`, `rooted-vnc` (jailbroken phone: TrollVNC + SSH + AppSync; verified end to end) and `iphone-usb` (any iPhone via
+macOS iPhone Mirroring using phone-harness; driver written and window capture verified, pairing not completed — see
+`docs/phone-setup.md`). `--target device` still works as an alias of `rooted-vnc`.
+
 ## Entry points (2026-09-20)
-- `./trio-e2e [--mode simulator|vnc] [--pr URL | --branch B] [--trio-branch B] [--onboarding preseed|walk] [--skip-build]
+- `./trio-test-e2e [--mode simulator|rooted-vnc|iphone-usb] [--pr URL | --branch B] [--trio-branch B] [--onboarding preseed|walk] [--skip-build]
   [--no-smoke] [--comment ask|auto|never] [--artifact-url URL] [--agent|--no-agent] [--yes]` — prompts for anything missing on
   a TTY. Submodule PRs are resolved via `.gitmodules` (verified with jwoglom/TandemKit#395 → Trio feat/tandem).
-- Skills: `trio-e2e` (thin wrapper around the script) and `trio-test` (the chain), plus one skill per stage.
+- Skills: `trio-test-e2e` (thin wrapper around the script) and `trio-test` (the chain), plus one skill per stage.
 - `TRIO_REPO` on this machine is the user's `~/repos/Trio` (their choice); PR/branch checkouts happen there (detached HEAD,
   `git clean -fd` keeps ignored files). Elsewhere the default is `<harness>/Trio`.
 
@@ -37,7 +42,7 @@ and fake pump ("Pump Simulator") configured.
 - **Simulator** (iPhone 17 / iOS 26.3, Xcode 26.3): build → install → launch with pre-seeded onboarding → home →
   Glucose Simulator + Pump Simulator via the home shortcuts, driven through WebDriverAgent. Report artifact published.
 - **Phone** (iOS 18.6.1, rootless jailbreak): unsigned build + codesign fake-sign (every dylib incl. Trio.debug.dylib) →
-  `th --target device install --appsync` (24 s) → `uiopen` over SSH → full onboarding via `th flow onboarding-walk`
+  `th --target rooted-vnc install --appsync` (24 s) → `uiopen` over SSH → full onboarding via `th flow onboarding-walk`
   (OCR over VNC; the two Bluetooth alerts and one Next were tapped by hand while the OCR was being fixed) → home →
   Glucose Simulator + Pump Simulator. Crash fixes on the way: Trio.debug.dylib must be signed; Crashlytics dies with
   EXC_GUARD on the jailbroken phone, so `crashlyticsSharingEnabled=false` is pre-seeded by `th launch --preseed-onboarding`.
@@ -73,8 +78,8 @@ and fake pump ("Pump Simulator") configured.
    `harness/flows/trio.py` and in `.claude/skills/trio-ui-drive/SKILL.md`. Watch for: Bluetooth "required" view on the CGM
    screen in the simulator, iOS notification permission alert, version-check alert, the "chapter complete" interstitials.
 4. `th test smoke` end to end, then `th report html` → publish as an Artifact.
-5. Phone: AppSync Unified is installed (2026-09-20, see `docs/phone-setup.md`). Next: `th --target device build --trollstore`
-   (produces the ad-hoc IPA), `th --target device install --appsync`, `th launch --target device`, walk onboarding via OCR.
+5. Phone: AppSync Unified is installed (2026-09-20, see `docs/phone-setup.md`). Next: `th --target rooted-vnc build --trollstore`
+   (produces the ad-hoc IPA), `th --target rooted-vnc install --appsync`, `th launch --target rooted-vnc`, walk onboarding via OCR.
 6. `th report pr` against a real PR (uses `gh --attach`; ask the user before posting).
 
 ## Machine-specific notes (what to redo on the new Mac)

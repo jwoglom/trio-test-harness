@@ -29,7 +29,7 @@ for d in "$HERE"/.claude/skills/*/; do
 done
 
 echo "== th on PATH (optional)"
-echo "   add to your shell rc:  export PATH=\"$HERE/bin:\$PATH\"   (gives you trio-test-harness, trio-e2e and the th alias)"
+echo "   add to your shell rc:  export PATH=\"$HERE/bin:\$PATH\"   (gives you trio-test-harness, trio-test-e2e and the th alias)"
 
 echo
 ./trio-test-harness doctor || true

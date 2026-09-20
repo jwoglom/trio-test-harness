@@ -5,7 +5,8 @@ description: Drive and screenshot the Trio app (or any iOS UI) on the iOS Simula
 
 # trio-ui-drive
 
-`cd ~/repos/trio-test-harness`; `th` = `./trio-test-harness` (short alias `bin/th`). Pick the target with `--target sim|device` (or `export TH_TARGET=…`).
+`cd ~/repos/trio-test-harness`; `th` = `./trio-test-harness` (short alias `bin/th`). Pick the target with `--target sim|rooted-vnc|iphone-usb` (or `export TH_TARGET=…`): simulator (WDA tree), jailbroken
+phone over TrollVNC (tesseract OCR), or any iPhone through iPhone Mirroring (Vision OCR, `th home` = ⌘1, Spotlight = ⌘3).
 **All coordinates are screenshot pixels** (same for both targets). Look at every screenshot before acting.
 
 ## Loop
@@ -21,7 +22,7 @@ description: Drive and screenshot the Trio app (or any iOS UI) on the iOS Simula
 `find "text"` · `wait-text "text"` · `ocr file.png [--find text]`.
 Simulator extras: `th sim defaults <key> <value> [--type -bool]` (UserDefaults of the app), `th sim container` (data path),
 `th sim openurl <url>`, `th sim erase` (factory reset the harness simulator).
-Phone extras: `th device wake` (power + swipe up), `th device vnc-check`, Spotlight launch via `th launch --target device`.
+Phone extras: `th device wake` (power + swipe up), `th device vnc-check`, Spotlight launch via `th launch --target rooted-vnc`.
 The phone driver cannot kill or launch by bundle id: use the App Switcher / Spotlight through taps.
 
 ## Trio facts (dev / 0.8.x)
