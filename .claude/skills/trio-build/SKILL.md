@@ -34,6 +34,10 @@ Branch/PR builds use the harness's own clone (`$TRIO_REPO`, a reference clone of
 - Build output: `build/last-build.json` (app path, bundle id, git sha, submodule shas) — `th run new` copies it into the run.
 - `CI=true` is exported so Trio's SwiftFormat and Crashlytics build phases are skipped; `DEV_BRANCH_WARNING_DISABLED` is set so
   the dev-branch popup does not block automation (same as Trio CI). Derived data: `~/Library/Developer/Xcode/DerivedData/trio-test-harness`.
+- **The checkout is never modified for signing.** Build settings go to `build/override-<target>.xcconfig` inside the harness
+  and are passed with `xcodebuild -xcconfig`. A user-written `ConfigOverride.xcconfig` in the checkout is only *read*: its
+  `DEVELOPER_TEAM` wins over `TH_DEVELOPER_TEAM`, and then the harness leaves team/bundle ids alone. Signed device builds
+  also need that team's Apple ID in Xcode ▸ Settings ▸ Accounts (or an App Store Connect key).
 - Errors: `th build` prints `error:` lines; full log at `build/xcodebuild-<target>.log`. A failing build of the change under test is a test result — report it.
 - `--clean` wipes derived data (slow rebuild). `--configuration Release` if the user wants release behaviour.
 - Watch app / widgets are built with the scheme; nothing extra needed.

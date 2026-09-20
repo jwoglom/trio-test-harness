@@ -47,6 +47,9 @@ Python package `harness/` (CLIs `trio-test-e2e`, `bin/th`), Claude skills in `.c
 - per stage: `trio-sim-setup`, `trio-phone-setup`, `trio-checkout`, `trio-build`, `trio-install`, `trio-launch`,
   `trio-fake-devices`, `trio-pr-plan`, `trio-ui-drive`, `trio-report`
 
+Signing settings never touch the checkout: they are passed with `xcodebuild -xcconfig build/override-<target>.xcconfig`; a
+user-written `ConfigOverride.xcconfig` in the checkout is read for its `DEVELOPER_TEAM` and otherwise left alone.
+
 Source selection: `TRIO_REPO` is the checkout the harness uses (this machine: `~/repos/Trio`; default elsewhere:
 `<harness>/Trio`, cloned on demand with `TH_TRIO_REFERENCE` as a git reference). A PR on a submodule repo is detected
 through `.gitmodules` of the candidate Trio branches (`--trio-branch`, `TH_TRIO_BASE_BRANCH`, dev, feat/tandem, main).

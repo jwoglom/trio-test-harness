@@ -109,8 +109,10 @@ macOS iPhone Mirroring using phone-harness; driver written and window capture ve
   both work. `/source` takes ~10 s; prefer `th find`/`th tap-text`.
 - `/tmp` writes were blocked in the agent sandbox; scratch files go to `runs/.tmp/` (`util.tmp_path`).
 - OCR on the whole 1179×2556 screenshot takes 1–5 s per pass; passes stop at the first hit.
-- Trio's `ConfigOverride.xcconfig` is gitignored in Trio; the harness writes one (team placeholder `TRIOSIMTST` for the
-  simulator, `DEV_BRANCH_WARNING_DISABLED` like CI) unless a non-harness one already exists.
+- The harness never writes into the Trio checkout for signing: settings (placeholder team `TRIOSIMTST` for the simulator,
+  `DEV_BRANCH_WARNING_DISABLED` like CI) live in `build/override-<target>.xcconfig` and reach xcodebuild via `-xcconfig`.
+  A user's own `ConfigOverride.xcconfig` is read for its team and otherwise untouched (older harness versions wrote a marked
+  file into the checkout; it is removed automatically when found).
 - The `--trollstore` install path exists but is irrelevant for an iOS 18 phone; the IPA it builds is what `--appsync` installs.
 
 ## Open questions for the user
