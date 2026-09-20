@@ -48,8 +48,19 @@ class SimulatorDriver(Driver):
         if self.have_idb():
             run(["idb", "connect", self.udid], env=self._env, check=False, quiet=True)
 
+    _idb_ok: bool | None = None
+
     def have_idb(self) -> bool:
-        return bool(which("idb")) and bool(which("idb_companion"))
+        """idb is an optional fallback; only trust it if idb_companion actually runs on this CPU."""
+        if SimulatorDriver._idb_ok is None:
+            ok = bool(which("idb")) and bool(which("idb_companion"))
+            if ok:
+                try:
+                    run(["idb_companion", "--help"], check=False, quiet=True, timeout=20)
+                except (OSError, HarnessError):
+                    ok = False
+            SimulatorDriver._idb_ok = ok
+        return SimulatorDriver._idb_ok
 
     def _idb(self, args: list[str], **kw):
         if not self.have_idb():
