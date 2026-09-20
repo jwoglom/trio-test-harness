@@ -9,7 +9,11 @@ Facts (Trio dev, v0.8.4.x) these flows rely on:
     "Skip Nightscout Setup") -> units & pump -> targets -> basal -> CR -> ISF ->
     delivery limits -> algorithm -> autosens -> SMB -> target behavior ->
     notifications (iOS prompt) -> Bluetooth (in-app alert) -> "Get Started".
-  * Home has a tab bar: Main, History, (+ Add Treatment), Adjustments, Settings.
+  * Home has a tab bar: Main, History, (+ Add Treatment), Adjustments, Settings. With no devices configured the
+    home header shows "Add pump" / "Add CGM" shortcuts (icons at roughly x=12%/50%, y=15% of the screen) that open the
+    same pickers as Settings > Devices. After launch a version-check alert "Update Available" needs OK.
+  * Picker sheets are dismissed by a swipe-down, so do NOT `scroll` inside them; `tap_text` (WDA) scrolls to the row.
+  * The Pump Simulator setup ends on a status page with a "Done" button; the Glucose Simulator needs no setup.
   * Settings -> Devices -> CGM -> Add CGM -> section "Simulator" -> "Glucose Simulator"
     (accessibility id devicePickerItem-simulator).
   * Settings -> Devices -> Insulin Pump -> Add Pump -> "Pump Simulator"
@@ -144,19 +148,38 @@ def _tap_seq(drv: Driver, run: Run | None, labels: list[str], settle: float = 1.
         step(run, drv, lab.lower().replace(" ", "-"), f"after tapping '{lab}'")
 
 
+def _open_picker_from_home(drv: Driver, run: Run | None, label: str, x_frac: float) -> bool:
+    """Use the home-screen 'Add CGM' / 'Add pump' shortcut (icon above the label). Returns False if absent."""
+    if not drv.find(label, exact=True):
+        return False
+    w, h = drv.screen_size()
+    drv.tap(int(w * x_frac), int(h * 0.155))
+    time.sleep(2.5)
+    step(run, drv, label.lower().replace(" ", "-") + "-picker", f"picker opened from the home '{label}' shortcut")
+    return True
+
+
 def add_cgm_simulator(drv: Driver, run: Run | None = None) -> None:
-    open_settings(drv)
-    step(run, drv, "settings", "Settings root")
-    _tap_seq(drv, run, ["Devices", "CGM"])
-    dismiss_dialogs(drv, ["Allow", "OK"])
-    _tap_seq(drv, run, ["Add CGM", "Glucose Simulator"])
+    dismiss_dialogs(drv, ["OK"])
+    if not _open_picker_from_home(drv, run, "Add CGM", 0.5):
+        open_settings(drv)
+        step(run, drv, "settings", "Settings root")
+        _tap_seq(drv, run, ["Devices", "CGM"])
+        dismiss_dialogs(drv, ["Allow", "OK"])
+        drv.tap_text("Add CGM"); time.sleep(2)
+    drv.tap_text("Glucose Simulator", exact=True)   # WDA scrolls the sheet to the row; never swipe inside sheets
+    time.sleep(2.5)
     dismiss_dialogs(drv, ["Continue", "Done", "OK", "Save"])
-    step(run, drv, "cgm-simulator-added", "CGM screen after adding Glucose Simulator")
+    step(run, drv, "cgm-simulator-added", "After adding Glucose Simulator")
 
 
 def add_pump_simulator(drv: Driver, run: Run | None = None) -> None:
-    open_settings(drv)
-    _tap_seq(drv, run, ["Devices", "Insulin Pump", "Add Pump", "Pump Simulator"])
+    dismiss_dialogs(drv, ["OK"])
+    if not _open_picker_from_home(drv, run, "Add pump", 0.125):
+        open_settings(drv)
+        _tap_seq(drv, run, ["Devices", "Insulin Pump", "Add Pump"])
+    drv.tap_text("Pump Simulator", exact=True)
+    time.sleep(3)
     # MockPumpManager setup: keep defaults and continue until it is dismissed
     for _ in range(6):
         lab = _visible(drv, ["Continue", "Done", "Save", "OK"])

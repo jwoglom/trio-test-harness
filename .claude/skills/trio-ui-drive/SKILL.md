@@ -33,6 +33,11 @@ The phone driver cannot kill or launch by bundle id: use the App Switcher / Spot
   (writes `Documents/onboardingCompleted.plist` into the app container).
 - **Home**: tab bar Main · History · (+) Add Treatment · Adjustments · Settings (on iOS 26 the labels are accessibility-only
   icons: chart, clock, plus, sliders, gear). Loading view ~2 s after launch; a version-check alert may appear (tap OK).
+- **Verified 2026-09-20 (sim)**: launch → "Update Available" alert → `th tap-text OK --exact`; home shows **Add pump** /
+  **Add CGM** shortcuts when nothing is configured — tap the *icon* above the label (label taps do nothing); in the picker use
+  `th tap-text "Glucose Simulator" --exact` (WDA scrolls to it) — a `scroll` swipe dismisses the sheet; Pump Simulator setup ends
+  with **Done**; afterwards the home shows glucose (~77 mg/dL trace) and "200 U / 100 %". Tapping the CGM bubble opens the CGM
+  settings sheet whose bottom button is **Delete CGM** — never tap blindly near the bottom of that sheet.
 - **Fake devices**: Settings ▸ Devices ▸ **CGM** ▸ Add CGM ▸ section "Simulator" ▸ **Glucose Simulator**
   (acc. id `devicePickerItem-simulator`). Settings ▸ Devices ▸ **Insulin Pump** ▸ Add Pump ▸ **Pump Simulator**
   (`devicePickerItem-MockPumpManager`), then Continue/Done through the mock pump setup. Flows: `th flow add-cgm-sim`,
