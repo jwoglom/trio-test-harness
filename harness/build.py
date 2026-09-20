@@ -260,7 +260,10 @@ def build(src: Path, target: str, *, configuration: str = "Debug", clean: bool =
         dest = "generic/platform=iOS"
         products = f"{configuration}-iphoneos"
         if trollstore:
-            signing = ADHOC_SIGNING
+            # Xcode 26 refuses CODE_SIGN_IDENTITY=- for the iphoneos SDK ("Ad Hoc code signing is not allowed"),
+            # so build unsigned and fake-sign afterwards with codesign (AppSync / TrollStore accept that).
+            signing = ["CODE_SIGNING_ALLOWED=NO", "CODE_SIGNING_REQUIRED=NO", "CODE_SIGN_IDENTITY=",
+                       "DEVELOPMENT_TEAM=", "PROVISIONING_PROFILE_SPECIFIER="]
         else:
             signing = ["CODE_SIGN_STYLE=Automatic", f"DEVELOPMENT_TEAM={team}",
                        "-allowProvisioningUpdates", "-allowProvisioningDeviceRegistration"]
@@ -290,6 +293,7 @@ def build(src: Path, target: str, *, configuration: str = "Debug", clean: bool =
         raise HarnessError(f"build succeeded but {app} is missing")
     ipa = None
     if target == "device" and trollstore:
+        fakesign_app(app, src, team, _bundle_id_from_app(app))
         ipa = package_ipa(app, CONFIG.build_dir / "Trio.ipa")
     bi = BuildInfo(target="device-trollstore" if trollstore else target, configuration=configuration,
                    source_dir=str(src), app_path=str(app), bundle_id=_bundle_id_from_app(app),
@@ -298,6 +302,53 @@ def build(src: Path, target: str, *, configuration: str = "Debug", clean: bool =
     bi.save()
     log(f"built {bi.bundle_id} at {app}")
     return bi
+
+
+def _entitlements_for(bundle: Path, src: Path, team: str, app_group: str) -> dict:
+    """Entitlements for a bundle: Trio's own file (with $(APP_GROUP_ID) resolved) for the main app, plus the
+    identifier entitlements Xcode would normally inject. Extensions get just the identifier + app group."""
+    info = plistlib.loads((bundle / "Info.plist").read_bytes())
+    bid = info["CFBundleIdentifier"]
+    ents: dict = {
+        "application-identifier": f"{team}.{bid}",
+        "com.apple.developer.team-identifier": team,
+        "keychain-access-groups": [f"{team}.{bid}"],
+        "get-task-allow": True,
+    }
+    if bundle.suffix == ".app" and bundle.name == "Trio.app":
+        ents.update(plistlib.loads((src / "Trio/Resources/Trio.entitlements").read_bytes()))
+    ents["com.apple.security.application-groups"] = [app_group]
+    def subst(v):
+        if isinstance(v, str):
+            return v.replace("$(APP_GROUP_ID)", app_group).replace("$(TRIO_APP_GROUP_ID)", app_group)
+        if isinstance(v, list):
+            return [subst(x) for x in v]
+        if isinstance(v, dict):
+            return {k: subst(x) for k, x in v.items()}
+        return v
+    return subst(ents)
+
+
+def fakesign_app(app: Path, src: Path, team: str, bundle_id: str) -> None:
+    """codesign -s - (ad-hoc) every nested bundle, innermost first, then the app itself."""
+    app_group = f"group.{bundle_id}.trio-app-group"
+    nested: list[Path] = []
+    for pattern in ("Frameworks/*.framework", "Frameworks/*.dylib", "PlugIns/*.appex", "Watch/*.app/PlugIns/*.appex",
+                    "Watch/*.app/Frameworks/*.framework", "Watch/*.app", "Extensions/*.appex"):
+        nested += sorted(app.glob(pattern))
+    log(f"fake-signing {len(nested)} nested bundles + {app.name} (team {team})")
+    for b in nested + [app]:
+        cmd = ["codesign", "--force", "--sign", "-", "--timestamp=none", "--generate-entitlement-der"]
+        if b.suffix in (".app", ".appex"):
+            ents = _entitlements_for(b, src, team, app_group)
+            ent_file = b.parent / (b.name + ".entitlements.plist") if b is not app else CONFIG.build_dir / "Trio.entitlements.plist"
+            ent_file.write_bytes(plistlib.dumps(ents))
+            cmd += ["--entitlements", str(ent_file)]
+        cmd.append(str(b))
+        run(cmd, quiet=True)
+        if b is not app and b.suffix in (".app", ".appex"):
+            (b.parent / (b.name + ".entitlements.plist")).unlink(missing_ok=True)
+    run(["codesign", "-dv", "--entitlements", "-", str(app)], check=False, quiet=True)
 
 
 def package_ipa(app: Path, out: Path) -> Path:
