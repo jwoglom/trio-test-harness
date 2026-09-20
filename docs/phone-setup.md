@@ -33,6 +33,20 @@ itself declares iOS 18 support). Delivery to the phone: the phone (192.168.14.x)
 `uiopen http://127.0.0.1:8765/file.deb` on the phone → Safari download → Downloads → share sheet → Sileo → GET → Confirm →
 Restart SpringBoard. `uiopen file:///...` does not open Sileo, and `dpkg -i` needs root (no passwordless sudo for mobile).
 
+## Lock screen / passcode
+The phone has a 6-digit passcode and auto-locks quickly. `th device unlock` wakes it (power), swipes up and types
+`TH_DEVICE_PASSCODE` from `.env` (never commit it, never print it). Without the passcode the harness cannot see or drive
+anything once the screen locks; alternatively set Settings ▸ Display & Brightness ▸ Auto-Lock to Never on this test phone.
+`uiopen` works while locked but the app is not visible until unlocked. Screens that are all black (mean brightness < 8)
+mean the display is off.
+
+## Build + signing for the phone (verified 2026-09-20)
+Xcode 26 refuses `CODE_SIGN_IDENTITY=-` for the iphoneos SDK ("Ad Hoc code signing is not allowed"), so `th --target device
+build --trollstore` builds with `CODE_SIGNING_ALLOWED=NO` and then fake-signs every nested bundle and the app with
+`codesign --sign -` plus entitlements derived from `Trio/Resources/Trio.entitlements` (app group, HealthKit, NFC, APNs) and
+the identifier entitlements Xcode normally injects (see `harness/build.py: fakesign_app`). The resulting `build/Trio.ipa`
+installed through AppSync in ~25 s with `th --target device install --appsync`.
+
 ## SSH access (works, key-based, user `mobile`)
 `th device ssh <cmd>`, `th device diag` (uptime, VNC process/port, top, disk), `th device vnc-restart` (killall
 trollvncserver; it runs as mobile and launchd respawns it), `th device kill Trio`, `th device apps`. `sudo` needs a password,
