@@ -60,57 +60,92 @@ def _run(args):
 # ---------------- doctor -----------------
 
 def cmd_doctor(args):
+    """Environment check, per connection mode. `th doctor` = general + all modes; `th --target X doctor` = that mode only."""
     from . import xcode
     ok = True
+    want = norm_target(getattr(args, "target", None)) if getattr(args, "target", None) else None
 
-    def item(name, good, detail=""):
+    def item(name, good, detail="", *, warn=False):
         nonlocal ok
-        ok &= bool(good)
-        print(f"  [{'ok' if good else 'MISSING'}] {name}{': ' + detail if detail else ''}")
+        if not good and not warn:
+            ok = False
+        tag = "ok" if good else ("warn" if warn else "MISSING")
+        print(f"  [{tag}] {name}{': ' + detail if detail else ''}")
 
-    print("Xcode")
+    print("General")
     app = xcode.find_xcode()
     item("Xcode.app", app, f"{app} (v{xcode.xcode_version(app)})" if app else "run ./bootstrap-xcode.sh")
-    if app:
-        try:
-            rts = xcode.list_runtimes()
-            item("iOS simulator runtime", rts, ", ".join(r["name"] for r in rts) or "th sim install-runtime")
-            wrts = xcode.list_runtimes("watchOS")
-            item("watchOS simulator runtime (Trio scheme embeds a Watch app)", wrts,
-                 ", ".join(r["name"] for r in wrts) or "th sim install-runtime --platform watchOS")
-        except HarnessError as e:
-            item("simctl", False, str(e)[:200])
-    print("Tools")
-    for t in ("idb", "idb_companion", "iproxy", "tesseract", "gh", "git", "xcodes"):
+    for t in ("gh", "git", "tesseract"):
         item(t, which(t), which(t) or "")
+    cp = run(["gh", "auth", "status"], check=False, quiet=True); item("gh auth", cp.returncode == 0)
     try:
-        import vncdotool, pymobiledevice3  # noqa: F401
-        item("python deps (vncdotool, pymobiledevice3)", True)
+        import pymobiledevice3, requests, PIL  # noqa: F401
+        item("python deps", True)
     except ImportError as e:
         item("python deps", False, str(e))
-    print("Trio source")
-    item("TRIO_REPO", CONFIG.trio_repo.exists(), str(CONFIG.trio_repo))
-    print("Physical iPhone")
-    try:
-        from .devices import usbmux_devices
-        devs = usbmux_devices()
-        item("usbmuxd device", devs, "; ".join(f"{d.get('name','?')} iOS {d.get('ios','?')} ({d['connection']}) {d['udid']}" for d in devs) or "none connected")
-    except HarnessError as e:
-        item("usbmuxd", False, str(e))
-    vnc_host = "127.0.0.1" if CONFIG.bool("TH_VNC_VIA_USB") else CONFIG.get("TH_VNC_HOST")
-    vnc_port = int(CONFIG.get("TH_VNC_LOCAL_PORT") if CONFIG.bool("TH_VNC_VIA_USB") else CONFIG.get("TH_VNC_PORT"))
-    print(f"  [info] TrollVNC target {vnc_host}:{vnc_port} ({'iproxy over USB' if CONFIG.bool('TH_VNC_VIA_USB') else 'network'})"
-          f"{' — port currently open' if port_open(vnc_host, vnc_port) else ''}")
-    print("GitHub")
-    cp = run(["gh", "auth", "status"], check=False, quiet=True)
-    item("gh auth", cp.returncode == 0)
-    print("Config")
+    item("TRIO_REPO checkout", (CONFIG.trio_repo / "Trio.xcworkspace").exists() or True, str(CONFIG.trio_repo)
+         + ("" if (CONFIG.trio_repo / "Trio.xcworkspace").exists() else " (cloned on first build)"))
     item("harness.env", ENV_FILE.exists(), str(ENV_FILE) if ENV_FILE.exists() else "cp harness.env.example harness.env")
-    item("TH_DEVELOPER_TEAM (device signing)", CONFIG.get("TH_DEVELOPER_TEAM") or None,
-         CONFIG.get("TH_DEVELOPER_TEAM") or "not set: device builds use --trollstore or fail")
     free = shutil.disk_usage("/").free // 2**30
-    item("disk free", free > 15, f"{free} GB")
-    print("\nsummary:", "all good" if ok else "some items missing (see above)")
+    item("disk free", free >= 12, f"{free} GB (a Trio build needs ~10 GB of derived data)", warn=free >= 8)
+    from . import daemon as DM
+
+    if want in (None, "sim"):
+        print("simulator")
+        if app:
+            try:
+                rts = xcode.list_runtimes(); item("iOS runtime", rts, ", ".join(r["name"] for r in rts) or "th sim install-runtime")
+                wrts = xcode.list_runtimes("watchOS"); item("watchOS runtime (Trio embeds a Watch app)", wrts,
+                                                            ", ".join(r["name"] for r in wrts) or "th sim install-runtime --platform watchOS")
+                devs = [d for d in xcode.list_devices() if d["name"] == CONFIG.get("TH_SIM_NAME")]
+                item(f"simulator '{CONFIG.get('TH_SIM_NAME')}' ({CONFIG.get('TH_SIM_DEVICE')})", devs,
+                     f"{devs[0]['state']} {devs[0]['runtimeIdentifier'].split('.')[-1]}" if devs else "created by th sim boot", warn=not devs)
+            except HarnessError as e:
+                item("simctl", False, str(e)[:160])
+        from . import wda as W
+        xr = W.xctestrun(); item("WebDriverAgent built", xr, xr.name if xr else "th wda build")
+        item("WebDriverAgent running", W.is_running(), "port 8100" if W.is_running() else "th wda start (after th sim boot)", warn=True)
+        item("sim daemon", DM.is_running("sim"), "" if DM.is_running("sim") else "th --target sim daemon start", warn=True)
+        item("idb (optional fallback)", which("idb_companion"), which("idb_companion") or "not needed with WDA", warn=True)
+
+    if want in (None, "rooted-vnc"):
+        print("rooted-vnc (jailbroken iPhone)")
+        from . import devices as D
+        try:
+            devs = D.usbmux_devices()
+            item("usbmuxd device", devs, "; ".join(f"{d.get('name','?')} iOS {d.get('ios','?')} ({d['connection']})" for d in devs) or "plug in + trust")
+        except HarnessError as e:
+            item("usbmuxd", False, str(e)[:120])
+        item("TH_DEVICE_UDID", CONFIG.get("TH_DEVICE_UDID"), "set" if CONFIG.get("TH_DEVICE_UDID") else "blank = only connected device", warn=True)
+        item("iproxy", which("iproxy"), which("iproxy") or "brew install libusbmuxd")
+        item("TH_VNC_PASSWORD", CONFIG.get("TH_VNC_PASSWORD"), "set" if CONFIG.get("TH_VNC_PASSWORD") else "TrollVNC full-access password, in .env")
+        item("TH_DEVICE_PASSCODE", CONFIG.get("TH_DEVICE_PASSCODE"), "set" if CONFIG.get("TH_DEVICE_PASSCODE") else "needed for th device unlock, in .env")
+        try:
+            from .vnc import VNCDriver
+            v = VNCDriver(); w, h = v.screen_size(); v.close()
+            item("TrollVNC connect + auth", True, f"{w}x{h} via {'USB iproxy' if v.via_usb else v.host}")
+        except Exception as e:  # noqa: BLE001
+            item("TrollVNC connect + auth", False, str(e).splitlines()[0][:140])
+        ssh = D.ssh_ok(); item("SSH (mobile@phone, key auth)", ssh, " ".join(D.ssh_target()[1:2]) if ssh else "ssh mobile@<phone> must work without a password")
+        if ssh:
+            cp = D.ssh_run("ls /var/jb/Library/MobileSubstrate/DynamicLibraries/ 2>/dev/null | grep -c AppSyncUnified; command -v uiopen", check=False, timeout=30)
+            item("AppSync Unified on phone", cp.stdout.strip().startswith(("1", "2", "3", "4")), "installd hook present" if cp.returncode == 0 else "see docs/phone-setup.md")
+            item("uiopen on phone", "uiopen" in cp.stdout, "")
+        item("rooted-vnc daemon", DM.is_running("rooted-vnc"), "" if DM.is_running("rooted-vnc") else "th --target rooted-vnc daemon start", warn=True)
+
+    if want in (None, "iphone-usb"):
+        print("iphone-usb (iPhone Mirroring)")
+        try:
+            from .mirror import MirrorDriver
+            st = MirrorDriver().status()
+            item("iPhone Mirroring app running", st["app_running"], "", warn=True)
+            item("mirroring window", bool(st["window"]), str(st["window"]) if st["window"] else "pair iPhone Mirroring first", warn=True)
+        except HarnessError as e:
+            item("phone-harness", False, str(e)[:120], warn=True)
+        item("TH_DEVELOPER_TEAM / ConfigOverride team (signed builds)", CONFIG.get("TH_DEVELOPER_TEAM") or (CONFIG.trio_repo / "ConfigOverride.xcconfig").exists(),
+             "set" if CONFIG.get("TH_DEVELOPER_TEAM") else "needed only for iphone-usb installs (devicectl)", warn=True)
+
+    print("\nsummary:", "ready" if ok else "some required items missing (see MISSING above)")
     return 0 if ok else 1
 
 

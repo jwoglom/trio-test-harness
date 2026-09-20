@@ -17,6 +17,12 @@ if [ ! -x .venv/bin/python ]; then python3 -m venv .venv; fi
 .venv/bin/pip install -q --upgrade pip
 .venv/bin/pip install -q -r requirements.txt
 
+echo "== vendored tools (gitignored; cloned on demand)"
+mkdir -p vendor
+[ -d vendor/phone-harness/.git ] || git clone -q --depth 1 https://github.com/ShawnPana/phone-harness.git vendor/phone-harness   # iphone-usb mode (MIT)
+.venv/bin/pip install -q -e vendor/phone-harness
+[ -d vendor/WebDriverAgent/.git ] || git clone -q --depth 1 https://github.com/appium/WebDriverAgent.git vendor/WebDriverAgent  # simulator input
+
 echo "== Config"
 [ -f harness.env ] || { cp harness.env.example harness.env; echo "created harness.env — edit it (team id, VNC password)"; }
 
@@ -34,4 +40,5 @@ echo "   add to your shell rc:  export PATH=\"$HERE/bin:\$PATH\"   (gives you tr
 echo
 ./trio-test-harness doctor || true
 echo
-echo "Next: ./bootstrap-xcode.sh if Xcode is missing, then: th build && th install && th test smoke"
+echo "Next: ./bootstrap-xcode.sh if Xcode is missing; put TH_VNC_HOST/TH_VNC_PASSWORD/TH_DEVICE_PASSCODE in .env for the phone;"
+echo "      then ./trio-test-harness doctor and ./trio-test-e2e --mode simulator --pr <url>"
