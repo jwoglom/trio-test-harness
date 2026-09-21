@@ -67,9 +67,9 @@ def _tsv_uncached(path: Path, upscale: float, invert, psm: int) -> list[OCRHit]:
     cp = run(["tesseract", str(src), "stdout", "--psm", str(psm), "tsv"], quiet=True,
              env={"OMP_THREAD_LIMIT": "1"})
     hits: list[OCRHit] = []
-    for row in csv.DictReader(io.StringIO(cp.stdout), delimiter="\t"):
+    for row in csv.DictReader(io.StringIO(cp.stdout), delimiter="\t", quoting=csv.QUOTE_NONE):
         txt = (row.get("text") or "").strip()
-        if not txt:
+        if not txt or "\n" in txt or "\t" in txt or len(txt) > 80:
             continue
         try:
             conf = float(row.get("conf", "0"))

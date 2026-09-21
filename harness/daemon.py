@@ -114,7 +114,20 @@ def serve(target: str) -> None:
     signal.signal(signal.SIGINT, _shutdown)
 
     while True:
-        conn, _ = srv.accept()
+        try:
+            conn, _ = srv.accept()
+        except OSError as e:
+            log(f"daemon[{target}] accept failed: {e}"); time.sleep(0.2); continue
+        try:
+            _serve_connection(conn, drv, target, _shutdown)
+        except (BrokenPipeError, ConnectionResetError, OSError) as e:
+            log(f"daemon[{target}] client connection dropped: {e}")   # a killed CLI must not kill the daemon
+        except SystemExit:
+            raise
+
+
+def _serve_connection(conn, drv, target, _shutdown) -> None:
+    if True:
         with conn, conn.makefile("rwb") as f:
             for line in f:
                 try:

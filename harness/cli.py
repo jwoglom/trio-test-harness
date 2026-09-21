@@ -534,8 +534,8 @@ def cmd_flow(args):
         F.add_pump_simulator(drv, r)
     elif args.sub == "back-home":
         F.back_to_home(drv)
-    elif args.sub == "dismiss":
-        print(F.dismiss_dialogs(drv))
+    elif args.sub in ("dismiss", "settle"):
+        print(F.settle(drv, r))
     elif args.sub == "at-home":
         ok = F.at_home(drv); print("home" if ok else "not home"); return 0 if ok else 1
     return 0
@@ -691,7 +691,7 @@ def build_parser() -> argparse.ArgumentParser:
     rp.set_defaults(fn=cmd_report)
 
     fl = sp.add_parser("flow", help="Trio UI flows"); fls = fl.add_subparsers(dest="sub", required=True)
-    for name in ("onboarding-walk", "add-cgm-sim", "add-pump-sim", "back-home", "dismiss", "at-home"):
+    for name in ("onboarding-walk", "add-cgm-sim", "add-pump-sim", "back-home", "dismiss", "settle", "at-home"):
         x = fls.add_parser(name); x.add_argument("--run")
     fl.set_defaults(fn=cmd_flow)
 

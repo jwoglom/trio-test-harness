@@ -32,6 +32,11 @@ from ..util import tmp_path, HarnessError, log
 NEXT_LABELS = ["Get Started", "Skip Nightscout Setup", "Next", "Continue", "Done", "OK"]
 PERMISSION_LABELS = ["Allow", "Allow While Using App", "OK", "Don't Allow"]
 HOME_MARKERS = ["Adjustments", "History", "Add Treatment", "Settings"]
+# Buttons that close interstitials Trio/iOS may throw up at any time (version check, permissions, notices).
+# Deliberately excludes Cancel/Close/Back so we never dismiss a sheet the test itself opened.
+INTERSTITIAL_BUTTONS = ["OK", "Allow", "Allow While Using App", "Continue", "Not Now", "Later", "Dismiss", "Got it", "Got It"]
+# Alert titles worth logging when seen
+INTERSTITIAL_TITLES = ["Update Available", "Would Like to", "Bluetooth Required", "Low Glucose", "High Glucose"]
 
 
 def step(run: Run | None, drv: Driver, action: str, note: str = "", *, pause: float = 0.0) -> Path | None:
@@ -153,23 +158,66 @@ def walk_onboarding(drv: Driver, run: Run | None = None, *, max_steps: int = 70,
     raise HarnessError("onboarding: exceeded max steps")
 
 
-def dismiss_dialogs(drv: Driver, labels: list[str] | None = None, rounds: int = 3) -> int:
-    """Tap through blocking alerts (dev-branch warning, version checker, permissions)."""
+def _alert_button(drv: Driver, shot: Path, labels: list[str]):
+    """An interstitial button on screen: exact isolated word, in the middle band (alerts) — not the tab bar / nav."""
+    from PIL import Image
+    h_img = Image.open(shot).height
+    nodes = drv.ui_tree()
+    if nodes:
+        for lab in labels:
+            hits = [n for n in nodes if n.matches(lab, exact=True) and n.w > 0 and h_img * 0.15 < n.center[1] < h_img * 0.9]
+            if hits:
+                return lab, hits[0].center
+        return None
+    for lab in labels:
+        hits = [h for h in _ocr_hits(drv, shot, lab) if h_img * 0.15 < h.center[1] < h_img * 0.9]
+        if hits:
+            return lab, hits[0].center
+    return None
+
+
+def settle(drv: Driver, run: Run | None = None, *, rounds: int = 4, labels: list[str] | None = None) -> int:
+    """Clear whatever interstitial is showing (update alert, permission prompt, notice) until the screen is stable.
+
+    Each round: screenshot → find an alert button → tap it → screenshot again; stop when nothing is found or the
+    screen did not change. Returns the number of dismissals. Safe to call before any interaction.
+    """
+    import hashlib
+    labels = labels or INTERSTITIAL_BUTTONS
     n = 0
-    for _ in range(rounds):
-        lab = _visible(drv, labels or ["Allow", "OK", "Continue", "Dismiss", "Close", "Got it"])
-        if not lab:
-            break
-        drv.tap_text(lab, exact=True)
+    prev_hash = None
+    for i in range(rounds):
+        shot = drv.screenshot(tmp_path(f"settle-{i}.png"))
+        digest = hashlib.md5(shot.read_bytes()).hexdigest()
+        found = _alert_button(drv, shot, labels)
+        if not found:
+            return n
+        if digest == prev_hash:
+            log(f"settle: tapping {found[0]!r} did not change the screen; giving up")
+            return n
+        lab, (x, y) = found
+        titles = [t for t in INTERSTITIAL_TITLES if _ocr_hits(drv, shot, t) or drv.find(t)] if not drv.ui_tree() else \
+                 [t for t in INTERSTITIAL_TITLES if drv.find(t)]
+        if run:
+            run.log_step(f"interstitial-{i}", f"dismissed with '{lab}'" + (f" ({', '.join(titles)})" if titles else ""), shot)
+        log(f"settle: '{lab}' at {x},{y}" + (f" [{', '.join(titles)}]" if titles else ""))
+        drv.tap(x, y)
         n += 1
-        time.sleep(0.8)
+        prev_hash = digest
+        time.sleep(1.0)
     return n
+
+
+def dismiss_dialogs(drv: Driver, labels: list[str] | None = None, rounds: int = 3) -> int:
+    """Backwards-compatible alias of settle()."""
+    return settle(drv, rounds=rounds, labels=labels)
 
 
 # ---------------- settings navigation -----------------
 
 def open_settings(drv: Driver) -> None:
     """Select the Settings tab (last tab). Prefer the tab-bar node when several 'Settings' exist."""
+    settle(drv)
     nodes = [n for n in drv.find("Settings", exact=True) if n.w > 0]
     if nodes:
         w, h = drv.screen_size()
@@ -180,10 +228,16 @@ def open_settings(drv: Driver) -> None:
     time.sleep(1.0)
 
 
-def _tap_seq(drv: Driver, run: Run | None, labels: list[str], settle: float = 1.2) -> None:
+def _tap_seq(drv: Driver, run: Run | None, labels: list[str], pause: float = 1.2) -> None:
+    """Tap labels in order; before each tap clear interstitials, and retry once if the label is not found."""
     for lab in labels:
-        drv.tap_text(lab)
-        time.sleep(settle)
+        settle(drv, run)
+        try:
+            drv.tap_text(lab)
+        except LookupError:
+            time.sleep(1.0); settle(drv, run)
+            drv.tap_text(lab)
+        time.sleep(pause)
         step(run, drv, lab.lower().replace(" ", "-"), f"after tapping '{lab}'")
 
 
@@ -198,8 +252,14 @@ def _open_picker_from_home(drv: Driver, run: Run | None, label: str, x_frac: flo
     return True
 
 
+def devices_configured(drv: Driver) -> bool:
+    """True when the home header no longer offers Add CGM / Add pump (both devices already set up)."""
+    return not drv.find("Add CGM", exact=True) and not drv.find("Add pump", exact=True) \
+        and bool(drv.find("Main", exact=True) or drv.find("Settings", exact=True))
+
+
 def add_cgm_simulator(drv: Driver, run: Run | None = None) -> None:
-    dismiss_dialogs(drv, ["OK"])
+    settle(drv, run)
     if not _open_picker_from_home(drv, run, "Add CGM", 0.5):
         open_settings(drv)
         step(run, drv, "settings", "Settings root")
@@ -213,7 +273,7 @@ def add_cgm_simulator(drv: Driver, run: Run | None = None) -> None:
 
 
 def add_pump_simulator(drv: Driver, run: Run | None = None) -> None:
-    dismiss_dialogs(drv, ["OK"])
+    settle(drv, run)
     if not _open_picker_from_home(drv, run, "Add pump", 0.125):
         open_settings(drv)
         _tap_seq(drv, run, ["Devices", "Insulin Pump", "Add Pump"])

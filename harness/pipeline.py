@@ -138,9 +138,10 @@ def stage_launch(args, bi, run):
             args.onboarding = "walk"
     time.sleep(6)
     F.step(run, drv, "launch", "Trio launched")
-    F.dismiss_dialogs(drv, ["OK"])
+    F.settle(drv, run)
     if args.onboarding == "walk" and not F.at_home(drv):
         F.walk_onboarding(drv, run)
+    F.settle(drv, run)
     if not F.at_home(drv):
         F.step(run, drv, "not-home", "Home screen not detected after launch")
         raise HarnessError("Trio did not reach the home screen; see the run screenshots")
@@ -151,10 +152,18 @@ def stage_launch(args, bi, run):
 def stage_smoke(args, drv, run):
     from .flows import trio as F
     log("== stage: smoke (fake CGM + pump)")
-    F.add_cgm_simulator(drv, run)
-    time.sleep(1.5)
-    F.add_pump_simulator(drv, run)
+    F.settle(drv, run)
+    if F.devices_configured(drv):
+        run.log_step("devices-present", "CGM and pump already configured from a previous install (app data kept); skipping setup")
+        F.step(run, drv, "home-with-devices", "Home with devices already configured")
+        return
+    if drv.find("Add CGM", exact=True):
+        F.add_cgm_simulator(drv, run)
+        time.sleep(1.5)
+    if drv.find("Add pump", exact=True):
+        F.add_pump_simulator(drv, run)
     time.sleep(4)
+    F.settle(drv, run)
     F.step(run, drv, "home-with-devices", "Home with Glucose Simulator + Pump Simulator")
 
 
