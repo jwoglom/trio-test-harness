@@ -234,6 +234,9 @@ class RemoteDriver(Driver):
     def swipe(self, x1, y1, x2, y2, *, duration: float = 0.3):
         return self._call("swipe", x1, y1, x2, y2, duration=duration)
 
+    def drag(self, x1, y1, x2, y2, *, hold: float = 0.8, duration: float = 0.8, settle: float = 0.5):
+        return self._call("drag", x1, y1, x2, y2, hold=hold, duration=duration, settle=settle)
+
     def type_text(self, text):
         return self._call("type_text", text)
 

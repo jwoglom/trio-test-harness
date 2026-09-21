@@ -158,6 +158,16 @@ class SimulatorDriver(Driver):
         self._idb(["ui", "swipe", str(int(x1 / s)), str(int(y1 / s)), str(int(x2 / s)), str(int(y2 / s)),
                    "--duration", str(duration)], quiet=True)
 
+    def drag(self, x1: int, y1: int, x2: int, y2: int, *, hold: float = 0.8, duration: float = 0.8, settle: float = 0.5) -> None:
+        self._need_input_backend()
+        s = self.scale
+        if self.wda:
+            # WDA's dragfromtoforduration presses for `duration` seconds before moving: a long-press drag.
+            self.wda.drag(x1 / s, y1 / s, x2 / s, y2 / s, hold)
+            return
+        self._idb(["ui", "swipe", str(int(x1 / s)), str(int(y1 / s)), str(int(x2 / s)), str(int(y2 / s)),
+                   "--duration", str(hold + duration)], quiet=True)
+
     def type_text(self, text: str) -> None:
         self._need_input_backend()
         if self.wda:

@@ -25,7 +25,9 @@ CURRENT = REPO_ROOT / "runs" / ".current"
 
 class Run:
     def __init__(self, path: Path):
-        self.path = path
+        # Always absolute: `th shot --run runs/<dir>` (relative) used to log screenshots as `runs/<dir>/screenshots/…`,
+        # which the report then failed to find under the run and drew as empty black cards.
+        self.path = Path(path).expanduser().resolve()
         self.shots = path / "screenshots"
         self.shots.mkdir(parents=True, exist_ok=True)
         self.meta_path = path / "run.json"
@@ -74,11 +76,29 @@ class Run:
     def log_step(self, action: str, note: str = "", screenshot: Path | None = None, **extra) -> dict:
         rec = {"t": dt.datetime.now().isoformat(timespec="seconds"), "action": action, "note": note}
         if screenshot:
-            rec["screenshot"] = str(Path(screenshot).relative_to(self.path)) if Path(screenshot).is_absolute() else str(screenshot)
+            rec["screenshot"] = self.rel_shot(screenshot)
         rec.update(extra)
         with open(self.steps_path, "a") as fh:
             fh.write(json.dumps(rec) + "\n")
         return rec
+
+    def rel_shot(self, screenshot: Path | str) -> str:
+        """Screenshot path as stored in steps.jsonl: relative to the run directory (`screenshots/001-x.png`)."""
+        sp = Path(screenshot).expanduser()
+        try:
+            return str(sp.resolve().relative_to(self.path))
+        except ValueError:
+            return str(sp) if not sp.is_absolute() else f"screenshots/{sp.name}"
+
+    def shot_file(self, step: dict) -> Path | None:
+        """Resolve a step's screenshot to an existing file (run-relative, repo-relative or absolute), else None."""
+        rel = step.get("screenshot")
+        if not rel:
+            return None
+        for cand in (self.path / rel, REPO_ROOT / rel, Path(rel), self.shots / Path(rel).name):
+            if cand.exists():
+                return cand
+        return None
 
     def finish(self, status: str, summary: str = "") -> None:
         self.update_meta(status=status, summary=summary, finished=dt.datetime.now().isoformat(timespec="seconds"))
@@ -107,8 +127,8 @@ def render_html(run: Run, out: Path | None = None) -> Path:
     cards = []
     for s in steps:
         img = ""
-        if s.get("screenshot") and (run.path / s["screenshot"]).exists():
-            img = f'<img src="{_thumb_b64(run.path / s["screenshot"])}" alt="{html.escape(s.get("note",""))}" loading="lazy">'
+        if (shot := run.shot_file(s)) is not None:
+            img = f'<img src="{_thumb_b64(shot)}" alt="{html.escape(s.get("note",""))}" loading="lazy">'
         cards.append(
             f'<figure><div class="frame">{img}</div><figcaption><b>{html.escape(s.get("action",""))}</b>'
             f'<span>{html.escape(s.get("note",""))}</span><time>{html.escape(s.get("t","")[11:19])}</time></figcaption></figure>')
@@ -167,7 +187,7 @@ def _gh(args: list[str], **kw) -> str:
 
 def select_steps(run: Run, max_shots: int | None) -> list[dict]:
     """Steps with screenshots, evenly thinned to max_shots (first and last always kept)."""
-    steps = [s for s in run.steps() if s.get("screenshot") and (run.path / s["screenshot"]).exists()]
+    steps = [s for s in run.steps() if run.shot_file(s) is not None]
     limit = min(max_shots or MAX_ATTACH, MAX_ATTACH)
     if len(steps) <= limit:
         return steps
@@ -207,8 +227,9 @@ def render_markdown(run: Run, *, columns: int = 3, max_shots: int | None = None,
             row = steps[i:i + columns]
             cells = []
             for s in row:
-                rel = s["screenshot"]
-                files.append(run.path / rel)
+                shot = run.shot_file(s)
+                rel = run.rel_shot(shot)
+                files.append(shot)
                 cap = html.escape(f"{s.get('action','')}: {s.get('note','')}".strip(": "))
                 cells.append(f"![{cap}](./{rel})<br><sub>{cap}</sub>")
             cells += [" "] * (columns - len(row))

@@ -59,6 +59,11 @@ class Driver:
     # input
     def tap(self, x: int, y: int, *, duration: float = 0.0) -> None: raise NotImplementedError
     def swipe(self, x1: int, y1: int, x2: int, y2: int, *, duration: float = 0.3) -> None: raise NotImplementedError
+    def drag(self, x1: int, y1: int, x2: int, y2: int, *, hold: float = 0.8, duration: float = 0.8, settle: float = 0.5) -> None:
+        """Long-press at (x1,y1) for `hold` s, move to (x2,y2) over `duration` s, rest `settle` s, release.
+        This is what SwiftUI .draggable/.dropDestination and reorderable lists need; `swipe` moves immediately.
+        Backends without a native gesture fall back to a slow swipe."""
+        self.swipe(x1, y1, x2, y2, duration=hold + duration)
     def type_text(self, text: str) -> None: raise NotImplementedError
     def key(self, name: str) -> None: raise NotImplementedError
     def home(self) -> None: raise NotImplementedError

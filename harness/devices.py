@@ -84,14 +84,34 @@ def trollstore_install_url(ipa: Path) -> tuple[str, socketserver.TCPServer]:
 # ---------------- AppSync Unified path (jailbroken phone, unsigned IPA) -----------------
 
 def appsync_install(ipa: Path, udid: str | None = None) -> None:
-    """Install an (ad-hoc signed) IPA through installd; works once AppSync Unified is on the phone."""
+    """Install an (ad-hoc signed) IPA through installd; works once AppSync Unified is on the phone.
+
+    installd on the jailbroken phone wedges if a prior install session was interrupted: the IPA uploads over AFC
+    but installd never answers and pymobiledevice3 hangs for its whole timeout. We restart installd over SSH first
+    (launchd respawns it) and use a shorter timeout with one retry so a wedge costs seconds, not 15 minutes.
+    """
     exe = which("pymobiledevice3")
     if not exe:
         raise HarnessError("pymobiledevice3 missing in .venv")
     cmd = [exe, "apps", "install", str(ipa)]
     if udid:
         cmd += ["--udid", udid]
-    run(cmd, timeout=900, capture=False)
+
+    def _restart_installd() -> None:
+        # best effort: SSH may not be configured; a fresh installd is respawned by launchd within a second
+        try:
+            ssh_run("killall Trio 2>/dev/null; killall -9 installd streaming_zip_conduit 2>/dev/null; true",
+                    check=False, timeout=20)
+        except Exception as e:  # noqa: BLE001
+            log(f"appsync_install: could not restart installd over SSH ({e}); continuing")
+
+    _restart_installd()
+    try:
+        run(cmd, timeout=300, capture=False)
+    except HarnessError as e:
+        log(f"appsync_install: first attempt failed ({e}); restarting installd and retrying once")
+        _restart_installd()
+        run(cmd, timeout=300, capture=False)
 
 
 # ---------------- devicectl path (signed builds) -----------------

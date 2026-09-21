@@ -55,6 +55,11 @@ macOS iPhone Mirroring using phone-harness; driver written and window capture ve
 - Phone: RFB connect + VNC auth, screenshot, Home press. `th device list` via pymobiledevice3.
 - OCR: phrase search incl. white-on-blue button text on synthetic iPhone-size images; run/report HTML + markdown rendering.
 - Trio submodules initialized in the user's `~/repos/Trio` (dev branch).
+- **Phone, 2026-09-20 (PR jwoglom/Trio#6)**: full exploratory pass over Settings ▸ Notifications ▸ Live Activity: pickers,
+  menus, help sheets, the new drag-and-drop editor (`th drag` = long-press + move: reorder, drop onto the palette to remove,
+  drag up from the palette to add — all worked over TrollVNC), tap-to-add, trash buttons, persistence across re-entry, and
+  the real Lock Screen Live Activity (`th device lock` twice = lock, then wake to the Lock Screen; `th device unlock` after).
+  Report artifact with 35 screenshots published.
 
 ## Still unverified
 - `th report pr` against a real PR (gh --attach inline uploads; ask before posting).
@@ -114,6 +119,13 @@ macOS iPhone Mirroring using phone-harness; driver written and window capture ve
   A user's own `ConfigOverride.xcconfig` is read for its team and otherwise untouched (older harness versions wrote a marked
   file into the checkout; it is removed automatically when found).
 - The `--trollstore` install path exists but is irrelevant for an iOS 18 phone; the IPA it builds is what `--appsync` installs.
+- **Two Claude Code sessions on one phone collide.** A second session's `trio-test-e2e` relaunched Trio mid-test and, because
+  `runs/.current` is a single shared pointer, redirected the other session's screenshots into its own run. Before driving the
+  phone, `pgrep -fl harness.pipeline` and wait; always pass `--run <dir>` to `th shot`/`run note`/`run finish` when two runs
+  may exist. `Run` paths are now made absolute and step screenshots are stored run-relative (a relative `--run runs/x` used
+  to log `runs/x/screenshots/…`, which the report could not find and drew as black cards).
+- SwiftUI drag & drop needs a long press before the move: use `th drag`, not `th swipe`. On the simulator `drag` maps to
+  WDA's `dragfromtoforduration` (its duration is the press-hold time).
 
 ## Open questions for the user
 - Whether AppSync Unified is acceptable on the phone (user said yes on 2026-09-19) and which package manager is installed.

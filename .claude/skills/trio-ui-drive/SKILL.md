@@ -17,7 +17,7 @@ phone over TrollVNC (tesseract OCR), or any iPhone through iPhone Mirroring (Vis
 3. Repeat. Wait with `th wait-text "<text>" --timeout 30` for slow transitions.
 
 ## Primitives
-`tap X Y [--duration s]` · `swipe X1 Y1 X2 Y2` · `scroll down|up|left|right [--amount 0.5]` · `type "text"` (focus a field first) ·
+`tap X Y [--duration s]` · `swipe X1 Y1 X2 Y2` · `drag X1 Y1 X2 Y2 [--hold 0.8 --duration 0.8 --settle 0.5]` (long-press then move: SwiftUI drag & drop) · `scroll down|up|left|right [--amount 0.5]` · `type "text"` (focus a field first) ·
 `key return|backspace|tab|escape` · `home` · `tap-text "label" [--exact] [--index n]` · `tree [--filter t] [--all]` (sim only) ·
 `find "text"` · `wait-text "text"` · `ocr file.png [--find text]`.
 Simulator extras: `th sim defaults <key> <value> [--type -bool]` (UserDefaults of the app), `th sim container` (data path),

@@ -158,8 +158,12 @@ def cmd_build(args):
                                  submodules=args.submodule, fetch=not args.no_fetch, trio_branch=args.trio_branch)
     if args.checkout_only:
         print(json.dumps(info, indent=2)); return 0
-    bi = B.build(src, _target(args), configuration=args.configuration, clean=args.clean, git_info=info,
-                 trollstore=args.trollstore)
+    target = _target(args)
+    # build() knows sim | device; rooted-vnc / iphone-usb are device builds (the pipeline does the same mapping, and
+    # without it the --trollstore fake-sign + .ipa step was silently skipped for `th --target rooted-vnc build`).
+    build_target = "sim" if target == "sim" else "device"
+    bi = B.build(src, build_target, configuration=args.configuration, clean=args.clean, git_info=info,
+                 trollstore=args.trollstore or target == "rooted-vnc")
     print(json.dumps(bi.__dict__, indent=2))
     return 0
 
@@ -321,6 +325,8 @@ def cmd_device(args):
         print(json.dumps(MirrorDriver().status(), default=str))
     elif args.sub == "wake":
         get_driver("rooted-vnc").wake()
+    elif args.sub == "lock":
+        get_driver("rooted-vnc").power(); print("locked (power pressed); `th device unlock` to come back")
     elif args.sub == "unlock":
         ok = get_driver("rooted-vnc").unlock(); print("unlocked" if ok else "still locked"); return 0 if ok else 1
     elif args.sub == "ssh":
@@ -398,6 +404,10 @@ def cmd_tap(args):
 
 def cmd_swipe(args):
     get_driver(_target(args)).swipe(args.x1, args.y1, args.x2, args.y2, duration=args.duration); return 0
+
+
+def cmd_drag(args):
+    get_driver(_target(args)).drag(args.x1, args.y1, args.x2, args.y2, hold=args.hold, duration=args.duration, settle=args.settle); return 0
 
 
 def cmd_scroll(args):
@@ -638,7 +648,7 @@ def build_parser() -> argparse.ArgumentParser:
     s.set_defaults(fn=cmd_sim)
 
     dv = sp.add_parser("device", help="physical iPhone utilities"); ds = dv.add_subparsers(dest="sub", required=True)
-    ds.add_parser("list"); ds.add_parser("wake"); ds.add_parser("unlock"); ds.add_parser("mirror-status"); ds.add_parser("diag"); ds.add_parser("vnc-restart"); ds.add_parser("apps")
+    ds.add_parser("list"); ds.add_parser("wake"); ds.add_parser("lock", help="press power: lock the phone to screenshot the Lock Screen / Live Activity"); ds.add_parser("unlock"); ds.add_parser("mirror-status"); ds.add_parser("diag"); ds.add_parser("vnc-restart"); ds.add_parser("apps")
     sshp = ds.add_parser("ssh", help="run a command on the phone over SSH"); sshp.add_argument("cmd", nargs="+"); sshp.add_argument("--timeout", type=int, default=60)
     kp = ds.add_parser("kill"); kp.add_argument("name")
     vc = ds.add_parser("vnc-check"); vc.add_argument("--out")
@@ -661,6 +671,8 @@ def build_parser() -> argparse.ArgumentParser:
 
     t = sp.add_parser("tap"); t.add_argument("x", type=int); t.add_argument("y", type=int); t.add_argument("--duration", type=float, default=0); t.set_defaults(fn=cmd_tap)
     sw = sp.add_parser("swipe"); [sw.add_argument(n, type=int) for n in ("x1", "y1", "x2", "y2")]; sw.add_argument("--duration", type=float, default=0.3); sw.set_defaults(fn=cmd_swipe)
+    dg = sp.add_parser("drag", help="long-press then move (SwiftUI drag & drop / reorder)"); [dg.add_argument(n, type=int) for n in ("x1", "y1", "x2", "y2")]
+    dg.add_argument("--hold", type=float, default=0.8); dg.add_argument("--duration", type=float, default=0.8); dg.add_argument("--settle", type=float, default=0.5); dg.set_defaults(fn=cmd_drag)
     sc = sp.add_parser("scroll"); sc.add_argument("direction", choices=["up", "down", "left", "right"]); sc.add_argument("--amount", type=float, default=0.5); sc.set_defaults(fn=cmd_scroll)
     ty = sp.add_parser("type"); ty.add_argument("text"); ty.set_defaults(fn=cmd_type)
     k = sp.add_parser("key"); k.add_argument("name"); k.set_defaults(fn=cmd_key)

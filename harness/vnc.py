@@ -181,6 +181,19 @@ class VNCDriver(Driver):
         c.pointer(x2, y2, 0)
         time.sleep(0.4)
 
+    def drag(self, x1: int, y1: int, x2: int, y2: int, *, hold: float = 0.8, duration: float = 0.8, settle: float = 0.5) -> None:
+        c = self.client
+        steps = max(20, int(duration / 0.02))
+        c.pointer(x1, y1, 0); time.sleep(0.03)
+        c.pointer(x1, y1, LEFT); time.sleep(hold)            # long press until the drag preview lifts
+        for i in range(1, steps + 1):
+            t = i / steps
+            c.pointer(int(x1 + (x2 - x1) * t), int(y1 + (y2 - y1) * t), LEFT)
+            time.sleep(duration / steps)
+        time.sleep(settle)                                    # let the drop target highlight/accept
+        c.pointer(x2, y2, 0)
+        time.sleep(0.5)
+
     def type_text(self, text: str) -> None:
         c = self.client
         for ch in text:
