@@ -163,6 +163,22 @@ def resolve_pr(pr: str) -> tuple[str, int]:
     raise HarnessError(f"cannot parse PR reference {pr!r}")
 
 
+def submodule_override(spec: str, src: Path) -> SubmoduleOverride:
+    """--submodule spec -> override. Besides NAME@REF / NAME=URL#REF, accepts a submodule PR
+    (URL or owner/repo#N) and owner/repo@BRANCH; the submodule is found in .gitmodules by repo name."""
+    pr = re.match(r"^(?:https://github\.com/)?([\w.-]+/[\w.-]+)(?:/pull/|#)(\d+)/?$", spec)
+    branch = None if pr else re.match(r"^([\w.-]+/[\w.-]+)@(.+)$", spec)
+    if not (pr or branch):
+        return SubmoduleOverride.parse(spec)
+    slug, ref = (pr.group(1), f"pr/{pr.group(2)}") if pr else (branch.group(1), branch.group(2))
+    gm = src / ".gitmodules"
+    mods = _parse_gitmodules(gm.read_text()) if gm.exists() else {}
+    for name, m in mods.items():
+        if _repo_name(m.get("url", "")) == _repo_name(slug):
+            return SubmoduleOverride(name, ref)
+    raise HarnessError(f"{slug} is not a submodule of this Trio checkout ({', '.join(sorted(mods)) or 'none'})")
+
+
 def _parse_gitmodules(text: str) -> dict[str, dict]:
     mods: dict[str, dict] = {}
     cur = None
@@ -307,7 +323,7 @@ def prepare_source(*, branch: str | None = None, pr: str | None = None, repo: st
         _git(["submodule", "update", "--init", "--recursive", "--jobs", "6"], src, timeout=3600)
         _check_submodules(src)
     for spec in submodules or []:
-        ov = SubmoduleOverride.parse(spec)
+        ov = submodule_override(spec, src)
         sub = src / ov.name
         if not (sub / ".git").exists() and not (sub / ".git").is_file():
             raise HarnessError(f"submodule {ov.name} not found under {src}")

@@ -108,17 +108,27 @@ repo or hosting. `--mode description` maintains a `<!-- trio-test-harness -->` s
 (home-infra `macos-workers`), triggered by hand from Actions ▸ "Trio e2e (simulator)" ▸ Run workflow, or:
 
 ```
-gh workflow run e2e.yml -R jwoglom/trio-test-harness -f pr=jwoglom/TandemKit#395 -f comment=auto
-gh workflow run e2e.yml -R jwoglom/trio-test-harness -f branch=dev -f agent=none -f runner=vm2
+gh workflow run e2e.yml -R jwoglom/trio-test-harness -f submodules=jwoglom/TandemKit#395 -f post_comment=true
+gh workflow run e2e.yml -R jwoglom/trio-test-harness -f trio=1234 -f agent=none
+gh workflow run e2e.yml -R jwoglom/trio-test-harness -f trio=feat/tandem -f submodules="TandemKit@my-branch"
 ```
 
-Inputs mirror the `trio-test-e2e` flags (pr/branch, trio_branch, submodules, configuration, onboarding, smoke) plus
-`agent` (Claude Code then exercises what the PR describes, headless, prompt in `ci/agent-prompt.md`),
-`agent_instructions`, `agent_minutes`, `comment`, `sim_device`, `sim_runtime`, `xcode` and `runner` (vm1/vm2/either).
-Results: job summary (`ci/summary.py`), artifact with `report.html` + screenshots, and with `comment=auto` a PR comment
-from `trio-test-harness-runner[bot]` (needs that App installed on the PR's owner; skipped otherwise).
-Secrets: `TRIO_E2E_APP_ID`, `TRIO_E2E_APP_KEY` (App with Contents: read, Pull requests: write) and
-`CLAUDE_CODE_OAUTH_TOKEN`. In CI the harness authenticates git with `TH_GIT_TOKEN` over HTTPS instead of SSH.
+- **Trio PR or branch**: a PR link, `owner/repo#N`, a nightscout/Trio PR number, or a branch. Blank means `dev`,
+  or, with a submodule PR, the Trio branch whose `.gitmodules` has that submodule.
+- **Submodules**: PR links / `owner/repo#N` and `NAME@branch` (or `owner/repo@branch`), space-separated.
+- **The run's PR** (read into `pr.md`, and where a comment goes) is the Trio PR, else the first submodule PR.
+  `ci/inputs.py` has the mapping onto `trio-test-e2e` flags.
+- Also: build configuration, skip onboarding, fake CGM/pump, `agent` (Claude Code then exercises what the PR
+  describes, headless; prompt in `ci/agent-prompt.md`), extra agent focus, agent time limit, post PR comment,
+  simulator device/runtime, Xcode.
+
+Results: job summary (`ci/summary.py`), artifact with `report.html` + screenshots, and optionally a PR comment from
+`trio-test-harness-runner[bot]`. That App needs to be installed on the PR's owner (skipped otherwise), and because
+`gh --attach` uploads only work with a user token, its comments carry step captions and a link to the run's
+artifact instead of inline screenshots. Secrets: `TRIO_E2E_APP_ID`, `TRIO_E2E_APP_KEY` (App with Contents: read,
+Pull requests: write) and `CLAUDE_CODE_OAUTH_TOKEN`. In CI the harness authenticates git with `TH_GIT_TOKEN` over
+HTTPS instead of SSH, and uses the workers' git mirrors (`TH_GIT_MIRRORS`) and prebuilt WebDriverAgent
+(`TH_WDA_PREBUILT`).
 
 ## Safety
 Only Trio's simulator CGM/pump and made-up values are used. Reports must not contain real health data, device identifiers,

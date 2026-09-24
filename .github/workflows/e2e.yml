@@ -1,39 +1,34 @@
-# Run trio-test-e2e on the iOS Simulator for a Trio or submodule (e.g. TandemKit) PR or branch,
-# on the self-hosted macOS workers (home-infra/macos-workers). Manual only:
-#   gh workflow run e2e.yml -R jwoglom/trio-test-harness -f pr=jwoglom/TandemKit#395 -f comment=auto
+# Run trio-test-e2e on the iOS Simulator for a Trio PR or branch, optionally with submodule
+# (e.g. TandemKit) PRs or branches, on the self-hosted macOS workers (home-infra/macos-workers).
+# Manual only:
+#   gh workflow run e2e.yml -R jwoglom/trio-test-harness -f submodules=jwoglom/TandemKit#395 -f post_comment=true
 name: Trio e2e (simulator)
-run-name: "e2e: ${{ inputs.pr || inputs.branch }} (simulator${{ inputs.agent == 'claude' && ', agent' || '' }})"
+run-name: "e2e: ${{ inputs.trio || 'dev' }}${{ inputs.submodules && format(' + {0}', inputs.submodules) || '' }}${{ inputs.agent == 'claude' && ' (agent)' || '' }}"
 
 on:
   workflow_dispatch:
     inputs:
-      pr:
-        description: "Trio or submodule PR: URL, owner/repo#N, or a number (nightscout/Trio)"
-        type: string
-      branch:
-        description: "Trio branch instead of a PR (exactly one of pr/branch)"
-        type: string
-      trio_branch:
-        description: "Trio branch to test a submodule PR against (blank: from .gitmodules)"
+      trio:
+        description: "Trio PR or branch (PR link, owner/repo#N, nightscout/Trio PR number, or branch; blank: dev, or the branch that has the submodule)"
         type: string
       submodules:
-        description: "Extra submodule overrides, space-separated NAME@REF"
+        description: "Submodules (PR links or branches: PR link, owner/repo#N, or NAME@branch; space-separated)"
         type: string
       configuration:
+        description: "Build configuration"
         type: choice
         options: [Debug, Release]
         default: Debug
-      onboarding:
-        description: "preseed skips onboarding; walk taps through it"
-        type: choice
-        options: [preseed, walk]
-        default: preseed
+      skip_onboarding:
+        description: "Skip onboarding"
+        type: boolean
+        default: true
       smoke:
         description: "Configure the Glucose Simulator + Pump Simulator"
         type: boolean
         default: true
       agent:
-        description: "claude: Claude Code then tests what the PR describes"
+        description: "Agent (claude: Claude Code then tests what the PR describes)"
         type: choice
         options: [claude, none]
         default: claude
@@ -41,49 +36,43 @@ on:
         description: "Extra focus for the agent"
         type: string
       agent_minutes:
-        description: "Time limit for the agent step"
+        description: "Agent time limit (minutes)"
         type: number
         default: 30
-      comment:
-        description: "auto: post the report as a PR comment (as trio-test-harness-runner[bot])"
-        type: choice
-        options: [never, auto]
-        default: never
+      post_comment:
+        description: "Post PR comment"
+        type: boolean
+        default: false
       sim_device:
+        description: "Simulator device"
         type: string
         default: iPhone 17
       sim_runtime:
-        description: "e.g. iOS 26.3 (blank: newest installed)"
+        description: "Simulator runtime, e.g. iOS 26.3 (blank: newest installed)"
         type: string
       xcode:
+        description: "Xcode"
         type: choice
         options: ["26.2"]
         default: "26.2"
-      runner:
-        description: "worker = either VM"
-        type: choice
-        options: [worker, vm1, vm2]
-        default: worker
 
 permissions:
   contents: read
 
 concurrency:
-  group: e2e-${{ inputs.pr || inputs.branch }}
+  group: e2e-${{ inputs.trio }}-${{ inputs.submodules }}
   cancel-in-progress: false
 
 jobs:
   e2e:
-    runs-on: [self-hosted, macOS, "${{ inputs.runner }}"]
+    runs-on: [self-hosted, macOS, worker]
     timeout-minutes: 150
     env:
       # Inputs reach scripts only through env, never interpolated into them.
-      IN_PR: ${{ inputs.pr }}
-      IN_BRANCH: ${{ inputs.branch }}
-      IN_TRIO_BRANCH: ${{ inputs.trio_branch }}
+      IN_TRIO: ${{ inputs.trio }}
       IN_SUBMODULES: ${{ inputs.submodules }}
       IN_CONFIGURATION: ${{ inputs.configuration }}
-      IN_ONBOARDING: ${{ inputs.onboarding }}
+      IN_SKIP_ONBOARDING: ${{ inputs.skip_onboarding }}
       IN_SMOKE: ${{ inputs.smoke }}
       IN_AGENT_INSTRUCTIONS: ${{ inputs.agent_instructions }}
       TH_XCODE_APP: /Applications/Xcode_${{ inputs.xcode }}.app
@@ -97,33 +86,13 @@ jobs:
       # Built by home-infra macos-workers (toolchains role), pinned to one WebDriverAgent release.
       TH_WDA_PREBUILT: /Volumes/work/cache/wda/current
     steps:
+      - uses: actions/checkout@v4
+
+      # Maps the two source fields onto trio-test-e2e flags (rules in ci/inputs.py) and picks the PR
+      # the run is about: the Trio PR, else the first submodule PR.
       - name: Validate inputs
         id: v
-        run: |
-          set -euo pipefail
-          if [ -n "$IN_PR" ] && [ -n "$IN_BRANCH" ] || [ -z "$IN_PR$IN_BRANCH" ]; then
-            echo "::error::set exactly one of pr or branch"; exit 1
-          fi
-          owner=jwoglom
-          if [ -n "$IN_PR" ]; then
-            if [[ "$IN_PR" =~ ^https://github\.com/([A-Za-z0-9_.-]+)/([A-Za-z0-9_.-]+)/pull/([0-9]+)/?$ ]] ||
-               [[ "$IN_PR" =~ ^([A-Za-z0-9_.-]+)/([A-Za-z0-9_.-]+)#([0-9]+)$ ]]; then
-              owner=${BASH_REMATCH[1]}
-            elif [[ "$IN_PR" =~ ^[0-9]+$ ]]; then
-              owner=nightscout
-            else
-              echo "::error::pr must be a PR URL, owner/repo#N, or a number"; exit 1
-            fi
-          elif ! [[ "$IN_BRANCH" =~ ^[A-Za-z0-9._/-]+$ ]]; then
-            echo "::error::branch has unexpected characters"; exit 1
-          fi
-          [ -z "$IN_TRIO_BRANCH" ] || [[ "$IN_TRIO_BRANCH" =~ ^[A-Za-z0-9._/-]+$ ]] || { echo "::error::bad trio_branch"; exit 1; }
-          for s in $IN_SUBMODULES; do
-            [[ "$s" =~ ^[A-Za-z0-9._-]+@[A-Za-z0-9._/-]+$ ]] || { echo "::error::bad submodule override: $s"; exit 1; }
-          done
-          echo "pr_owner=$owner" >> "$GITHUB_OUTPUT"
-
-      - uses: actions/checkout@v4
+        run: python3 ci/inputs.py "$RUNNER_TEMP/e2e-args" >> "$GITHUB_OUTPUT"
 
       # Contents: read on jwoglom/Trio + jwoglom/TandemKit (private submodule) and PR metadata.
       - name: GitHub App token (jwoglom)
@@ -149,11 +118,9 @@ jobs:
           set -uo pipefail
           # Per-job paths (workerd's task dir), so nothing is shared between runs.
           export TRIO_REPO="$RUNNER_TEMP/Trio" TH_DERIVED_DATA="${DERIVED_DATA:-$RUNNER_TEMP/DerivedData}"
-          args=(--mode simulator --yes --no-agent --comment never
-                --configuration "$IN_CONFIGURATION" --onboarding "$IN_ONBOARDING")
-          if [ -n "$IN_PR" ]; then args+=(--pr "$IN_PR"); else args+=(--branch "$IN_BRANCH"); fi
-          [ -z "$IN_TRIO_BRANCH" ] || args+=(--trio-branch "$IN_TRIO_BRANCH")
-          for s in $IN_SUBMODULES; do args+=(--submodule "$s"); done
+          args=(--mode simulator --yes --no-agent --comment never --configuration "$IN_CONFIGURATION"
+                --onboarding "$([ "$IN_SKIP_ONBOARDING" = true ] && echo preseed || echo walk)")
+          while IFS= read -r a; do args+=("$a"); done < "$RUNNER_TEMP/e2e-args"
           [ "$IN_SMOKE" = true ] || args+=(--no-smoke)
           # The runner's bash has -e; keep going so the run dir is recorded even when the run fails.
           rc=0
@@ -186,7 +153,7 @@ jobs:
 
       - name: GitHub App token (PR owner)
         id: comment_token
-        if: always() && inputs.comment == 'auto' && inputs.pr != '' && steps.v.outputs.pr_owner != 'jwoglom'
+        if: always() && inputs.post_comment && steps.v.outputs.pr != '' && steps.v.outputs.pr_owner != 'jwoglom'
         continue-on-error: true
         uses: actions/create-github-app-token@v2
         with:
@@ -196,18 +163,23 @@ jobs:
 
       - name: PR comment
         id: comment
-        if: always() && inputs.comment == 'auto' && inputs.pr != '' && steps.e2e.outputs.run_dir != ''
+        if: always() && inputs.post_comment && steps.e2e.outputs.run_dir != ''
         env:
           GH_TOKEN: ${{ steps.comment_token.outputs.token || (steps.v.outputs.pr_owner == 'jwoglom' && steps.token.outputs.token) || '' }}
           RUN_DIR: ${{ steps.e2e.outputs.run_dir }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          PR: ${{ steps.v.outputs.pr }}
           PR_OWNER: ${{ steps.v.outputs.pr_owner }}
         run: |
+          if [ -z "$PR" ]; then
+            echo "::notice title=PR comment skipped::this run has no PR (Trio branch only)"
+            echo "note=skipped: this run has no PR" >> "$GITHUB_OUTPUT"; exit 0
+          fi
           if [ -z "$GH_TOKEN" ]; then
             echo "::notice title=PR comment skipped::the trio-test-harness-runner App is not installed on $PR_OWNER"
             echo "note=skipped: the trio-test-harness-runner App is not installed on $PR_OWNER" >> "$GITHUB_OUTPUT"; exit 0
           fi
-          if out=$(./trio-test-harness report pr "$IN_PR" --run "$RUN_DIR" --artifact-url "$RUN_URL" 2>&1); then
+          if out=$(./trio-test-harness report pr "$PR" --run "$RUN_DIR" --artifact-url "$RUN_URL" 2>&1); then
             echo "note=posted $(echo "$out" | tail -1)" >> "$GITHUB_OUTPUT"
           else
             echo "$out" | tail -20

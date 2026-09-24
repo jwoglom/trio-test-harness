@@ -240,6 +240,13 @@ def render_markdown(run: Run, *, columns: int = 3, max_shots: int | None = None,
     return "\n".join(lines), files
 
 
+def _without_images(md: str, artifact_url: str | None) -> str:
+    """The comment body without its ![...](./screenshots/...) images; each cell keeps its caption."""
+    text = re.sub(r"!\[[^\]]*\]\(\./screenshots/[^)]+\)(<br>)?", "", md).replace("<summary>Screenshots", "<summary>Steps")
+    where = f"the run's artifact ({artifact_url})" if artifact_url else "the run's report"
+    return text + f"\n\n_Screenshots could not be attached with this token; they are in {where}._\n"
+
+
 def post_to_pr(run: Run, pr: str, *, mode: str = "comment", repo: str | None = None,
                columns: int = 3, max_shots: int | None = None, artifact_url: str | None = None) -> str:
     """Comment on (or append to the description of) a PR with the run's screenshots attached inline."""
@@ -253,8 +260,19 @@ def post_to_pr(run: Run, pr: str, *, mode: str = "comment", repo: str | None = N
         rel = f.relative_to(run.path)
         attach += ["--attach", f"./{rel}"]
     if mode == "comment":
-        out = run_cmd(["gh", "pr", "comment", str(num), "--repo", slug, "--body-file", str(body), *attach],
-                  cwd=run.path, timeout=900).stdout
+        try:
+            out = run_cmd(["gh", "pr", "comment", str(num), "--repo", slug, "--body-file", str(body), *attach],
+                          cwd=run.path, timeout=900).stdout
+        except HarnessError as e:
+            # gh uploads --attach files as the signed-in user; a GitHub App token (CI) cannot, so post
+            # the same comment with captions in place of the images.
+            if "unsupported authentication type" not in str(e) or not attach:
+                raise
+            log("gh cannot attach files with this token; posting without inline screenshots")
+            body.write_text(_without_images(md, artifact_url))
+            out = run_cmd(["gh", "pr", "comment", str(num), "--repo", slug, "--body-file", str(body)],
+                          cwd=run.path, timeout=300).stdout
+            files = []
         log(f"commented on {slug}#{num} with {len(files)} screenshots attached")
         return out.strip()
     if mode == "description":
