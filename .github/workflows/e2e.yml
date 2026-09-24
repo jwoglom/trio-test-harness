@@ -163,7 +163,7 @@ jobs:
           ./trio-test-harness --target sim daemon start
           trap './trio-test-harness --target sim daemon stop >/dev/null 2>&1 || true' EXIT
           claude -p "$prompt" --model "$CLAUDE_MODEL" --output-format stream-json --verbose \
-            --permission-mode dontAsk --settings "$RUNNER_TEMP/claude-settings.json" \
+            --permission-mode dontAsk --permission-prompts none --settings "$RUNNER_TEMP/claude-settings.json" \
             --append-system-prompt "$(cat ci/agent-limits.md)" \
             --allowedTools "Bash(./trio-test-harness:*)" "Bash(./bin/th:*)" "Bash(sleep:*)" Read Glob Grep \
             | python3 ci/agent-stream.py "$RUN_DIR/agent-summary.md"
@@ -190,7 +190,7 @@ jobs:
           print(t.format(run_dir=os.environ["RUN_DIR"], extra=os.environ["EXTRA"]))')
           python3 ci/claude-sandbox.py "$RUNNER_TEMP/claude-settings.json"
           claude -p "$prompt" --model "$CLAUDE_MODEL" --output-format stream-json --verbose \
-            --permission-mode dontAsk --settings "$RUNNER_TEMP/claude-settings.json" \
+            --permission-mode dontAsk --permission-prompts none --settings "$RUNNER_TEMP/claude-settings.json" \
             --append-system-prompt "$(cat ci/review-limits.md)" \
             --allowedTools Read Glob Grep \
             | python3 ci/agent-stream.py "$RUN_DIR/highlights-raw.md"

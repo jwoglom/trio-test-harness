@@ -2,8 +2,9 @@
 
     python ci/claude-sandbox.py OUT.json
 
-The agent may only run the harness CLI (plus sleep) through Bash; `--permission-mode dontAsk` denies
-everything else. On top of that, macOS's sandbox (Seatbelt) confines those commands: no network at all,
+The agent may only run the harness CLI (plus sleep) through Bash; `--permission-mode dontAsk` and
+`--permission-prompts none` deny everything else, and the file tools cannot read outside the working
+directories. On top of that, macOS's sandbox (Seatbelt) confines those commands: no network at all,
 writes only into the run folders, and a single Unix socket, the harness daemon's. The daemon is started
 outside the sandbox before the agent (it holds the simulator and WebDriverAgent connections, which a
 sandboxed process cannot reach), so the agent can do exactly what the daemon's driver exposes.
@@ -20,6 +21,9 @@ HARNESS = Path(__file__).resolve().parent.parent
 
 def settings() -> dict:
     return {
+        # Read, Glob and Grep refuse paths outside the working directories in every mode (Claude Code >= 2.1.257);
+        # without it, `-p` runs read outside them unasked.
+        "permissions": {"blockReadsOutsideWorkingDirectories": True},
         "sandbox": {
             "enabled": True,
             "failIfUnavailable": True,          # a missing sandbox is an error, not an unsandboxed run
