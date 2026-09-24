@@ -127,12 +127,14 @@ def render_html(run: Run, out: Path | None = None) -> Path:
     color = {"passed": "#1a7f37", "failed": "#cf222e"}.get(status, "#9a6700")
     cards = []
     for s in steps:
-        img = ""
+        caption = (f'<figcaption><b>{html.escape(s.get("action",""))}</b><span>{html.escape(s.get("note",""))}</span>'
+                   f'<time>{html.escape(s.get("t","")[11:19])}</time></figcaption>')
         if (shot := run.shot_file(s)) is not None:
             img = f'<img src="{_thumb_b64(shot)}" alt="{html.escape(s.get("note",""))}" loading="lazy">'
-        cards.append(
-            f'<figure><div class="frame">{img}</div><figcaption><b>{html.escape(s.get("action",""))}</b>'
-            f'<span>{html.escape(s.get("note",""))}</span><time>{html.escape(s.get("t","")[11:19])}</time></figcaption></figure>')
+            cards.append(f'<figure><div class="frame">{img}</div>{caption}</figure>')
+        else:
+            # Notes and other steps without a screenshot: text only, no empty phone frame.
+            cards.append(f'<figure class="note">{caption}</figure>')
     facts = [
         ("Target", meta.get("target", build.get("target", "?"))),
         ("Branch / PR", git.get("pr") or git.get("branch") or "in-place checkout"),
@@ -163,6 +165,7 @@ dt{{color:var(--muted)}} dd{{margin:0;word-break:break-word}}
 figure{{margin:0;background:var(--card);border:1px solid var(--line);border-radius:10px;overflow:hidden;display:flex;flex-direction:column}}
 .frame{{aspect-ratio:9/19.5;background:#000;display:flex;align-items:center;justify-content:center}}
 .frame img{{width:100%;height:100%;object-fit:contain}}
+figure.note{{align-self:start;border-left:3px solid var(--line)}}
 figcaption{{padding:8px 10px;font-size:13px;display:flex;flex-direction:column;gap:2px}} figcaption span{{color:var(--muted)}} time{{color:var(--muted);font-size:11px}}
 </style></head><body><main>
 <h1>{html.escape(title)}</h1><span class="status">{html.escape(status)}</span>
