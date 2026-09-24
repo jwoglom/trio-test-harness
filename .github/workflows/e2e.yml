@@ -155,7 +155,16 @@ jobs:
           print(t.format(run_dir=os.environ["RUN_DIR"], smoke_note=os.environ["SMOKE"], extra=os.environ["EXTRA"]))')
           # stream-json + ci/agent-stream.py: live progress in this log (model, each tool call, notes),
           # final answer into agent-summary.md for the job summary.
+          # Locked down (ci/claude-sandbox.py, ci/agent-limits.md): Bash may only run the harness and sleep,
+          # everything else is denied (dontAsk), and the harness commands run in macOS's sandbox with no network,
+          # writes only under runs/ and build/, and one Unix socket: the harness daemon, started here outside the
+          # sandbox because it holds the simulator and WebDriverAgent connections.
+          python3 ci/claude-sandbox.py "$RUNNER_TEMP/claude-settings.json"
+          ./trio-test-harness --target sim daemon start
+          trap './trio-test-harness --target sim daemon stop >/dev/null 2>&1 || true' EXIT
           claude -p "$prompt" --model "$CLAUDE_MODEL" --output-format stream-json --verbose \
+            --permission-mode dontAsk --settings "$RUNNER_TEMP/claude-settings.json" \
+            --append-system-prompt "$(cat ci/agent-limits.md)" \
             --allowedTools "Bash(./trio-test-harness:*)" "Bash(./bin/th:*)" "Bash(sleep:*)" Read Glob Grep \
             | python3 ci/agent-stream.py "$RUN_DIR/agent-summary.md"
           ./trio-test-harness report html --run "$RUN_DIR" >/dev/null
@@ -179,7 +188,10 @@ jobs:
           import os, pathlib
           t = pathlib.Path("ci/highlights-prompt.md").read_text()
           print(t.format(run_dir=os.environ["RUN_DIR"], extra=os.environ["EXTRA"]))')
+          python3 ci/claude-sandbox.py "$RUNNER_TEMP/claude-settings.json"
           claude -p "$prompt" --model "$CLAUDE_MODEL" --output-format stream-json --verbose \
+            --permission-mode dontAsk --settings "$RUNNER_TEMP/claude-settings.json" \
+            --append-system-prompt "$(cat ci/review-limits.md)" \
             --allowedTools Read Glob Grep \
             | python3 ci/agent-stream.py "$RUN_DIR/highlights-raw.md"
           python3 ci/highlights.py "$RUN_DIR" "$RUN_DIR/highlights-raw.md"
