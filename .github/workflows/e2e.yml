@@ -204,12 +204,14 @@ jobs:
           PR_OWNER: ${{ steps.v.outputs.pr_owner }}
         run: |
           if [ -z "$GH_TOKEN" ]; then
+            echo "::notice title=PR comment skipped::the trio-test-harness-runner App is not installed on $PR_OWNER"
             echo "note=skipped: the trio-test-harness-runner App is not installed on $PR_OWNER" >> "$GITHUB_OUTPUT"; exit 0
           fi
           if out=$(./trio-test-harness report pr "$IN_PR" --run "$RUN_DIR" --artifact-url "$RUN_URL" 2>&1); then
             echo "note=posted $(echo "$out" | tail -1)" >> "$GITHUB_OUTPUT"
           else
             echo "$out" | tail -20
+            echo "::warning title=PR comment failed::see the PR comment step log"
             echo "note=failed; see the PR comment step log" >> "$GITHUB_OUTPUT"
           fi
 

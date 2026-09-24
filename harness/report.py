@@ -19,6 +19,7 @@ from pathlib import Path
 
 from .config import CONFIG, REPO_ROOT
 from .util import HarnessError, log, now_slug, read_json, run, write_json
+from .util import run as run_cmd  # post_to_pr's `run` parameter shadows run()
 
 CURRENT = REPO_ROOT / "runs" / ".current"
 
@@ -252,7 +253,7 @@ def post_to_pr(run: Run, pr: str, *, mode: str = "comment", repo: str | None = N
         rel = f.relative_to(run.path)
         attach += ["--attach", f"./{rel}"]
     if mode == "comment":
-        out = run(["gh", "pr", "comment", str(num), "--repo", slug, "--body-file", str(body), *attach],
+        out = run_cmd(["gh", "pr", "comment", str(num), "--repo", slug, "--body-file", str(body), *attach],
                   cwd=run.path, timeout=900).stdout
         log(f"commented on {slug}#{num} with {len(files)} screenshots attached")
         return out.strip()
@@ -261,7 +262,7 @@ def post_to_pr(run: Run, pr: str, *, mode: str = "comment", repo: str | None = N
         current = json.loads(_gh(["pr", "view", str(num), "--repo", slug, "--json", "body"], quiet=True))["body"] or ""
         new_body = (current.split(marker)[0].rstrip() if marker in current else current.rstrip()) + f"\n\n{marker}\n{md}\n"
         body.write_text(new_body)
-        run(["gh", "pr", "edit", str(num), "--repo", slug, "--body-file", str(body), *attach], cwd=run.path, timeout=900)
+        run_cmd(["gh", "pr", "edit", str(num), "--repo", slug, "--body-file", str(body), *attach], cwd=run.path, timeout=900)
         log(f"updated description of {slug}#{num}")
         return f"https://github.com/{slug}/pull/{num}"
     raise HarnessError(f"unknown mode {mode}")
