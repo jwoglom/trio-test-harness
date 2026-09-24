@@ -3,7 +3,7 @@
 # Manual only:
 #   gh workflow run e2e.yml -R jwoglom/trio-test-harness -f submodules=jwoglom/TandemKit#395 -f post_comment=true
 name: Trio e2e (simulator)
-run-name: "e2e: ${{ inputs.trio || 'dev' }}${{ inputs.submodules && format(' + {0}', inputs.submodules) || '' }}${{ inputs.agent == 'claude' && ' (agent)' || '' }}"
+run-name: "e2e: ${{ inputs.trio || (!inputs.submodules && 'dev') || '' }}${{ inputs.trio && inputs.submodules && ' + ' || '' }}${{ inputs.submodules }}${{ inputs.agent == 'claude' && ' (agent)' || '' }}"
 
 on:
   workflow_dispatch:
