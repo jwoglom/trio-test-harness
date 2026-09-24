@@ -130,9 +130,10 @@ gh workflow run e2e.yml -R jwoglom/trio-test-harness -f trio=feat/tandem -f subm
 - **Submodules**: PR links / `owner/repo#N` and `NAME@branch` (or `owner/repo@branch`), space-separated.
 - **The run's PR** (read into `pr.md`, and where a comment goes) is the Trio PR, else the first submodule PR.
   `ci/inputs.py` has the mapping onto `trio-test-e2e` flags.
-- Also: build configuration, skip onboarding, fake CGM/pump. Claude Code then exercises what the PR describes ( headless; prompt in `ci/agent-prompt.md`; its step log shows live progress via `ci/agent-stream.py`),
-  Claude model for the agent (`claude_model`, default `sonnet`), extra agent focus, agent time limit, post PR comment,
-  simulator device/runtime, Xcode.
+- Also: build configuration, skip onboarding, fake CGM/pump, Claude model (`claude_model`, default `sonnet`), extra
+  agent focus, agent time limit, post PR comment, simulator device/runtime, Xcode.
+- Every run then has Claude Code exercise what the PR describes (headless, sandboxed; prompt in `ci/agent-prompt.md`,
+  live progress in its step log via `ci/agent-stream.py`), and a separate review pass pick the relevant screenshots.
 
 Results: job summary (`ci/summary.py`), an artifact with the run (screenshots, `steps.jsonl`, `report.html`), `report.html`
 on its own as an unzipped artifact (it embeds the screenshots), and optionally a PR comment from
