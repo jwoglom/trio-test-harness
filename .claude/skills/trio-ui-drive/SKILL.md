@@ -21,7 +21,8 @@ phone over TrollVNC (tesseract OCR), or any iPhone through iPhone Mirroring (Vis
 `key return|backspace|tab|escape` · `home` · `tap-text "label" [--exact] [--index n]` · `tree [--filter t] [--all]` (sim only) ·
 `find "text"` · `wait-text "text"` · `ocr file.png [--find text]`.
 Simulator extras: `th sim defaults <key> <value> [--type -bool]` (UserDefaults of the app), `th sim container` (data path),
-`th sim openurl <url>`, `th sim erase` (factory reset the harness simulator).
+`th sim openurl <url>`, `th sim erase` (factory reset the harness simulator),
+`th lock` / `th unlock` / `th locked` (lock the simulator through WebDriverAgent; `shot` then captures the real Lock Screen).
 Phone extras: `th device wake` (power + swipe up), `th device vnc-check`, Spotlight launch via `th launch --target rooted-vnc`.
 The phone driver cannot kill or launch by bundle id: use the App Switcher / Spotlight through taps.
 
@@ -55,3 +56,6 @@ The phone driver cannot kill or launch by bundle id: use the App Switcher / Spot
   keys, so tap the text field first. If the screen is black, the phone is asleep: `th device wake`.
 - Alerts from iOS (permissions) are ordinary taps: `th tap-text Allow`.
 - Screenshots go into the current run (`th run current`); use `--out path.png` for throwaway shots.
+- Live Activities render on the simulator. Enable them in Trio (Settings ▸ Live Activity ▸ Enable Live Activity; off by
+  default), wait for a glucose update (the Glucose Simulator ticks every few minutes), then `th lock` + `shot` for the
+  Lock Screen, or `th home` + `shot` for the Dynamic Island (iPhone 17 / Pro models). `th unlock` to return.

@@ -9,10 +9,17 @@ installed, launched and on the home screen{smoke_note}. Follow the trio-test-e2e
    with `./trio-test-harness run note "..."`. Look at each screenshot before tapping.
 3. Finish with `./trio-test-harness run finish passed|failed|partial --summary "..."` and `./trio-test-harness report html`.
 
+The simulator can show everything a phone would, including the Lock Screen and Live Activities:
+- Live Activities are off by default in Trio: Settings ▸ Live Activity ▸ Enable Live Activity. Trio starts one on the
+  next glucose update (the Glucose Simulator produces one every few minutes; `sleep` while waiting).
+- Lock Screen: `./trio-test-harness --target sim lock`, then `shot`; `./trio-test-harness --target sim unlock` afterwards.
+- Dynamic Island: `./trio-test-harness --target sim home` (Trio in the background), then `shot`.
+Only genuinely hardware-bound behavior (Bluetooth pumps and sensors, real pairing) is out of reach.
+
 Rules:
 - Only Trio's Glucose Simulator and Pump Simulator, and made-up values. No real health data, device identifiers or tokens.
 - Do not publish Artifacts, post PR comments, push, or change the Trio checkout; the workflow handles reporting.
-- If the PR cannot be exercised on the simulator (hardware-only, BLE), say so and record what you could check.
+- If part of the PR truly needs hardware (BLE pairing, a physical pump/sensor), say so and record what you could check.
 - Stay within the time limit; prefer a few well-evidenced checks over many shallow ones.
 
 Your final message becomes the job summary's "Agent findings": markdown with the verdict, what you exercised

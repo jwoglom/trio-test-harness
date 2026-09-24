@@ -426,6 +426,18 @@ def cmd_home(args):
     get_driver(_target(args)).home(); return 0
 
 
+def cmd_lock(args):
+    target = norm_target(_target(args))
+    if target != "sim":
+        print("on a phone use `th device lock` / `th device unlock`", file=sys.stderr); return 2
+    drv = get_driver(target)
+    if args.sub == "status":
+        locked = drv.is_locked(); print("locked" if locked else "unlocked"); return 0
+    drv.lock() if args.sub == "lock" else drv.unlock()
+    print(f"{args.sub}ed" if args.sub == "unlock" else "locked: `shot` now captures the Lock Screen (and Live Activities)")
+    return 0
+
+
 def cmd_tap_text(args):
     drv = get_driver(_target(args))
     x, y = drv.tap_text(args.text, exact=args.exact, index=args.index)
@@ -677,6 +689,10 @@ def build_parser() -> argparse.ArgumentParser:
     ty = sp.add_parser("type"); ty.add_argument("text"); ty.set_defaults(fn=cmd_type)
     k = sp.add_parser("key"); k.add_argument("name"); k.set_defaults(fn=cmd_key)
     sp.add_parser("home").set_defaults(fn=cmd_home)
+    for name, helptext in (("lock", "lock the simulator: `shot` then captures the Lock Screen and Live Activities"),
+                           ("unlock", "unlock the simulator after `lock`")):
+        sp.add_parser(name, help=helptext).set_defaults(fn=cmd_lock, sub=name)
+    sp.add_parser("locked", help="print whether the simulator is locked").set_defaults(fn=cmd_lock, sub="status")
     tt = sp.add_parser("tap-text", help="tap element by label/id (accessibility tree, OCR fallback)")
     tt.add_argument("text"); tt.add_argument("--exact", action="store_true"); tt.add_argument("--index", type=int, default=0); tt.set_defaults(fn=cmd_tap_text)
     f = sp.add_parser("find"); f.add_argument("text"); f.add_argument("--exact", action="store_true"); f.set_defaults(fn=cmd_find)

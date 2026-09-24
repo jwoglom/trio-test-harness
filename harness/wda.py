@@ -173,6 +173,16 @@ class WDAClient:
     def home(self) -> None:
         self._req("POST", "/wda/homescreen", session=False)
 
+    def lock(self) -> None:
+        """Lock the device (on the simulator WDA presses the side button)."""
+        self._req("POST", "/wda/lock", session=False)
+
+    def unlock(self) -> None:
+        self._req("POST", "/wda/unlock", session=False)
+
+    def is_locked(self) -> bool:
+        return bool(self._req("GET", "/wda/locked", session=False))
+
     def source(self) -> dict:
         return self._req("GET", "/source?format=json", session=False, timeout=120)
 

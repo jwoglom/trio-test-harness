@@ -191,6 +191,18 @@ class SimulatorDriver(Driver):
             return
         self._idb(["ui", "button", "HOME"], quiet=True)
 
+    def lock(self) -> None:
+        """Lock the simulator, so screenshots show the Lock Screen and any Live Activity on it."""
+        self.ensure_wda().lock()
+        time.sleep(1.5)
+
+    def unlock(self) -> None:
+        self.ensure_wda().unlock()
+        time.sleep(1.0)
+
+    def is_locked(self) -> bool:
+        return self.ensure_wda().is_locked()
+
     def wake(self) -> None:
         pass  # simulator never sleeps
 
