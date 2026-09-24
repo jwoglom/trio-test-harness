@@ -248,8 +248,20 @@ def _open_picker_from_home(drv: Driver, run: Run | None, label: str, x_frac: flo
     w, h = drv.screen_size()
     drv.tap(int(w * x_frac), int(h * 0.155))
     time.sleep(2.5)
+    # The home header stays in the accessibility tree behind a sheet, so finding the label above does
+    # not prove the tap opened the picker; the picker's Cancel button does.
+    if not drv.wait_for_text("Cancel", timeout=5, ocr=False):
+        step(run, drv, label.lower().replace(" ", "-") + "-no-picker", f"'{label}' shortcut did not open a picker")
+        return False
     step(run, drv, label.lower().replace(" ", "-") + "-picker", f"picker opened from the home '{label}' shortcut")
     return True
+
+
+def _close_device_sheet(drv: Driver) -> None:
+    """Newer Trio opens the device's own settings sheet (Close button) right after adding it."""
+    if drv.find("Close", exact=True):
+        drv.tap_text("Close", exact=True, ocr_fallback=False)
+        time.sleep(1.5)
 
 
 def devices_configured(drv: Driver) -> bool:
@@ -287,6 +299,7 @@ def add_cgm_simulator(drv: Driver, run: Run | None = None) -> None:
     time.sleep(2.5)
     dismiss_dialogs(drv, ["Continue", "Done", "OK", "Save"])
     step(run, drv, "cgm-simulator-added", "After adding Glucose Simulator")
+    _close_device_sheet(drv)
 
 
 def add_pump_simulator(drv: Driver, run: Run | None = None) -> None:
@@ -304,6 +317,7 @@ def add_pump_simulator(drv: Driver, run: Run | None = None) -> None:
         drv.tap_text(lab, exact=True)
         time.sleep(1.0)
     step(run, drv, "pump-simulator-added", "Insulin Pump screen after adding Pump Simulator")
+    _close_device_sheet(drv)
 
 
 def back_to_home(drv: Driver, hops: int = 4) -> None:
