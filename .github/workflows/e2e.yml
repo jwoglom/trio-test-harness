@@ -122,6 +122,8 @@ jobs:
                 --onboarding "$([ "$IN_SKIP_ONBOARDING" = true ] && echo preseed || echo walk)")
           while IFS= read -r a; do args+=("$a"); done < "$RUNNER_TEMP/e2e-args"
           [ "$IN_SMOKE" = true ] || args+=(--no-smoke)
+          # Routine setup (skipped onboarding + fake devices) is left out of report.html and the comment.
+          if [ "$IN_SKIP_ONBOARDING" = true ] && [ "$IN_SMOKE" = true ]; then args+=(--hide-setup-screenshots); fi
           # The runner's bash has -e; keep going so the run dir is recorded even when the run fails.
           rc=0
           ./trio-test-e2e "${args[@]}" || rc=$?

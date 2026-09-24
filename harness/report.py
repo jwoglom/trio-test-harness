@@ -119,7 +119,7 @@ def _thumb_b64(png: Path, max_w: int = 640) -> str:
 
 def render_html(run: Run, out: Path | None = None) -> Path:
     meta = run.meta
-    steps = run.steps()
+    steps = shown_steps(run)
     title = meta.get("title") or f"Trio test: {meta.get('name','run')}"
     build = meta.get("build", {})
     git = build.get("git", {}) if isinstance(build, dict) else {}
@@ -143,6 +143,8 @@ def render_html(run: Run, out: Path | None = None) -> Path:
     ]
     if git.get("submodule_overrides"):
         facts.append(("Submodules", "; ".join(f"{o['name']} @ {o['ref']}" for o in git["submodule_overrides"])))
+    if setup_note(run):
+        facts.append(("Setup", setup_note(run)))
     fact_html = "".join(f"<dt>{html.escape(k)}</dt><dd>{html.escape(str(v))}</dd>" for k, v in facts)
     page = f"""<!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
@@ -186,9 +188,26 @@ def _gh(args: list[str], **kw) -> str:
     return run(["gh", *args], **kw).stdout
 
 
+def shown_steps(run: Run) -> list[dict]:
+    """The steps a report shows: all of them, minus the routine setup when the run asked to hide it.
+
+    `trio-test-e2e --hide-setup-screenshots` records meta["setup_steps"] (the step count once launch,
+    skipped onboarding and the fake CGM/pump setup had succeeded); those steps are left out of
+    reports. The screenshots stay in the run directory.
+    """
+    steps = run.steps()
+    return steps[int(run.meta.get("setup_steps") or 0):]
+
+
+def setup_note(run: Run) -> str | None:
+    n = int(run.meta.get("setup_steps") or 0)
+    return (f"{n} routine setup steps (launch, onboarding skipped, fake CGM + pump) are not shown; "
+            "their screenshots are in the run artifact.") if n else None
+
+
 def select_steps(run: Run, max_shots: int | None) -> list[dict]:
     """Steps with screenshots, evenly thinned to max_shots (first and last always kept)."""
-    steps = [s for s in run.steps() if run.shot_file(s) is not None]
+    steps = [s for s in shown_steps(run) if run.shot_file(s) is not None]
     limit = min(max_shots or MAX_ATTACH, MAX_ATTACH)
     if len(steps) <= limit:
         return steps
@@ -218,8 +237,10 @@ def render_markdown(run: Run, *, columns: int = 3, max_shots: int | None = None,
         lines += ["", meta["summary"]]
     steps = select_steps(run, max_shots)
     files: list[Path] = []
+    if setup_note(run):
+        lines += ["", f"<sub>{setup_note(run)}</sub>"]
     if steps:
-        total = len([s for s in run.steps() if s.get("screenshot")])
+        total = len([s for s in shown_steps(run) if s.get("screenshot")])
         note = f" ({len(steps)} of {total} screenshots)" if len(steps) < total else ""
         lines += ["", f"<details open><summary>Screenshots{note}</summary>", ""]
         header = "| " + " | ".join([" "] * columns) + " |"

@@ -213,6 +213,9 @@ def main(argv=None) -> int:
     p.add_argument("--skip-build", action="store_true", help="reuse build/last-build.json")
     p.add_argument("--skip-install", action="store_true")
     p.add_argument("--no-smoke", action="store_true", help="stop after reaching the home screen")
+    p.add_argument("--hide-setup-screenshots", action="store_true",
+                   help="with preseeded onboarding and the smoke stage: leave the routine setup steps out of "
+                        "report.html and the PR comment once they succeeded (kept in the run directory)")
     p.add_argument("--checkout-only", action="store_true")
     p.add_argument("--comment", choices=["ask", "auto", "never"], default="ask")
     p.add_argument("--artifact-url", help="claude.ai artifact link to include in the PR comment")
@@ -253,6 +256,8 @@ def main(argv=None) -> int:
         drv = stage_launch(args, bi, run)
         if not args.no_smoke:
             stage_smoke(args, drv, run)
+            if args.hide_setup_screenshots and args.onboarding == "preseed":
+                run.update_meta(setup_steps=len(run.steps()))
         run.finish("passed", "Trio launched, reached the home screen" + ("" if args.no_smoke else ", Glucose Simulator + Pump Simulator configured") + ".")
     except Exception as e:  # noqa: BLE001
         run.finish("failed", f"{type(e).__name__}: {e}")
