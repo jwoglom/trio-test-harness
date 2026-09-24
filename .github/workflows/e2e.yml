@@ -160,6 +160,31 @@ jobs:
             | python3 ci/agent-stream.py "$RUN_DIR/agent-summary.md"
           ./trio-test-harness report html --run "$RUN_DIR" >/dev/null
 
+      # A separate Claude pass, with no memory of the test session, reads the whole run (PR, steps, notes, the
+      # tester's findings), looks at the screenshots and picks only the relevant ones; report.html and the PR
+      # comment lead with its verdict, prose and picks (ci/highlights-prompt.md, ci/highlights.py).
+      - name: Highlights (a separate Claude pass picks the relevant screenshots)
+        id: highlights
+        if: always() && inputs.agent == 'claude' && steps.e2e.outputs.run_dir != ''
+        timeout-minutes: 10
+        continue-on-error: true
+        env:
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          CLAUDE_MODEL: ${{ inputs.claude_model || 'sonnet' }}
+          RUN_DIR: ${{ steps.e2e.outputs.run_dir }}
+        run: |
+          set -euo pipefail
+          extra=$([ -n "$IN_AGENT_INSTRUCTIONS" ] && printf '\nFocus from the person who started this run:\n%s\n' "$IN_AGENT_INSTRUCTIONS" || true)
+          prompt=$(RUN_DIR="$RUN_DIR" EXTRA="$extra" .venv/bin/python -c '
+          import os, pathlib
+          t = pathlib.Path("ci/highlights-prompt.md").read_text()
+          print(t.format(run_dir=os.environ["RUN_DIR"], extra=os.environ["EXTRA"]))')
+          claude -p "$prompt" --model "$CLAUDE_MODEL" --output-format stream-json --verbose \
+            --allowedTools Read Glob Grep \
+            | python3 ci/agent-stream.py "$RUN_DIR/highlights-raw.md"
+          python3 ci/highlights.py "$RUN_DIR" "$RUN_DIR/highlights-raw.md"
+          ./trio-test-harness report html --run "$RUN_DIR" >/dev/null
+
       - name: GitHub App token (PR owner)
         id: comment_token
         if: always() && inputs.post_comment && steps.v.outputs.pr != '' && steps.v.outputs.pr_owner != 'jwoglom'

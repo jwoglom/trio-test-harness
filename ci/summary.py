@@ -63,6 +63,16 @@ def main(argv=None) -> int:
             shot = " 📷" if s.get("screenshot") else ""
             out.append(f"| {i} | {str(s.get('t', ''))[11:19]} | {s.get('action', '')}{shot} | {note[:200]} |")
 
+    hl_path = run / "highlights.json"
+    if hl_path.exists():
+        try:
+            hl = json.loads(hl_path.read_text())
+            label = {"works": "✅ Works as expected", "broken": "❌ Not working as expected",
+                     "inconclusive": "🟡 Inconclusive"}.get(hl.get("verdict"), "Highlights")
+            picks = ", ".join(h.get("screenshot", "").split("/")[-1] for h in hl.get("highlights", []))
+            out += ["", f"### Review: {label}", "", hl.get("summary", ""), "", f"<sub>Chosen screenshots: {picks}</sub>"]
+        except ValueError:
+            pass
     if args.agent_summary and Path(args.agent_summary).exists():
         text = Path(args.agent_summary).read_text().strip()
         if text:
