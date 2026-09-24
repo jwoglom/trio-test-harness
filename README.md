@@ -108,8 +108,8 @@ repo or hosting. `--mode description` maintains a `<!-- trio-test-harness -->` s
 (home-infra `macos-workers`), triggered by hand from Actions ▸ "Trio e2e (simulator)" ▸ Run workflow, or:
 
 From a laptop, `./trio-test-ci` triggers it with every workflow option as a flag (`./trio-test-ci --help`), prints the
-run URL, then follows the run: steps as they start and finish, and the job log once the job is done (GitHub publishes job
-logs only after completion). Ctrl-C stops following without cancelling; `./trio-test-ci --attach <run id>` resumes.
+run URL, then follows the run with `gh run watch` (live step progress; `--compact` for failed/relevant steps only) and
+prints the job log once the run is done (GitHub publishes job logs only after completion). Ctrl-C stops following without cancelling; `./trio-test-ci --attach <run id>` resumes.
 
 ```
 ./trio-test-ci -s jwoglom/TandemKit#395 --comment

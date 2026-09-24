@@ -6,8 +6,8 @@
     ./trio-test-ci feat/tandem -s TandemKit@my-branch --instructions "check the bolus sheet"
     ./trio-test-ci --attach 35955500012          # follow a run again after Ctrl-C
 
-Prints the run URL, then each step as it starts and finishes, and the job's log once the job is
-done (GitHub publishes job logs only after a job completes). Ctrl-C stops following; the run keeps
+Prints the run URL, then follows it with `gh run watch` (live step progress) and prints the job's
+log once the run is done (GitHub publishes job logs only after a job completes). Ctrl-C stops following; the run keeps
 going on GitHub (cancel it with `gh run cancel <id>`).
 Needs the gh CLI, signed in with access to the workflow's repository.
 """
@@ -57,7 +57,8 @@ def parse_args(argv=None) -> argparse.Namespace:
     p.add_argument("--repo", default=REPO, help=f"default: {REPO}")
     p.add_argument("--no-follow", action="store_true", help="trigger, print the URL, and exit")
     p.add_argument("--attach", type=int, metavar="RUN_ID", help="follow an existing run instead of starting one")
-    p.add_argument("--interval", type=float, default=5.0, help="seconds between polls (default 5)")
+    p.add_argument("--interval", type=float, default=3.0, help="seconds between refreshes (default 3)")
+    p.add_argument("--compact", action="store_true", help="show only relevant/failed steps while watching")
     return p.parse_args(argv)
 
 
@@ -113,55 +114,20 @@ def trigger(a: argparse.Namespace) -> int:
     sys.exit(f"triggered, but could not find the run; see https://github.com/{a.repo}/actions (as {me})")
 
 
-class Follower:
-    def __init__(self, repo: str, run_id: int, interval: float):
-        self.repo, self.run_id, self.interval = repo, run_id, interval
-        self.step_state: dict[tuple[int, int], str] = {}
-        self.logged: set[int] = set()
-
-    def _jobs(self) -> list[dict]:
-        return gh_json("api", f"repos/{self.repo}/actions/runs/{self.run_id}/jobs")["jobs"]
-
-    def _print_steps(self, job: dict) -> None:
-        for s in job.get("steps") or []:
-            key = (job["id"], s["number"])
-            state = s.get("conclusion") or s["status"]
-            if self.step_state.get(key) == state or state in ("queued", "pending"):
-                continue
-            self.step_state[key] = state
-            mark = {"in_progress": "▶", "success": "✔", "failure": "✘", "skipped": "·", "cancelled": "■"}.get(state, "?")
-            print(f"\033[1m{mark} {s['name']}\033[0m" + ("" if state == "in_progress" else f"  ({state})"), flush=True)
-
-    def _print_log(self, job: dict) -> None:
-        # Only published once the job has completed (404 BlobNotFound before that).
-        for _ in range(6):
-            cp = gh("api", f"repos/{self.repo}/actions/jobs/{job['id']}/logs", check=False)
-            if cp.returncode == 0:
-                break
-            time.sleep(5)
-        else:
-            print(f"(log not available yet; later: gh run view {self.run_id} -R {self.repo} --log)")
-            return
-        print(f"\n----- log: {job['name']} -----", flush=True)
+def follow(repo: str, run_id: int, interval: float, compact: bool) -> str:
+    """`gh run watch` for live step progress, then the job log (published only once the run is done)."""
+    watch = ["gh", "run", "watch", str(run_id), "-R", repo, "-i", str(max(1, int(interval)))]
+    subprocess.run(watch + (["--compact"] if compact else []))
+    cp = gh("run", "view", str(run_id), "-R", repo, "--log", check=False)
+    if cp.returncode == 0:
+        print("\n----- log -----")
+        # `gh run view --log` lines are "<job>\t<step>\t<timestamp> <text>"; keep the step and text.
         for line in cp.stdout.splitlines():
-            print(TS.sub("", line), flush=True)
-        self.logged.add(job["id"])
-
-    def run(self) -> str:
-        last_status = None
-        while True:
-            run = gh_json("api", f"repos/{self.repo}/actions/runs/{self.run_id}")
-            if run["status"] != last_status:
-                last_status = run["status"]
-                if last_status in ("queued", "waiting", "pending"):
-                    print(f"… {last_status} (waiting for a macOS worker)", flush=True)
-            for job in self._jobs():
-                self._print_steps(job)
-                if job["status"] == "completed" and job["id"] not in self.logged:
-                    self._print_log(job)
-            if run["status"] == "completed":
-                return run.get("conclusion") or "unknown"
-            time.sleep(self.interval)
+            parts = line.split("\t", 2)
+            print(f"{parts[1]} | {TS.sub('', parts[2].lstrip(chr(0xFEFF)))}" if len(parts) == 3 else line, flush=True)
+    else:
+        print(f"(log not available yet; later: gh run view {run_id} -R {repo} --log)")
+    return gh_json("run", "view", str(run_id), "-R", repo, "--json", "conclusion")["conclusion"] or "unknown"
 
 
 def main(argv=None) -> int:
@@ -174,7 +140,7 @@ def main(argv=None) -> int:
     if a.no_follow:
         return 0
     try:
-        conclusion = Follower(a.repo, run_id, a.interval).run()
+        conclusion = follow(a.repo, run_id, a.interval, a.compact)
     except KeyboardInterrupt:
         print(f"\nstopped following; the run continues: {url}\n"
               f"(follow again: ./trio-test-ci --attach {run_id}; cancel: gh run cancel {run_id} -R {a.repo})")
