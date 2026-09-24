@@ -15,7 +15,9 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
+import shutil
 import subprocess
 import sys
 import time
@@ -114,10 +116,37 @@ def trigger(a: argparse.Namespace) -> int:
     sys.exit(f"triggered, but could not find the run; see https://github.com/{a.repo}/actions (as {me})")
 
 
-def follow(repo: str, run_id: int, interval: float, compact: bool) -> str:
+def watch(cmd: list[str], url: str) -> None:
+    """Run `gh run watch`, keeping the run URL at the top of its display.
+
+    In a terminal gh draws in the alternate screen and redraws from the top-left on every refresh
+    (cursor home + clear to end, "\\x1b[J"), so anything printed before it is hidden. Its output is
+    piped through here, with GH_FORCE_TTY so gh still draws for a terminal, and the URL is written
+    after each clear.
+    """
+    if not sys.stdout.isatty():
+        subprocess.run(cmd)
+        return
+    env = {**os.environ, "GH_FORCE_TTY": str(shutil.get_terminal_size().columns)}
+    header = f"\x1b[1mRun:\x1b[0m {url}\n\n".encode()
+    p = subprocess.Popen(cmd, stdout=subprocess.PIPE, env=env)
+    out = sys.stdout.buffer
+    try:
+        for line in iter(p.stdout.readline, b""):
+            out.write(line.replace(b"\x1b[J", b"\x1b[J" + header))
+            out.flush()
+        p.wait()
+    except KeyboardInterrupt:
+        p.terminate()
+        out.write(b"\x1b[?1049l")   # leave gh's alternate screen even if it did not get to
+        out.flush()
+        raise
+
+
+def follow(repo: str, run_id: int, url: str, interval: float, compact: bool) -> str:
     """`gh run watch` for live step progress, then the job log (published only once the run is done)."""
-    watch = ["gh", "run", "watch", str(run_id), "-R", repo, "-i", str(max(1, int(interval)))]
-    subprocess.run(watch + (["--compact"] if compact else []))
+    cmd = ["gh", "run", "watch", str(run_id), "-R", repo, "-i", str(max(1, int(interval)))]
+    watch(cmd + (["--compact"] if compact else []), url)
     cp = gh("run", "view", str(run_id), "-R", repo, "--log", check=False)
     if cp.returncode == 0:
         print("\n----- log -----")
@@ -140,7 +169,7 @@ def main(argv=None) -> int:
     if a.no_follow:
         return 0
     try:
-        conclusion = follow(a.repo, run_id, a.interval, a.compact)
+        conclusion = follow(a.repo, run_id, url, a.interval, a.compact)
     except KeyboardInterrupt:
         print(f"\nstopped following; the run continues: {url}\n"
               f"(follow again: ./trio-test-ci --attach {run_id}; cancel: gh run cancel {run_id} -R {a.repo})")
