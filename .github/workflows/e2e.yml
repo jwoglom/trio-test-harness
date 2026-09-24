@@ -32,6 +32,10 @@ on:
         type: choice
         options: [claude, none]
         default: claude
+      claude_model:
+        description: "Claude model for the agent (sonnet, opus, haiku, or a model ID)"
+        type: string
+        default: sonnet
       agent_instructions:
         description: "Extra focus for the agent"
         type: string
@@ -139,6 +143,7 @@ jobs:
         continue-on-error: true
         env:
           CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          CLAUDE_MODEL: ${{ inputs.claude_model || 'sonnet' }}
           RUN_DIR: ${{ steps.e2e.outputs.run_dir }}
         run: |
           set -euo pipefail
@@ -148,9 +153,11 @@ jobs:
           import os, pathlib
           t = pathlib.Path("ci/agent-prompt.md").read_text()
           print(t.format(run_dir=os.environ["RUN_DIR"], smoke_note=os.environ["SMOKE"], extra=os.environ["EXTRA"]))')
-          claude -p "$prompt" --output-format text \
+          # stream-json + ci/agent-stream.py: live progress in this log (model, each tool call, notes),
+          # final answer into agent-summary.md for the job summary.
+          claude -p "$prompt" --model "$CLAUDE_MODEL" --output-format stream-json --verbose \
             --allowedTools "Bash(./trio-test-harness:*)" "Bash(./bin/th:*)" "Bash(sleep:*)" Read Glob Grep \
-            | tee "$RUN_DIR/agent-summary.md"
+            | python3 ci/agent-stream.py "$RUN_DIR/agent-summary.md"
           ./trio-test-harness report html --run "$RUN_DIR" >/dev/null
 
       - name: GitHub App token (PR owner)
