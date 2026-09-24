@@ -240,7 +240,6 @@ figcaption{{padding:8px 10px;font-size:13px;display:flex;flex-direction:column;g
 # Screenshots are uploaded *into* the comment with `gh pr comment --attach` (gh ≥ 2.99): each `![alt](./path.png)`
 # reference in the body is rewritten to the uploaded asset URL. No side repo, no external hosting.
 
-MAX_ATTACH = 50   # GitHub's per-command limit
 
 
 def _gh(args: list[str], **kw) -> str:
@@ -270,16 +269,6 @@ def setup_note(run: Run) -> str | None:
     a, b = _hidden_range(run)
     return (f"{b - a} Glucose Simulator + Pump Simulator setup steps are not shown; "
             "their screenshots are in the run artifact.") if b > a else None
-
-
-def select_steps(run: Run, max_shots: int | None) -> list[dict]:
-    """Steps with screenshots, evenly thinned to max_shots (first and last always kept)."""
-    steps = [s for s in shown_steps(run) if run.shot_file(s) is not None]
-    limit = min(max_shots or MAX_ATTACH, MAX_ATTACH)
-    if len(steps) <= limit:
-        return steps
-    idx = sorted({round(i * (len(steps) - 1) / (limit - 1)) for i in range(limit)})
-    return [steps[i] for i in idx]
 
 
 def render_markdown(run: Run, *, columns: int = 3, max_shots: int | None = None,
@@ -323,27 +312,10 @@ def render_markdown(run: Run, *, columns: int = 3, max_shots: int | None = None,
         lines += ["", f"<sub>{len(cells)} of {total} screenshots chosen by a separate review pass; all steps are{where}.</sub>",
                   "", "<sub>Posted by trio-test-harness (simulator CGM/pump, no real patient data).</sub>"]
         return "\n".join(lines), files
-    steps = select_steps(run, max_shots)
-    if setup_note(run):
-        lines += ["", f"<sub>{setup_note(run)}</sub>"]
-    if steps:
-        total = len([s for s in shown_steps(run) if s.get("screenshot")])
-        note = f" ({len(steps)} of {total} screenshots)" if len(steps) < total else ""
-        lines += ["", f"<details open><summary>Screenshots{note}</summary>", ""]
-        header = "| " + " | ".join([" "] * columns) + " |"
-        lines += [header, "|" + "---|" * columns]
-        for i in range(0, len(steps), columns):
-            row = steps[i:i + columns]
-            cells = []
-            for s in row:
-                shot = run.shot_file(s)
-                rel = run.rel_shot(shot)
-                files.append(shot)
-                cap = html.escape(f"{s.get('action','')}: {s.get('note','')}".strip(": "))
-                cells.append(f"![{cap}](./{rel})<br><sub>{cap}</sub>")
-            cells += [" "] * (columns - len(row))
-            lines.append("| " + " | ".join(cells) + " |")
-        lines += ["", "</details>"]
+    # No review for this run (no agent, or the review failed): the comment carries only the run's result and
+    # summary. Screenshots in a PR comment are only ever the review's picks; everything is in the full report.
+    where = f"the [full report]({artifact_url})" if artifact_url else "the run's report"
+    lines += ["", f"<sub>No screenshot review for this run; all steps and screenshots are in {where}.</sub>"]
     lines += ["", "<sub>Posted by trio-test-harness (simulator CGM/pump, no real patient data).</sub>"]
     return "\n".join(lines), files
 
