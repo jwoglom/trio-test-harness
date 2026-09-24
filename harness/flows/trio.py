@@ -258,6 +258,23 @@ def devices_configured(drv: Driver) -> bool:
         and bool(drv.find("Main", exact=True) or drv.find("Settings", exact=True))
 
 
+def _tap_picker_row(drv: Driver, label: str, max_scrolls: int = 6) -> None:
+    """Tap a row in a device picker sheet, scrolling down until SwiftUI has created it.
+
+    The grouped pickers (manufacturer sections, simulators last) are lazy lists: rows far below the
+    fold are not in the accessibility tree yet, so looking them up without scrolling fails. Scrolling
+    *down* only moves the list; swiping the other way could dismiss the sheet.
+    """
+    for _ in range(max_scrolls):
+        try:
+            drv.tap_text(label, exact=True, ocr_fallback=False)
+            return
+        except LookupError:
+            drv.scroll("down", 0.4)
+            time.sleep(0.8)
+    drv.tap_text(label, exact=True)  # last try, with the OCR fallback
+
+
 def add_cgm_simulator(drv: Driver, run: Run | None = None) -> None:
     settle(drv, run)
     if not _open_picker_from_home(drv, run, "Add CGM", 0.5):
@@ -266,7 +283,7 @@ def add_cgm_simulator(drv: Driver, run: Run | None = None) -> None:
         _tap_seq(drv, run, ["Devices", "CGM"])
         dismiss_dialogs(drv, ["Allow", "OK"])
         drv.tap_text("Add CGM"); time.sleep(2)
-    drv.tap_text("Glucose Simulator", exact=True)   # WDA scrolls the sheet to the row; never swipe inside sheets
+    _tap_picker_row(drv, "Glucose Simulator")
     time.sleep(2.5)
     dismiss_dialogs(drv, ["Continue", "Done", "OK", "Save"])
     step(run, drv, "cgm-simulator-added", "After adding Glucose Simulator")
@@ -277,7 +294,7 @@ def add_pump_simulator(drv: Driver, run: Run | None = None) -> None:
     if not _open_picker_from_home(drv, run, "Add pump", 0.125):
         open_settings(drv)
         _tap_seq(drv, run, ["Devices", "Insulin Pump", "Add Pump"])
-    drv.tap_text("Pump Simulator", exact=True)
+    _tap_picker_row(drv, "Pump Simulator")
     time.sleep(3)
     # MockPumpManager setup: keep defaults and continue until it is dismissed
     for _ in range(6):
