@@ -96,18 +96,37 @@ class BuildInfo:
 
 # ---------------- source checkout -----------------
 
-# Process-scoped git config: use SSH for GitHub (private submodules such as TandemKit need auth,
-# and the user's origin already uses SSH), never prompt for credentials.
-GIT_ENV = {
+# Process-scoped git config, never prompting for credentials. Private submodules such as TandemKit
+# need auth: by default GitHub URLs are rewritten to SSH (the user's origin already uses SSH); with
+# TH_GIT_TOKEN set (CI, no SSH key) they go over HTTPS with that token instead.
+GIT_ENV_SSH = {
     "GIT_TERMINAL_PROMPT": "0",
     "GIT_CONFIG_COUNT": "1",
     "GIT_CONFIG_KEY_0": "url.git@github.com:.insteadOf",
     "GIT_CONFIG_VALUE_0": "https://github.com/",
 }
+# Token mode is hermetic: global/system git config is ignored, so a user-level SSH rewrite or a
+# credential manager that would prompt cannot interfere. The helper reads the token from the
+# environment, so it never lands in a URL, .git/config or an error message.
+GIT_ENV_TOKEN = {
+    "GIT_TERMINAL_PROMPT": "0",
+    "GIT_CONFIG_GLOBAL": "/dev/null",
+    "GIT_CONFIG_NOSYSTEM": "1",
+    "GIT_CONFIG_COUNT": "2",
+    "GIT_CONFIG_KEY_0": "url.https://github.com/.insteadOf",
+    "GIT_CONFIG_VALUE_0": "git@github.com:",
+    "GIT_CONFIG_KEY_1": "credential.helper",
+    "GIT_CONFIG_VALUE_1": '!f() { echo username=x-access-token; echo "password=$TH_GIT_TOKEN"; }; f',
+}
+
+
+def git_env() -> dict[str, str]:
+    token = CONFIG.get("TH_GIT_TOKEN")
+    return {**GIT_ENV_TOKEN, "TH_GIT_TOKEN": token} if token else dict(GIT_ENV_SSH)
 
 
 def _git(args: list[str], cwd: Path, **kw):
-    env = {**GIT_ENV, **(kw.pop("env", None) or {})}
+    env = {**git_env(), **(kw.pop("env", None) or {})}
     return run(["git", *args], cwd=cwd, env=env, **kw)
 
 

@@ -16,6 +16,7 @@ DEFAULTS = {
     "TRIO_REPO": str(REPO_ROOT / "Trio"),        # Trio checkout the harness builds from (cloned on demand)
     "TH_TRIO_REFERENCE": str(REPO_ROOT.parent / "Trio"),  # existing local clone used to speed up that clone
     "TH_TRIO_BASE_BRANCH": "dev",                # Trio branch to test submodule PRs against when not derivable
+    "TH_GIT_TOKEN": "",               # CI only (env, never a file): HTTPS token for GitHub instead of SSH
     "TH_DEVELOPER_TEAM": "",          # Apple Team ID for device builds; blank = simulator-only
     "TH_SIM_TEAM_PLACEHOLDER": "TRIOSIMTST",  # fake team id used to form a valid bundle id on the simulator
     "TH_XCODE_APP": "",               # e.g. /Applications/Xcode-26.3.app; blank = auto-detect newest
