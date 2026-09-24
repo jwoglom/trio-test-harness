@@ -135,7 +135,7 @@ jobs:
       - name: Agent (Claude Code tests what the PR describes)
         id: agent
         if: inputs.agent == 'claude' && steps.e2e.outcome == 'success'
-        timeout-minutes: ${{ inputs.agent_minutes }}
+        timeout-minutes: ${{ fromJSON(inputs.agent_minutes) }}
         continue-on-error: true
         env:
           CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
