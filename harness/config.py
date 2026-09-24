@@ -20,6 +20,8 @@ DEFAULTS = {
     "TH_GIT_MIRRORS": "",             # dir of <owner>/<repo>.git bare mirrors used as --reference for submodules
     "TH_WDA_PREBUILT": "",            # derivedData of a prebuilt WebDriverAgentRunner (Build/Products/*.xctestrun)                # Trio branch to test submodule PRs against when not derivable
     "TH_GIT_TOKEN": "",               # CI only (env, never a file): HTTPS token for GitHub instead of SSH
+    "TH_UPLOAD_TOKEN": "",            # CI only (env): user token that uploads PR-comment screenshots
+    "TH_UPLOAD_REPO": "",             # owner/repo those uploads belong to (who can see them)
     "TH_DEVELOPER_TEAM": "",          # Apple Team ID for device builds; blank = simulator-only
     "TH_SIM_TEAM_PLACEHOLDER": "TRIOSIMTST",  # fake team id used to form a valid bundle id on the simulator
     "TH_XCODE_APP": "",               # e.g. /Applications/Xcode-26.3.app; blank = auto-detect newest

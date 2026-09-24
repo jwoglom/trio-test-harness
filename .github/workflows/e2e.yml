@@ -170,6 +170,12 @@ jobs:
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           PR: ${{ steps.v.outputs.pr }}
           PR_OWNER: ${{ steps.v.outputs.pr_owner }}
+          # Screenshots are uploaded with a user PAT that can only reach this repo (GitHub takes
+          # attachment uploads from user tokens only); the comment is still posted as the App. The
+          # images are visible to people who can read this private repo, so only PRs in jwoglom's
+          # repos get them; elsewhere the comment carries captions and a link to the run.
+          TH_UPLOAD_TOKEN: ${{ steps.v.outputs.pr_owner == 'jwoglom' && secrets.TRIO_TEST_HARNESS_USER_PAT || '' }}
+          TH_UPLOAD_REPO: ${{ github.repository }}
         run: |
           if [ -z "$PR" ]; then
             echo "::notice title=PR comment skipped::this run has no PR (Trio branch only)"
@@ -198,17 +204,27 @@ jobs:
           [ -z "$COMMENT_NOTE" ] || args+=(--comment-note "$COMMENT_NOTE")
           python3 ci/summary.py "${args[@]}" >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Upload report
+      - name: Upload run (screenshots, steps, report)
         if: always() && steps.e2e.outputs.run_dir != ''
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: trio-e2e-${{ github.run_id }}
           path: ${{ steps.e2e.outputs.run_dir }}
           retention-days: 14
 
+      # report.html embeds the screenshots, so as an unzipped artifact it opens without unpacking.
+      - name: Upload report.html (unzipped)
+        if: always() && steps.e2e.outputs.run_dir != ''
+        uses: actions/upload-artifact@v7
+        with:
+          path: ${{ steps.e2e.outputs.run_dir }}/report.html
+          archive: false
+          retention-days: 14
+          if-no-files-found: ignore
+
       - name: Upload build log (on failure)
         if: failure() && steps.e2e.outcome == 'failure'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: trio-e2e-${{ github.run_id }}-build-log
           path: build/xcodebuild-*.log

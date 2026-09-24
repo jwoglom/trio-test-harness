@@ -122,11 +122,15 @@ gh workflow run e2e.yml -R jwoglom/trio-test-harness -f trio=feat/tandem -f subm
   describes, headless; prompt in `ci/agent-prompt.md`), extra agent focus, agent time limit, post PR comment,
   simulator device/runtime, Xcode.
 
-Results: job summary (`ci/summary.py`), artifact with `report.html` + screenshots, and optionally a PR comment from
-`trio-test-harness-runner[bot]`. That App needs to be installed on the PR's owner (skipped otherwise), and because
-`gh --attach` uploads only work with a user token, its comments carry step captions and a link to the run's
-artifact instead of inline screenshots. Secrets: `TRIO_E2E_APP_ID`, `TRIO_E2E_APP_KEY` (App with Contents: read,
-Pull requests: write) and `CLAUDE_CODE_OAUTH_TOKEN`. In CI the harness authenticates git with `TH_GIT_TOKEN` over
+Results: job summary (`ci/summary.py`), an artifact with the run (screenshots, `steps.jsonl`, `report.html`), `report.html`
+on its own as an unzipped artifact (it embeds the screenshots), and optionally a PR comment from
+`trio-test-harness-runner[bot]` (the App must be installed on the PR's owner; skipped otherwise). GitHub accepts
+attachment uploads only from user tokens, so for PRs in jwoglom's repos the screenshots are uploaded with
+`TRIO_TEST_HARNESS_USER_PAT` (a fine-grained PAT that can only reach this repo; the images therefore display for people
+who can read it) and the App posts the comment. Elsewhere, or if the upload fails, the comment has step captions and a
+link to the run instead.
+Secrets: `TRIO_E2E_APP_ID`, `TRIO_E2E_APP_KEY` (App with Contents: read,
+Pull requests: write) `CLAUDE_CODE_OAUTH_TOKEN`, and `TRIO_TEST_HARNESS_USER_PAT`. In CI the harness authenticates git with `TH_GIT_TOKEN` over
 HTTPS instead of SSH, and uses the workers' git mirrors (`TH_GIT_MIRRORS`) and prebuilt WebDriverAgent
 (`TH_WDA_PREBUILT`).
 

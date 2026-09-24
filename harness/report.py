@@ -240,6 +240,39 @@ def render_markdown(run: Run, *, columns: int = 3, max_shots: int | None = None,
     return "\n".join(lines), files
 
 
+def upload_assets(files: list[Path], token: str, repo: str) -> dict[Path, str]:
+    """Upload images as GitHub comment attachments (user-attachments) with a user token.
+
+    GitHub accepts these uploads only from user tokens, not App tokens, so CI uploads with the user's
+    fine-grained PAT (scoped to `repo`) and posts the comment itself as the App. The assets belong to
+    `repo`: they display for viewers who can read that repo. Returns {file: asset URL}.
+    """
+    import mimetypes
+    import requests
+    hdrs = {"Authorization": f"Bearer {token}", "Accept": "application/vnd.github+json"}
+    r = requests.get(f"https://api.github.com/repos/{repo}", headers=hdrs, timeout=30)
+    if r.status_code != 200:
+        raise HarnessError(f"upload token cannot read {repo}: HTTP {r.status_code}")
+    repo_id = r.json()["id"]
+    urls: dict[Path, str] = {}
+    for f in files:
+        ctype = mimetypes.guess_type(f.name)[0] or "application/octet-stream"
+        with open(f, "rb") as fh:
+            up = requests.post("https://uploads.github.com/user-attachments/assets",
+                               params={"name": f.name, "content_type": ctype, "repository_id": repo_id},
+                               headers={**hdrs, "Content-Type": "application/octet-stream"}, data=fh, timeout=120)
+        if up.status_code >= 300 or not up.json().get("url"):
+            raise HarnessError(f"uploading {f.name} failed: HTTP {up.status_code} {up.text[:200]}")
+        urls[f] = up.json()["url"]
+    return urls
+
+
+def _with_uploaded_images(md: str, run: Run, urls: dict[Path, str]) -> str:
+    for f, url in urls.items():
+        md = md.replace(f"(./{f.relative_to(run.path)})", f"({url})")
+    return md
+
+
 def _without_images(md: str, artifact_url: str | None) -> str:
     """The comment body without its ![...](./screenshots/...) images; each cell keeps its caption."""
     text = re.sub(r"!\[[^\]]*\]\(\./screenshots/[^)]+\)(<br>)?", "", md).replace("<summary>Screenshots", "<summary>Steps")
@@ -260,6 +293,17 @@ def post_to_pr(run: Run, pr: str, *, mode: str = "comment", repo: str | None = N
         rel = f.relative_to(run.path)
         attach += ["--attach", f"./{rel}"]
     if mode == "comment":
+        upload_token, upload_repo = CONFIG.get("TH_UPLOAD_TOKEN"), CONFIG.get("TH_UPLOAD_REPO")
+        if upload_token and upload_repo and files:
+            # CI: the images go up with a user token scoped to upload_repo; the comment itself is posted
+            # with whatever GH_TOKEN is (the App), so the App is the visible author.
+            try:
+                body.write_text(_with_uploaded_images(md, run, upload_assets(files, upload_token, upload_repo)))
+                attach = []
+            except HarnessError as e:
+                log(f"screenshot upload failed ({e}); posting without inline screenshots")
+                body.write_text(_without_images(md, artifact_url))
+                attach, files = [], []
         try:
             out = run_cmd(["gh", "pr", "comment", str(num), "--repo", slug, "--body-file", str(body), *attach],
                           cwd=run.path, timeout=900).stdout
