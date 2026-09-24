@@ -37,13 +37,16 @@ def ensure_checkout(dest: Path | None = None) -> Path:
     if (dest / ".git").exists():
         return dest
     ref = Path(CONFIG.get("TH_TRIO_REFERENCE")).expanduser()
-    url = _gh_repo_url(DEFAULT_GH_REPO)
+    origin = CONFIG.get("TH_TRIO_ORIGIN")
+    url = _gh_repo_url(origin or DEFAULT_GH_REPO)
     cmd = ["clone", "--no-checkout"]
-    if (ref / ".git").exists():
-        try:
-            url = _origin_url(ref)
-        except HarnessError:
-            pass
+    # A working clone or a bare mirror (CI workers keep one of nightscout/Trio) both work as a reference.
+    if (ref / ".git").exists() or (ref / "HEAD").exists() and (ref / "objects").is_dir():
+        if not origin:
+            try:
+                url = _origin_url(ref)
+            except HarnessError:
+                pass
         cmd += ["--reference-if-able", str(ref)]
     dest.parent.mkdir(parents=True, exist_ok=True)
     log(f"cloning Trio into {dest} (origin {url})")

@@ -89,7 +89,9 @@ jobs:
       TH_XCODE_APP: /Applications/Xcode_${{ inputs.xcode }}.app
       TH_SIM_DEVICE: ${{ inputs.sim_device }}
       TH_SIM_RUNTIME: ${{ inputs.sim_runtime }}
-      # The workers keep a bare mirror of nightscout/Trio; cloning with it as a reference takes seconds.
+      # jwoglom/Trio carries feat/tandem (the TandemKit submodule) and upstream's branches; the workers'
+      # bare mirror of nightscout/Trio serves as a reference, so most objects come from local disk.
+      TH_TRIO_ORIGIN: jwoglom/Trio
       TH_TRIO_REFERENCE: /Volumes/work/mirrors/nightscout/Trio.git
     steps:
       - name: Validate inputs

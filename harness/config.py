@@ -15,6 +15,7 @@ ENV_FILE = REPO_ROOT / "harness.env"
 DEFAULTS = {
     "TRIO_REPO": str(REPO_ROOT / "Trio"),        # Trio checkout the harness builds from (cloned on demand)
     "TH_TRIO_REFERENCE": str(REPO_ROOT.parent / "Trio"),  # existing local clone used to speed up that clone
+    "TH_TRIO_ORIGIN": "",                        # owner/repo to clone Trio from; blank = the reference's origin, else nightscout/Trio
     "TH_TRIO_BASE_BRANCH": "dev",                # Trio branch to test submodule PRs against when not derivable
     "TH_GIT_TOKEN": "",               # CI only (env, never a file): HTTPS token for GitHub instead of SSH
     "TH_DEVELOPER_TEAM": "",          # Apple Team ID for device builds; blank = simulator-only
