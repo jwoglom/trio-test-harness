@@ -113,7 +113,7 @@ prints the job log once the run is done (GitHub publishes job logs only after co
 
 ```
 ./trio-test-ci -s jwoglom/TandemKit#395 --comment
-./trio-test-ci 1234 --agent none
+./trio-test-ci 1234 --model opus
 ./trio-test-ci feat/tandem -s TandemKit@my-branch --instructions "check the bolus sheet"
 ```
 
@@ -121,7 +121,7 @@ Or with gh directly:
 
 ```
 gh workflow run e2e.yml -R jwoglom/trio-test-harness -f submodules=jwoglom/TandemKit#395 -f post_comment=true
-gh workflow run e2e.yml -R jwoglom/trio-test-harness -f trio=1234 -f agent=none
+gh workflow run e2e.yml -R jwoglom/trio-test-harness -f trio=1234
 gh workflow run e2e.yml -R jwoglom/trio-test-harness -f trio=feat/tandem -f submodules="TandemKit@my-branch"
 ```
 
@@ -130,8 +130,7 @@ gh workflow run e2e.yml -R jwoglom/trio-test-harness -f trio=feat/tandem -f subm
 - **Submodules**: PR links / `owner/repo#N` and `NAME@branch` (or `owner/repo@branch`), space-separated.
 - **The run's PR** (read into `pr.md`, and where a comment goes) is the Trio PR, else the first submodule PR.
   `ci/inputs.py` has the mapping onto `trio-test-e2e` flags.
-- Also: build configuration, skip onboarding, fake CGM/pump, `agent` (Claude Code then exercises what the PR
-  describes, headless; prompt in `ci/agent-prompt.md`; its step log shows live progress via `ci/agent-stream.py`),
+- Also: build configuration, skip onboarding, fake CGM/pump. Claude Code then exercises what the PR describes ( headless; prompt in `ci/agent-prompt.md`; its step log shows live progress via `ci/agent-stream.py`),
   Claude model for the agent (`claude_model`, default `sonnet`), extra agent focus, agent time limit, post PR comment,
   simulator device/runtime, Xcode.
 

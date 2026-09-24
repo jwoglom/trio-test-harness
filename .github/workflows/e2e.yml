@@ -3,7 +3,7 @@
 # Manual only:
 #   gh workflow run e2e.yml -R jwoglom/trio-test-harness -f submodules=jwoglom/TandemKit#395 -f post_comment=true
 name: Trio e2e (simulator)
-run-name: "e2e: ${{ inputs.trio || (!inputs.submodules && 'dev') || '' }}${{ inputs.trio && inputs.submodules && ' + ' || '' }}${{ inputs.submodules }}${{ inputs.agent == 'claude' && ' (agent)' || '' }}"
+run-name: "e2e: ${{ inputs.trio || (!inputs.submodules && 'dev') || '' }}${{ inputs.trio && inputs.submodules && ' + ' || '' }}${{ inputs.submodules }}"
 
 on:
   workflow_dispatch:
@@ -27,11 +27,6 @@ on:
         description: "Configure the Glucose Simulator + Pump Simulator"
         type: boolean
         default: true
-      agent:
-        description: "Agent (claude: Claude Code then tests what the PR describes)"
-        type: choice
-        options: [claude, none]
-        default: claude
       claude_model:
         description: "Claude model for the agent (sonnet, opus, haiku, or a model ID)"
         type: string
@@ -138,7 +133,7 @@ jobs:
       # No GitHub token here: the agent only drives the simulator through the harness.
       - name: Agent (Claude Code tests what the PR describes)
         id: agent
-        if: inputs.agent == 'claude' && steps.e2e.outcome == 'success'
+        if: steps.e2e.outcome == 'success'
         timeout-minutes: ${{ fromJSON(inputs.agent_minutes) }}
         continue-on-error: true
         env:
@@ -174,7 +169,7 @@ jobs:
       # comment lead with its verdict, prose and picks (ci/highlights-prompt.md, ci/highlights.py).
       - name: Highlights (a separate Claude pass picks the relevant screenshots)
         id: highlights
-        if: always() && inputs.agent == 'claude' && steps.e2e.outputs.run_dir != ''
+        if: always() && steps.e2e.outputs.run_dir != ''
         timeout-minutes: 10
         continue-on-error: true
         env:

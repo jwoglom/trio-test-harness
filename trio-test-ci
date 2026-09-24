@@ -2,7 +2,7 @@
 """Trigger the "Trio e2e (simulator)" GitHub Actions workflow and follow it from the terminal.
 
     ./trio-test-ci -s jwoglom/TandemKit#395 --comment
-    ./trio-test-ci 1234 --agent none
+    ./trio-test-ci 1234 --model opus
     ./trio-test-ci feat/tandem -s TandemKit@my-branch --instructions "check the bolus sheet"
     ./trio-test-ci --attach 35955500012          # follow a run again after Ctrl-C
 
@@ -48,7 +48,6 @@ def parse_args(argv=None) -> argparse.Namespace:
     p.add_argument("--configuration", choices=["Debug", "Release"])
     p.add_argument("--walk-onboarding", action="store_true", help="tap through onboarding instead of skipping it")
     p.add_argument("--no-smoke", action="store_true", help="do not configure the Glucose Simulator + Pump Simulator")
-    p.add_argument("--agent", choices=["claude", "none"], help="default: claude")
     p.add_argument("--model", metavar="MODEL", help="Claude model for the agent (default sonnet)")
     p.add_argument("--instructions", metavar="TEXT", help="extra focus for the agent")
     p.add_argument("--agent-minutes", type=int, metavar="N", help="agent time limit (default 30)")
@@ -76,8 +75,6 @@ def workflow_fields(a: argparse.Namespace) -> dict[str, str]:
         f["skip_onboarding"] = "false"
     if a.no_smoke:
         f["smoke"] = "false"
-    if a.agent:
-        f["agent"] = a.agent
     if a.model:
         f["claude_model"] = a.model
     if a.instructions:
