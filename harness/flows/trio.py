@@ -287,9 +287,49 @@ def _tap_picker_row(drv: Driver, label: str, max_scrolls: int = 6) -> None:
     drv.tap_text(label, exact=True)  # last try, with the OCR fallback
 
 
-def add_cgm_simulator(drv: Driver, run: Run | None = None) -> None:
+SHEET_BUTTONS = ["Close", "Cancel", "Done"]
+
+
+def _sheet_open(drv: Driver) -> str | None:
+    """A sheet's dismiss button, if one is showing. The home screen behind a sheet stays in the
+    accessibility tree, so home markers alone cannot tell "home" from "a sheet over home"."""
+    return _visible(drv, SHEET_BUTTONS) if drv.ui_tree() else None
+
+
+def reset_to_home(drv: Driver, run: Run | None = None, attempts: int = 6) -> bool:
+    """Get back to the home screen from wherever a failed step left the app. Returns True when there."""
+    for _ in range(attempts):
+        settle(drv, run)
+        lab = _sheet_open(drv)
+        if lab:
+            try:
+                drv.tap_text(lab, exact=True, ocr_fallback=False)
+            except LookupError:
+                pass
+            time.sleep(1.2)
+            continue
+        if at_home(drv):
+            return True
+        back_to_home(drv, hops=2)
+        time.sleep(0.8)
+    return at_home(drv) and not _sheet_open(drv)
+
+
+def _diagnose(drv: Driver, run: Run | None, action: str, why: str) -> None:
+    """Record what was on screen when a step failed: a screenshot plus the visible UI labels."""
+    step(run, drv, action, why)
+    if run is None:
+        return
+    try:
+        labels = sorted({n.label for n in drv.ui_tree() if n.label and n.w > 0})
+    except Exception as e:  # noqa: BLE001 - diagnostics must never mask the real failure
+        labels = [f"(accessibility tree unavailable: {e})"]
+    (run.path / f"{action}-labels.txt").write_text("\n".join(labels) + "\n")
+
+
+def _add_cgm_once(drv: Driver, run: Run | None, via_settings: bool) -> None:
     settle(drv, run)
-    if not _open_picker_from_home(drv, run, "Add CGM", 0.5):
+    if via_settings or not _open_picker_from_home(drv, run, "Add CGM", 0.5):
         open_settings(drv)
         step(run, drv, "settings", "Settings root")
         _tap_seq(drv, run, ["Devices", "CGM"])
@@ -302,9 +342,9 @@ def add_cgm_simulator(drv: Driver, run: Run | None = None) -> None:
     _close_device_sheet(drv)
 
 
-def add_pump_simulator(drv: Driver, run: Run | None = None) -> None:
+def _add_pump_once(drv: Driver, run: Run | None, via_settings: bool) -> None:
     settle(drv, run)
-    if not _open_picker_from_home(drv, run, "Add pump", 0.125):
+    if via_settings or not _open_picker_from_home(drv, run, "Add pump", 0.125):
         open_settings(drv)
         _tap_seq(drv, run, ["Devices", "Insulin Pump", "Add Pump"])
     _tap_picker_row(drv, "Pump Simulator")
@@ -318,6 +358,40 @@ def add_pump_simulator(drv: Driver, run: Run | None = None) -> None:
         time.sleep(1.0)
     step(run, drv, "pump-simulator-added", "Insulin Pump screen after adding Pump Simulator")
     _close_device_sheet(drv)
+
+
+def _add_device(drv: Driver, run: Run | None, kind: str, shortcut: str, once, attempts: int) -> None:
+    """Add a simulated device, then prove it: back on home, its 'Add …' shortcut must be gone.
+
+    The first attempt uses the home shortcut; a failed or unverified attempt is recorded, the app is
+    reset to home, and the next attempt goes through Settings ▸ Devices instead.
+    """
+    for attempt in range(1, attempts + 1):
+        failed = False
+        try:
+            once(drv, run, via_settings=attempt > 1)
+        except (LookupError, HarnessError) as e:
+            failed = True
+            _diagnose(drv, run, f"{kind}-attempt-{attempt}-failed", f"{type(e).__name__}: {e}")
+        if not reset_to_home(drv, run):
+            _diagnose(drv, run, f"{kind}-attempt-{attempt}-not-home", "could not get back to the home screen")
+            continue
+        if not drv.find(shortcut, exact=True):
+            if attempt > 1:
+                run and run.log_step(f"{kind}-recovered", f"{kind} simulator added on attempt {attempt}")
+            return
+        if not failed:
+            _diagnose(drv, run, f"{kind}-attempt-{attempt}-unverified", f"home still offers '{shortcut}'")
+    raise HarnessError(f"could not add the {kind} simulator after {attempts} attempts; "
+                       f"see the *-attempt-* screenshots and labels in the run")
+
+
+def add_cgm_simulator(drv: Driver, run: Run | None = None, attempts: int = 2) -> None:
+    _add_device(drv, run, "cgm", "Add CGM", _add_cgm_once, attempts)
+
+
+def add_pump_simulator(drv: Driver, run: Run | None = None, attempts: int = 2) -> None:
+    _add_device(drv, run, "pump", "Add pump", _add_pump_once, attempts)
 
 
 def back_to_home(drv: Driver, hops: int = 4) -> None:
