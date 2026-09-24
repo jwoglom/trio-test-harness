@@ -48,6 +48,8 @@ def ensure_checkout(dest: Path | None = None) -> Path:
             except HarnessError:
                 pass
         cmd += ["--reference-if-able", str(ref)]
+        if not (ref / ".git").exists():
+            cmd.append("--dissociate")  # a shared mirror: do not depend on it after the clone
     dest.parent.mkdir(parents=True, exist_ok=True)
     log(f"cloning Trio into {dest} (origin {url})")
     _git([*cmd, url, str(dest)], REPO_ROOT, timeout=1800)
@@ -175,6 +177,39 @@ def _parse_gitmodules(text: str) -> dict[str, dict]:
     return mods
 
 
+def _slug_key(url: str) -> tuple[str, str] | None:
+    m = re.search(r"github\.com[:/]([^/]+)/([^/]+?)(?:\.git)?/?$", url)
+    return (m.group(1).lower(), m.group(2).lower()) if m else None
+
+
+def _init_submodules_from_mirrors(src: Path) -> None:
+    """Clone top-level submodules with a local bare mirror as --reference, where one exists.
+
+    TH_GIT_MIRRORS is a directory of <owner>/<repo>.git mirrors (the CI workers keep Trio's public
+    submodules there). Objects come from local disk; anything newer is still fetched from GitHub.
+    Submodules without a mirror, and nested ones, are left to the normal update that follows.
+    """
+    root = CONFIG.get("TH_GIT_MIRRORS")
+    gm = src / ".gitmodules"
+    if not root or not gm.exists() or not Path(root).is_dir():
+        return
+    mirrors = {(o.name.lower(), r.name[:-4].lower()): r
+               for o in Path(root).iterdir() if o.is_dir()
+               for r in o.glob("*.git") if (r / "HEAD").exists()}
+    for name, m in _parse_gitmodules(gm.read_text()).items():
+        path, key = m.get("path"), _slug_key(m.get("url", ""))
+        mirror = mirrors.get(key) if key else None
+        if not path or not mirror or (src / path / ".git").exists():
+            continue
+        # --dissociate (git >= 2.54) copies the borrowed objects so the clone no longer depends on the
+        # mirror; older git (Apple's) keeps the reference, which is fine while the mirror is not pruned.
+        base = ["submodule", "update", "--init", "--reference", str(mirror)]
+        cp = _git([*base, "--dissociate", "--", path], src, check=False, quiet=True, timeout=1800)
+        if cp.returncode != 0 and "dissociate" in (cp.stderr or ""):
+            cp = _git([*base, "--", path], src, check=False, quiet=True, timeout=1800)
+        log(f"submodule {name}: {'from mirror ' + str(mirror) if cp.returncode == 0 else 'mirror failed, will clone'}")
+
+
 def _repo_name(url_or_slug: str) -> str:
     return re.sub(r"\.git$", "", url_or_slug.rstrip("/").rsplit("/", 1)[-1]).lower()
 
@@ -268,6 +303,7 @@ def prepare_source(*, branch: str | None = None, pr: str | None = None, repo: st
     if fetch:
         log("syncing git submodules (first run downloads LoopKit & friends; several minutes)")
         _git(["submodule", "sync", "--recursive"], src, quiet=True)
+        _init_submodules_from_mirrors(src)
         _git(["submodule", "update", "--init", "--recursive", "--jobs", "6"], src, timeout=3600)
         _check_submodules(src)
     for spec in submodules or []:

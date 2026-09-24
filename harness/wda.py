@@ -42,6 +42,23 @@ def xctestrun() -> Path | None:
     return Path(hits[-1]) if hits else None
 
 
+def from_prebuilt() -> Path | None:
+    """Use a WDA built ahead of time (TH_WDA_PREBUILT: a derivedData dir with Build/Products/*.xctestrun).
+
+    The products are copied (an APFS clone, so instant) because test-without-building writes into its
+    derivedData; the prebuilt tree stays read-only and shared between runs.
+    """
+    pre = CONFIG.get("TH_WDA_PREBUILT")
+    if not pre or not glob.glob(str(Path(pre) / "Build" / "Products" / "*iphonesimulator*.xctestrun")):
+        return None
+    (WDA_DD / "Build").mkdir(parents=True, exist_ok=True)
+    src = str(Path(pre) / "Build" / "Products")
+    if subprocess.run(["cp", "-cR", src, str(WDA_DD / "Build")], stderr=subprocess.DEVNULL).returncode != 0:
+        run(["cp", "-R", src, str(WDA_DD / "Build")])
+    log(f"using prebuilt WebDriverAgent from {pre}")
+    return xctestrun()
+
+
 def build(udid: str) -> Path:
     ensure_source()
     log("building WebDriverAgentRunner for the simulator (one-off, several minutes)")
@@ -67,7 +84,7 @@ def is_running() -> bool:
 def start(udid: str, timeout: float = 600) -> None:
     if is_running():
         return
-    xr = xctestrun() or build(udid)
+    xr = xctestrun() or from_prebuilt() or build(udid)
     PID_FILE.parent.mkdir(parents=True, exist_ok=True)
     cmd = ["xcodebuild", "test-without-building", "-xctestrun", str(xr), "-destination", f"id={udid}",
            "-derivedDataPath", str(WDA_DD)]

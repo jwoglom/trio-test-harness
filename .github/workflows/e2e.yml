@@ -93,6 +93,9 @@ jobs:
       # bare mirror of nightscout/Trio serves as a reference, so most objects come from local disk.
       TH_TRIO_ORIGIN: jwoglom/Trio
       TH_TRIO_REFERENCE: /Volumes/work/mirrors/nightscout/Trio.git
+      TH_GIT_MIRRORS: /Volumes/work/mirrors
+      # Built by home-infra macos-workers (toolchains role), pinned to one WebDriverAgent release.
+      TH_WDA_PREBUILT: /Volumes/work/cache/wda/current
     steps:
       - name: Validate inputs
         id: v
