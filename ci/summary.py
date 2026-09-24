@@ -43,6 +43,8 @@ def main(argv=None) -> int:
     built = {k: v for k, v in built.items() if v}
     if built:
         out.append("- **Built:** " + ", ".join(f"{k} `{v}`" for k, v in built.items()))
+    if git.get("packages_note"):
+        out.append(f"- **Packages:** ⚠️ {git['packages_note']}")
     subs = git.get("submodules") or {}
     if isinstance(subs, dict) and subs:
         out.append("- **Submodules:** " + ", ".join(f"{k} `{str(v)[:12]}`" for k, v in sorted(subs.items())))

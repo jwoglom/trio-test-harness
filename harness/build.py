@@ -359,10 +359,28 @@ COMMON_FLAGS = [
 ADHOC_SIGNING = ['CODE_SIGN_IDENTITY=-', "CODE_SIGN_STYLE=Manual", "DEVELOPMENT_TEAM=", "PROVISIONING_PROFILE_SPECIFIER="]
 
 
-def resolve_packages(src: Path, scheme: str) -> None:
-    run(["xcodebuild", "-resolvePackageDependencies", "-workspace", CONFIG.get("TH_TRIO_WORKSPACE"),
-         "-scheme", scheme, "-onlyUsePackageVersionsFromResolvedFile", "-derivedDataPath", CONFIG.get("TH_DERIVED_DATA")],
-        cwd=src, env={**xcode.developer_env(), "CI": "true"}, timeout=1800, capture=False)
+PACKAGES_RERESOLVED = ("Package.resolved did not match the checkout's package dependencies (typically a submodule "
+                       "PR that adds a package), so packages were resolved fresh instead of from the lockfile")
+
+
+def resolve_packages(src: Path, scheme: str) -> str | None:
+    """Resolve SwiftPM packages from Package.resolved, as Trio CI does.
+
+    If the lockfile is only out of date, resolve again without it and return a note saying so;
+    any other failure raises.
+    """
+    base = ["xcodebuild", "-resolvePackageDependencies", "-workspace", CONFIG.get("TH_TRIO_WORKSPACE"),
+            "-scheme", scheme, "-derivedDataPath", CONFIG.get("TH_DERIVED_DATA")]
+    env = {**xcode.developer_env(), "CI": "true"}
+    try:
+        run([*base, "-onlyUsePackageVersionsFromResolvedFile"], cwd=src, env=env, timeout=1800)
+        return None
+    except HarnessError as e:
+        if "out-of-date resolved file" not in str(e):
+            raise
+    log(f"WARNING: {PACKAGES_RERESOLVED}")
+    run(base, cwd=src, env=env, timeout=1800, capture=False)
+    return PACKAGES_RERESOLVED
 
 
 def build(src: Path, target: str, *, configuration: str = "Debug", clean: bool = False,
@@ -375,7 +393,9 @@ def build(src: Path, target: str, *, configuration: str = "Debug", clean: bool =
         shutil.rmtree(dd)
     xcconfig, team = harness_xcconfig(src, "device" if (target == "device" and not trollstore) else "sim")
     if not (dd / "SourcePackages").exists():
-        resolve_packages(src, scheme)
+        note = resolve_packages(src, scheme)
+        if note:
+            git_info = {**(git_info or {}), "packages_note": note}
     if target == "sim":
         dest = "generic/platform=iOS Simulator"
         signing = ADHOC_SIGNING

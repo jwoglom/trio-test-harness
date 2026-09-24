@@ -152,8 +152,9 @@ jobs:
           [ -z "$IN_TRIO_BRANCH" ] || args+=(--trio-branch "$IN_TRIO_BRANCH")
           for s in $IN_SUBMODULES; do args+=(--submodule "$s"); done
           [ "$IN_SMOKE" = true ] || args+=(--no-smoke)
-          ./trio-test-e2e "${args[@]}"
-          rc=$?
+          # The runner's bash has -e; keep going so the run dir is recorded even when the run fails.
+          rc=0
+          ./trio-test-e2e "${args[@]}" || rc=$?
           run_dir=$(cat runs/.current 2>/dev/null || true)
           echo "run_dir=$run_dir" >> "$GITHUB_OUTPUT"
           exit $rc
