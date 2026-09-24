@@ -1,0 +1,187 @@
+#!/usr/bin/env python3
+"""Trigger the "Trio e2e (simulator)" GitHub Actions workflow and follow it from the terminal.
+
+    ./trio-test-ci -s jwoglom/TandemKit#395 --comment
+    ./trio-test-ci 1234 --agent none
+    ./trio-test-ci feat/tandem -s TandemKit@my-branch --instructions "check the bolus sheet"
+    ./trio-test-ci --attach 35955500012          # follow a run again after Ctrl-C
+
+Prints the run URL, then each step as it starts and finishes, and the job's log once the job is
+done (GitHub publishes job logs only after a job completes). Ctrl-C stops following; the run keeps
+going on GitHub (cancel it with `gh run cancel <id>`).
+Needs the gh CLI, signed in with access to the workflow's repository.
+"""
+from __future__ import annotations
+
+import argparse
+import json
+import re
+import subprocess
+import sys
+import time
+from datetime import datetime, timezone
+
+REPO = "jwoglom/trio-test-harness"
+WORKFLOW = "e2e.yml"
+TS = re.compile(r"^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d+Z ")
+
+
+def gh(*args: str, check: bool = True) -> subprocess.CompletedProcess:
+    return subprocess.run(["gh", *args], capture_output=True, text=True, check=check)
+
+
+def gh_json(*args: str):
+    return json.loads(gh(*args).stdout)
+
+
+def parse_args(argv=None) -> argparse.Namespace:
+    p = argparse.ArgumentParser(
+        prog="trio-test-ci", description="Run the Trio e2e workflow on the macOS workers and follow it.",
+        formatter_class=argparse.RawDescriptionHelpFormatter, epilog=__doc__.split("\n\n", 1)[1])
+    p.add_argument("trio", nargs="?", default="",
+                   help="Trio PR or branch: PR link, owner/repo#N, nightscout/Trio PR number, or branch "
+                        "(blank: dev, or the branch that has the submodule)")
+    p.add_argument("-s", "--submodule", action="append", default=[], metavar="REF",
+                   help="submodule PR (link or owner/repo#N) or NAME@branch; repeatable")
+    p.add_argument("--configuration", choices=["Debug", "Release"])
+    p.add_argument("--walk-onboarding", action="store_true", help="tap through onboarding instead of skipping it")
+    p.add_argument("--no-smoke", action="store_true", help="do not configure the Glucose Simulator + Pump Simulator")
+    p.add_argument("--agent", choices=["claude", "none"], help="default: claude")
+    p.add_argument("--instructions", metavar="TEXT", help="extra focus for the agent")
+    p.add_argument("--agent-minutes", type=int, metavar="N", help="agent time limit (default 30)")
+    p.add_argument("--comment", action="store_true", help="post the report as a PR comment")
+    p.add_argument("--sim-device", metavar="NAME", help='simulator device (default "iPhone 17")')
+    p.add_argument("--sim-runtime", metavar="NAME", help='e.g. "iOS 26.3" (default: newest installed)')
+    p.add_argument("--xcode", metavar="VERSION", help="Xcode version (default 26.2)")
+    p.add_argument("--ref", default="main", help="git ref of the workflow to run (default: main)")
+    p.add_argument("--repo", default=REPO, help=f"default: {REPO}")
+    p.add_argument("--no-follow", action="store_true", help="trigger, print the URL, and exit")
+    p.add_argument("--attach", type=int, metavar="RUN_ID", help="follow an existing run instead of starting one")
+    p.add_argument("--interval", type=float, default=5.0, help="seconds between polls (default 5)")
+    return p.parse_args(argv)
+
+
+def workflow_fields(a: argparse.Namespace) -> dict[str, str]:
+    """Only what was given; the workflow's own defaults stay the source of truth."""
+    f = {"trio": a.trio}
+    if a.submodule:
+        f["submodules"] = " ".join(a.submodule)
+    if a.configuration:
+        f["configuration"] = a.configuration
+    if a.walk_onboarding:
+        f["skip_onboarding"] = "false"
+    if a.no_smoke:
+        f["smoke"] = "false"
+    if a.agent:
+        f["agent"] = a.agent
+    if a.instructions:
+        f["agent_instructions"] = a.instructions
+    if a.agent_minutes is not None:
+        f["agent_minutes"] = str(a.agent_minutes)
+    if a.comment:
+        f["post_comment"] = "true"
+    if a.sim_device:
+        f["sim_device"] = a.sim_device
+    if a.sim_runtime:
+        f["sim_runtime"] = a.sim_runtime
+    if a.xcode:
+        f["xcode"] = a.xcode
+    return f
+
+
+def trigger(a: argparse.Namespace) -> int:
+    fields = workflow_fields(a)
+    started = datetime.now(timezone.utc)
+    args = ["workflow", "run", WORKFLOW, "-R", a.repo, "--ref", a.ref]
+    for k, v in fields.items():
+        args += ["-f", f"{k}={v}"]
+    cp = gh(*args, check=False)
+    if cp.returncode != 0:
+        sys.exit(f"gh workflow run failed:\n{cp.stderr.strip() or cp.stdout.strip()}")
+    m = re.search(r"/actions/runs/(\d+)", cp.stdout + cp.stderr)
+    if m:
+        return int(m.group(1))
+    # Older gh does not print the run URL: find the dispatch we just made.
+    me = gh("api", "user", "--jq", ".login").stdout.strip()
+    for _ in range(30):
+        runs = gh_json("run", "list", "-R", a.repo, "-w", WORKFLOW, "-e", "workflow_dispatch", "-L", "10",
+                       "--json", "databaseId,createdAt")
+        for r in runs:
+            if datetime.fromisoformat(r["createdAt"].replace("Z", "+00:00")) >= started.replace(microsecond=0):
+                return int(r["databaseId"])
+        time.sleep(2)
+    sys.exit(f"triggered, but could not find the run; see https://github.com/{a.repo}/actions (as {me})")
+
+
+class Follower:
+    def __init__(self, repo: str, run_id: int, interval: float):
+        self.repo, self.run_id, self.interval = repo, run_id, interval
+        self.step_state: dict[tuple[int, int], str] = {}
+        self.logged: set[int] = set()
+
+    def _jobs(self) -> list[dict]:
+        return gh_json("api", f"repos/{self.repo}/actions/runs/{self.run_id}/jobs")["jobs"]
+
+    def _print_steps(self, job: dict) -> None:
+        for s in job.get("steps") or []:
+            key = (job["id"], s["number"])
+            state = s.get("conclusion") or s["status"]
+            if self.step_state.get(key) == state or state in ("queued", "pending"):
+                continue
+            self.step_state[key] = state
+            mark = {"in_progress": "▶", "success": "✔", "failure": "✘", "skipped": "·", "cancelled": "■"}.get(state, "?")
+            print(f"\033[1m{mark} {s['name']}\033[0m" + ("" if state == "in_progress" else f"  ({state})"), flush=True)
+
+    def _print_log(self, job: dict) -> None:
+        # Only published once the job has completed (404 BlobNotFound before that).
+        for _ in range(6):
+            cp = gh("api", f"repos/{self.repo}/actions/jobs/{job['id']}/logs", check=False)
+            if cp.returncode == 0:
+                break
+            time.sleep(5)
+        else:
+            print(f"(log not available yet; later: gh run view {self.run_id} -R {self.repo} --log)")
+            return
+        print(f"\n----- log: {job['name']} -----", flush=True)
+        for line in cp.stdout.splitlines():
+            print(TS.sub("", line), flush=True)
+        self.logged.add(job["id"])
+
+    def run(self) -> str:
+        last_status = None
+        while True:
+            run = gh_json("api", f"repos/{self.repo}/actions/runs/{self.run_id}")
+            if run["status"] != last_status:
+                last_status = run["status"]
+                if last_status in ("queued", "waiting", "pending"):
+                    print(f"… {last_status} (waiting for a macOS worker)", flush=True)
+            for job in self._jobs():
+                self._print_steps(job)
+                if job["status"] == "completed" and job["id"] not in self.logged:
+                    self._print_log(job)
+            if run["status"] == "completed":
+                return run.get("conclusion") or "unknown"
+            time.sleep(self.interval)
+
+
+def main(argv=None) -> int:
+    a = parse_args(argv)
+    if subprocess.run(["gh", "--version"], capture_output=True).returncode != 0:
+        sys.exit("the gh CLI is required (brew install gh; gh auth login)")
+    run_id = a.attach or trigger(a)
+    url = f"https://github.com/{a.repo}/actions/runs/{run_id}"
+    print(f"run: {url}", flush=True)
+    if a.no_follow:
+        return 0
+    try:
+        conclusion = Follower(a.repo, run_id, a.interval).run()
+    except KeyboardInterrupt:
+        print(f"\nstopped following; the run continues: {url}\n"
+              f"(follow again: ./trio-test-ci --attach {run_id}; cancel: gh run cancel {run_id} -R {a.repo})")
+        return 130
+    print(f"\n{conclusion}: {url}")
+    return 0 if conclusion == "success" else 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())

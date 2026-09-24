@@ -107,6 +107,18 @@ repo or hosting. `--mode description` maintains a `<!-- trio-test-harness -->` s
 `.github/workflows/e2e.yml` runs `trio-test-e2e --mode simulator` on the self-hosted macOS workers
 (home-infra `macos-workers`), triggered by hand from Actions ▸ "Trio e2e (simulator)" ▸ Run workflow, or:
 
+From a laptop, `./trio-test-ci` triggers it with every workflow option as a flag (`./trio-test-ci --help`), prints the
+run URL, then follows the run: steps as they start and finish, and the job log once the job is done (GitHub publishes job
+logs only after completion). Ctrl-C stops following without cancelling; `./trio-test-ci --attach <run id>` resumes.
+
+```
+./trio-test-ci -s jwoglom/TandemKit#395 --comment
+./trio-test-ci 1234 --agent none
+./trio-test-ci feat/tandem -s TandemKit@my-branch --instructions "check the bolus sheet"
+```
+
+Or with gh directly:
+
 ```
 gh workflow run e2e.yml -R jwoglom/trio-test-harness -f submodules=jwoglom/TandemKit#395 -f post_comment=true
 gh workflow run e2e.yml -R jwoglom/trio-test-harness -f trio=1234 -f agent=none
