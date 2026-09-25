@@ -19,6 +19,8 @@ macOS iPhone Mirroring using phone-harness; driver written and window capture ve
 - `./trio-test-e2e [--mode simulator|rooted-vnc|iphone-usb] [--pr URL | --branch B] [--trio-branch B] [--onboarding preseed|walk] [--skip-build]
   [--no-smoke] [--comment ask|auto|never] [--artifact-url URL] [--agent|--no-agent] [--yes]` — prompts for anything missing on
   a TTY. Submodule PRs are resolved via `.gitmodules` (verified with jwoglom/TandemKit#395 → Trio feat/tandem).
+- `./trio-test-harness webui` (2026-09-24): browser form with the CI workflow's options + target (rooted-vnc default, or
+  simulator); runs the CI stages locally (`harness/webui.py`) and posts the PR comment only on a button press. See README "Web UI".
 - Skills: `trio-test-e2e` (thin wrapper around the script) and `trio-test` (the chain), plus one skill per stage.
 - `TRIO_REPO` on this machine is the user's `~/repos/Trio` (their choice); PR/branch checkouts happen there (detached HEAD,
   `git clean -fd` keeps ignored files). Elsewhere the default is `<harness>/Trio`.
@@ -63,6 +65,13 @@ macOS iPhone Mirroring using phone-harness; driver written and window capture ve
 
 ## Still unverified
 - `th report pr` against a real PR (gh --attach inline uploads; ask before posting).
+- `th webui` with a real job: only tested with the stages stubbed (auth, validation, stage order, sandbox settings per
+  target, comment gating). Unverified: the sandboxed agent on rooted-vnc (daemon socket `daemon-rooted-vnc.sock`, `device
+  lock/unlock` through the daemon from inside the sandbox) and a real `report pr` from the button.
+- `th webui` live phone panel (`harness/liveview.py`, noVNC 1.7.0 from jsdelivr): verified 2026-09-24 showing the real
+  phone through TrollVNC in the user's browser (TrollVNC accepts noVNC's encodings and extended clipboard). Not yet
+  checked: control input through noVNC, the panel's buttons, and the USB fallback when Wi-Fi refuses.
+  After a phone reboot the rootless jailbreak must be re-run before TrollVNC/SSH answer.
 - `th test smoke` as a single command (the pieces were run individually).
 - Onboarding walk fully unattended on the phone: the iOS alert "Allow" and the "Next" under a dimmed alert are now handled
   (isolated-word OCR, banded passes, alerts checked before Next) but that exact combination has not been re-run end to end.

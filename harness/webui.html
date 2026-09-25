@@ -1,0 +1,375 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Trio Test Runner</title>
+<style>
+:root{--bg:#fff;--fg:#1f2328;--muted:#656d76;--card:#f6f8fa;--line:#d0d7de;--accent:#0969da;--ok:#1a7f37;--bad:#cf222e;--warn:#9a6700;--input:#fff}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#0d1117;--fg:#e6edf3;--muted:#8d96a0;--card:#161b22;--line:#30363d;--accent:#4493f8;--ok:#3fb950;--bad:#f85149;--warn:#d29922;--input:#0d1117}}
+:root[data-theme="dark"]{--bg:#0d1117;--fg:#e6edf3;--muted:#8d96a0;--card:#161b22;--line:#30363d;--accent:#4493f8;--ok:#3fb950;--bad:#f85149;--warn:#d29922;--input:#0d1117}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:14px/1.45 -apple-system,system-ui,sans-serif}
+header{padding:12px 16px;border-bottom:1px solid var(--line);display:flex;align-items:baseline;gap:12px}
+header h1{font-size:17px;margin:0} header a{color:inherit;text-decoration:none} header span{color:var(--muted);font-size:13px}
+.layout{display:grid;grid-template-columns:360px minmax(0,1fr);gap:20px;padding:16px;max-width:1500px;margin:0 auto}
+/* phone column = the phone screen scaled to --phone-h, plus the panel's 10px padding and border: no side gaps */
+.layout{--ar:828/1792;--phone-h:min(72vh,820px)}
+.layout.with-phone{grid-template-columns:340px minmax(0,1fr) calc(var(--phone-h) * var(--ar) + 22px);max-width:none}
+@media (max-width:1300px){.layout.with-phone{grid-template-columns:340px minmax(0,1fr)} #phone{grid-column:1}}
+@media (max-width:900px){.layout,.layout.with-phone{grid-template-columns:1fr} #phone{grid-column:auto}}
+#phone{align-self:start;position:sticky;top:12px;padding:10px}
+.phonehead{display:flex;align-items:center;gap:8px;margin-bottom:6px} .phonehead h2{margin:0}
+#screen{aspect-ratio:var(--ar);width:min(100%,calc(var(--phone-h) * var(--ar)));margin:0 auto;background:#000;border-radius:12px;overflow:hidden;display:flex;align-items:center;justify-content:center;color:#8d96a0;font-size:13px}
+#screen.control{outline:2px solid var(--accent);outline-offset:2px}
+.btns{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin-top:10px} .btns button{padding:6px 2px;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.typerow{display:flex;gap:6px;margin-top:8px}
+#lastshot img{max-width:120px;border:1px solid var(--line);border-radius:6px;margin-top:8px;display:block}
+header .spacer{flex:1}
+.card{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:14px 16px}
+h2{font-size:15px;margin:0 0 10px} h3{font-size:14px;margin:0 0 8px}
+label{display:block;font-size:12px;color:var(--muted);margin:10px 0 3px}
+label.check{display:flex;align-items:center;gap:6px;color:var(--fg);font-size:13px;margin:8px 0}
+input[type=text],input[type=number],select,textarea{width:100%;padding:6px 8px;border:1px solid var(--line);border-radius:6px;background:var(--input);color:var(--fg);font:inherit}
+textarea{min-height:60px;resize:vertical}
+.row{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.seg{display:flex;border:1px solid var(--line);border-radius:6px;overflow:hidden}
+.seg label{flex:1;margin:0;text-align:center;padding:6px;cursor:pointer;color:var(--fg);font-size:13px}
+.seg input{display:none} .seg label:has(input:checked){background:var(--accent);color:#fff}
+fieldset{border:0;padding:0;margin:0} fieldset:disabled{opacity:.45}
+details.more{margin-top:10px} details.more summary{cursor:pointer;font-size:13px;color:var(--muted)}
+button{font:inherit;padding:6px 14px;border-radius:6px;border:1px solid var(--line);background:var(--bg);color:var(--fg);cursor:pointer}
+button.primary{background:var(--ok);border-color:transparent;color:#fff;font-weight:600}
+button.danger{color:var(--bad)} button:disabled{opacity:.5;cursor:default}
+.actions{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:14px}
+.err{color:var(--bad);font-size:13px;white-space:pre-wrap}
+.hint{color:var(--muted);font-size:12px}
+table{width:100%;border-collapse:collapse} td,th{text-align:left;padding:7px 6px;border-bottom:1px solid var(--line);vertical-align:top}
+th{font-size:12px;color:var(--muted);font-weight:500} tr.job{cursor:pointer} tr.job:hover td{background:var(--card)}
+.pill{display:inline-block;padding:1px 8px;border-radius:999px;font-size:12px;font-weight:600;color:#fff;background:var(--muted);white-space:nowrap}
+.pill.passed,.pill.posted,.pill.works{background:var(--ok)} .pill.failed,.pill.broken,.pill.cancelled,.pill.interrupted{background:var(--bad)}
+.pill.running,.pill.posting{background:var(--accent)} .pill.partial,.pill.waiting,.pill.inconclusive,.pill.unknown{background:var(--warn)}
+.stages{display:flex;gap:6px;flex-wrap:wrap;margin:10px 0}
+.stage{border:1px solid var(--line);border-radius:6px;padding:3px 9px;font-size:12px;background:var(--bg)}
+.stage.passed{border-color:var(--ok)} .stage.failed{border-color:var(--bad)} .stage.running{border-color:var(--accent)}
+.facts{display:grid;grid-template-columns:max-content 1fr;gap:3px 14px;font-size:13px;margin:8px 0}
+.facts dt{color:var(--muted)} .facts dd{margin:0;word-break:break-word}
+pre{margin:0;white-space:pre-wrap;word-break:break-word;font:12px/1.4 ui-monospace,SFMono-Regular,Menlo,monospace}
+.log{max-height:420px;overflow:auto;background:var(--bg);border:1px solid var(--line);border-radius:6px;padding:8px}
+iframe{width:100%;height:80vh;border:1px solid var(--line);border-radius:8px;background:#fff}
+.stack>*+*{margin-top:16px}
+#form{align-self:start}
+.muted{color:var(--muted)} a{color:var(--accent)}
+.findings{white-space:pre-wrap;font-size:13px}
+</style>
+</head>
+<body>
+<header><h1><a href="#/">Trio Test Runner</a></h1><span>runs on this machine · nothing goes to GitHub until you post</span>
+  <span class="spacer"></span><button id="phonetoggle" type="button" hidden>Live phone</button></header>
+<div class="layout">
+  <form id="form" class="card" autocomplete="off">
+    <h2>New run</h2>
+    <label>Target</label>
+    <div class="seg">
+      <label><input type="radio" name="target" value="rooted-vnc" checked>rooted-vnc (iPhone)</label>
+      <label><input type="radio" name="target" value="simulator">simulator</label>
+    </div>
+    <label for="trio">Trio PR or branch</label>
+    <input type="text" id="trio" name="trio" placeholder="PR link, owner/repo#N, 1234, or branch">
+    <div class="hint">Branch forms: <code>feat/x</code> (origin, else upstream), <code>upstream:feat/x</code>, <code>owner/repo:feat/x</code>. Blank: dev, or the branch that has the submodule.</div>
+    <label for="submodules">Submodules</label>
+    <input type="text" id="submodules" name="submodules" placeholder="jwoglom/TandemKit#395  TandemKit@branch">
+    <div class="hint">PR links, owner/repo#N, or NAME@branch; space-separated. The comment goes to the Trio PR, else the first submodule PR.</div>
+    <div class="row">
+      <div><label for="configuration">Configuration</label>
+        <select id="configuration" name="configuration"><option>Debug</option><option>Release</option></select></div>
+      <div><label for="claude_model">Claude model</label>
+        <input type="text" id="claude_model" name="claude_model" value="sonnet" list="models"></div>
+    </div>
+    <datalist id="models"><option value="sonnet"><option value="opus"><option value="haiku"></datalist>
+    <label class="check"><input type="checkbox" name="skip_onboarding" checked>Skip onboarding</label>
+    <label class="check"><input type="checkbox" name="smoke" checked>Configure the Glucose Simulator + Pump Simulator</label>
+    <label for="agent_instructions">Extra focus for the agent</label>
+    <textarea id="agent_instructions" name="agent_instructions" placeholder="e.g. check the bolus sheet"></textarea>
+    <div class="row">
+      <div><label for="agent_minutes">Agent time limit (min)</label>
+        <input type="number" id="agent_minutes" name="agent_minutes" value="30" min="1" max="180"></div>
+      <div><label for="xcode">Xcode</label><select id="xcode" name="xcode"><option value="">harness.env / newest</option></select></div>
+    </div>
+    <label class="check"><input type="checkbox" name="post_comment">Post the PR comment when done</label>
+    <details class="more" id="simbox"><summary>Simulator</summary>
+      <fieldset id="simfields">
+        <label for="sim_device">Device</label>
+        <input type="text" id="sim_device" name="sim_device" list="sim_devices">
+        <datalist id="sim_devices"></datalist>
+        <label for="sim_runtime">Runtime</label>
+        <input type="text" id="sim_runtime" name="sim_runtime" list="sim_runtimes" placeholder="newest installed">
+        <datalist id="sim_runtimes"></datalist>
+      </fieldset>
+    </details>
+    <div class="actions"><button class="primary" type="submit">Run</button><span class="err" id="formerr"></span></div>
+  </form>
+  <main id="main" class="stack"></main>
+  <aside id="phone" class="card" hidden>
+    <div class="phonehead"><h2>iPhone</h2><span id="vncstate" class="hint">not connected</span><span class="spacer" style="flex:1"></span>
+      <button id="vncconnect" type="button">Connect</button><button id="phoneclose" type="button" title="Hide the phone panel">×</button></div>
+    <label class="check"><input type="checkbox" id="vnccontrol">Control: clicks tap, drags swipe, keys type, right-click is Home</label>
+    <div class="hint" id="busyhint" hidden>A run is driving the phone; taking control can disturb it.</div>
+    <div id="screen">Connect to see the phone over TrollVNC.</div>
+    <div class="btns">
+      <button type="button" data-act="shot" title="Native-resolution screenshot; added to the open run if it is finished">Screenshot</button>
+      <button type="button" data-act="home">Home</button>
+      <button type="button" data-act="lock" title="Press the power button">Power / lock</button>
+      <button type="button" data-act="unlock" title="Wake, swipe up, enter the passcode from .env">Unlock</button>
+      <button type="button" data-act="wake" title="Power + swipe up if the screen is dark">Wake</button>
+      <button type="button" data-act="launch" title="Open Trio over SSH">Launch Trio</button>
+    </div>
+    <div class="typerow"><input type="text" id="typetext" placeholder="Type into the focused field"><button type="button" id="typebtn">Type</button></div>
+    <div id="devmsg" class="hint" style="margin-top:6px"></div>
+    <a id="lastshot" target="_blank" rel="noopener" hidden><img alt="last screenshot"></a>
+  </aside>
+</div>
+<script>
+const $ = (s, el = document) => el.querySelector(s);
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"}[c]));
+const ANSI = /\x1b\[[0-9;?]*[A-Za-z]/g;
+const ACTIVE = new Set(["queued", "waiting", "running"]);
+const STAGES = [["e2e", "checkout → build → install → launch → smoke"], ["agent", "agent"], ["highlights", "review"]];
+
+async function api(path, body) {
+  const r = await fetch(path, body === undefined ? {} : {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(body)});
+  const data = await r.json().catch(() => ({error: `HTTP ${r.status}`}));
+  if (!r.ok) throw new Error(data.error || `HTTP ${r.status}`);
+  return data;
+}
+const pill = s => s ? `<span class="pill ${esc(s)}">${esc(s)}</span>` : "";
+const what = i => [i.trio || (!i.submodules && "dev") || "", i.submodules].filter(Boolean).join(" + ");
+const when = t => t ? t.replace("T", " ").slice(5, 16) : "";
+
+// ---- form ----
+const form = $("#form");
+function syncTarget() {
+  const sim = form.target.value === "simulator";
+  $("#simfields").disabled = !sim;
+  if (sim) $("#simbox").open = true;
+  $("#phonetoggle").hidden = sim;
+}
+form.addEventListener("change", e => { if (e.target.name === "target") syncTarget(); });
+syncTarget();
+api("/api/options").then(o => {
+  for (const x of o.xcodes) $("#xcode").insertAdjacentHTML("beforeend", `<option value="${esc(x)}">${esc(x.split("/").pop().replace(/\.app$/, ""))}</option>`);
+  if (o.defaults.xcode && o.xcodes.includes(o.defaults.xcode)) $("#xcode").value = o.defaults.xcode;
+  $("#sim_devices").innerHTML = o.sim_devices.map(d => `<option value="${esc(d)}">`).join("");
+  $("#sim_runtimes").innerHTML = o.sim_runtimes.map(d => `<option value="${esc(d)}">`).join("");
+  $("#sim_device").placeholder = o.defaults.sim_device || "iPhone 16";
+}).catch(() => {});
+form.addEventListener("submit", async e => {
+  e.preventDefault();
+  const f = Object.fromEntries(new FormData(form));
+  for (const k of ["skip_onboarding", "smoke", "post_comment"]) f[k] = form[k].checked;
+  $("#formerr").textContent = "";
+  try {
+    const job = await api("/api/jobs", f);
+    location.hash = `#/job/${job.id}`;
+  } catch (err) { $("#formerr").textContent = err.message; }
+});
+
+// ---- views ----
+let timer = null, view = null;
+function route() {
+  clearTimeout(timer);
+  const m = location.hash.match(/^#\/job\/([\w-]+)/);
+  view = m ? {job: m[1], offset: 0, follow: true} : {list: true};
+  $("#main").innerHTML = "";
+  m ? showJob() : showList();
+}
+window.addEventListener("hashchange", route);
+
+async function showList() {
+  const v = view;
+  try {
+    const {jobs} = await api("/api/state");
+    if (v !== view) return;
+    $("#main").innerHTML = `<section class="card"><h2>Runs</h2>${jobs.length ? `<table><thead><tr><th>Started</th><th>Target</th><th>Trio / submodules</th><th>Status</th><th>Comment</th></tr></thead><tbody>${
+      jobs.map(j => `<tr class="job" data-id="${esc(j.id)}"><td>${esc(when(j.created))}</td><td>${esc(j.inputs.target)}</td><td>${esc(what(j.inputs))}${j.pr ? `<div class="hint">PR ${esc(j.pr)}</div>` : ""}</td><td>${pill(j.status)}</td><td>${pill(j.comment?.status)}</td></tr>`).join("")
+    }</tbody></table>` : `<p class="muted">No runs yet. Fill in the form and press Run.</p>`}</section>`;
+    for (const tr of document.querySelectorAll("tr.job")) tr.onclick = () => location.hash = `#/job/${tr.dataset.id}`;
+  } catch (err) { $("#main").innerHTML = `<p class="err">${esc(err.message)}</p>`; }
+  if (v === view) timer = setTimeout(showList, 4000);
+}
+
+async function showJob() {
+  const v = view;
+  let j;
+  try { j = await api(`/api/jobs/${v.job}`); } catch (err) { $("#main").innerHTML = `<p class="err">${esc(err.message)}</p>`; return; }
+  if (v !== view) return;
+  if (!$("#jobhead")) {
+    $("#main").innerHTML = `
+      <section class="card" id="jobhead"></section>
+      <section class="card" id="comment"></section>
+      <section class="card" id="findings" hidden><h3>Agent findings</h3><div class="findings"></div></section>
+      <section id="report" hidden></section>
+      <section class="card"><h3>Log <label class="check" style="display:inline-flex;margin:0 0 0 10px"><input type="checkbox" id="follow" checked>follow</label></h3>
+        <div class="log"><pre id="log"></pre></div></section>`;
+    $("#follow").onchange = e => v.follow = e.target.checked;
+  }
+  renderHead(j);
+  renderComment(j, v);
+  const findings = (j.agent_summary || "").trim();
+  $("#findings").hidden = !findings;
+  $("#findings .findings").textContent = findings;
+  if (j.has_report && !ACTIVE.has(j.status) && v.reportShown !== j.finished) {
+    v.reportShown = j.finished;
+    $("#report").hidden = false;
+    $("#report").innerHTML = `<iframe sandbox src="/jobs/${esc(j.id)}/report.html?t=${Date.now()}" title="report"></iframe>`;
+  }
+  try {
+    const l = await api(`/api/jobs/${v.job}/log?offset=${v.offset}`);
+    if (v !== view) return;
+    const pre = $("#log");
+    if (l.skipped) pre.textContent += `\n… ${l.skipped} bytes not shown …\n`;
+    pre.textContent += l.text.replace(ANSI, "");
+    // a full xcodebuild log is several MB: keep the page responsive with the last ~2 MB (all of it is in log.txt)
+    if (pre.textContent.length > 2e6) pre.textContent = "… earlier lines trimmed (full log: runs/.webui/" + v.job + "/log.txt) …\n" + pre.textContent.slice(-1.5e6);
+    v.offset = l.offset;
+    if (v.follow && l.text) pre.parentElement.scrollTop = pre.parentElement.scrollHeight;
+  } catch (_) {}
+  const busy = ACTIVE.has(j.status) || j.comment?.status === "posting";
+  if (v === view) timer = setTimeout(showJob, busy ? 2000 : 10000);
+}
+
+function renderHead(j) {
+  const i = j.inputs, st = j.stages || {};
+  const facts = [["Target", i.target], ["Trio", i.trio || "(default)"], ["Submodules", i.submodules], ["PR", j.pr],
+    ["Model", `${i.claude_model}, ${i.agent_minutes} min`], ["Configuration", i.configuration],
+    ["Focus", i.agent_instructions], ["Run", j.run_name], ["Started", when(j.created)]].filter(f => f[1]);
+  $("#jobhead").innerHTML = `
+    <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+      <h2 style="margin:0">${esc(what(i) || "Trio")}</h2>${pill(j.status)}${j.verdict ? pill(j.verdict) : ""}
+      <span style="flex:1"></span>
+      ${ACTIVE.has(j.status) ? `<button class="danger" id="cancel">Cancel</button>` : ""}
+      ${j.has_report ? `<a href="/jobs/${esc(j.id)}/report.html" target="_blank" rel="noopener">Open report ↗</a>` : ""}
+    </div>
+    <div class="stages">${STAGES.map(([k, label]) => `<span class="stage ${esc(st[k]?.status || "")}">${esc(label)}${st[k]?.status ? ` · ${esc(st[k].status)}` : ""}</span>`).join("")}</div>
+    ${j.run_summary ? `<p style="margin:6px 0">${esc(j.run_summary)}</p>` : ""}
+    ${j.error ? `<p class="err">${esc(j.error)}</p>` : ""}
+    <dl class="facts">${facts.map(([k, x]) => `<dt>${esc(k)}</dt><dd>${esc(x)}</dd>`).join("")}</dl>`;
+  const c = $("#cancel");
+  if (c) c.onclick = async () => {
+    if (!confirm("Cancel this run? The current step is stopped.")) return;
+    try { await api(`/api/jobs/${j.id}/cancel`, {}); } catch (err) { alert(err.message); }
+  };
+}
+
+function renderComment(j, v) {
+  const box = $("#comment"), c = j.comment || {};
+  if (!j.pr) { box.innerHTML = `<h3>PR comment</h3><p class="muted">This run has no PR (Trio branch only), so there is nothing to comment on.</p>`; return; }
+  const ready = !ACTIVE.has(j.status) && j.run_name;
+  const key = `${j.status}|${c.status}|${j.finished}`;
+  if (box.dataset.key === key) return;        // keep what was typed into the link field
+  box.dataset.key = key;
+  let state = "";
+  if (c.status === "posted") state = `${pill("posted")} ${c.url ? `<a href="${esc(c.url)}" target="_blank" rel="noopener">${esc(c.url)}</a>` : ""} <span class="hint">${esc(when(c.at))}</span>`;
+  else if (c.status === "posting") state = `${pill("posting")} uploading screenshots and posting…`;
+  else if (c.status) state = `${pill(c.status)} <pre class="err">${esc(c.error || "")}</pre>`;
+  box.innerHTML = `<h3>PR comment → ${esc(j.pr)}</h3>
+    ${ready ? `<details id="pv"><summary class="hint" style="cursor:pointer">Preview the comment</summary><div id="pvbody" class="log" style="margin-top:8px"><pre>loading…</pre></div></details>
+    <label for="artifact_url">Full report link to include (optional)</label>
+    <input type="text" id="artifact_url" placeholder="https://claude.ai/…">
+    <div class="actions"><button class="primary" id="post" ${c.status === "posting" ? "disabled" : ""}>${c.status === "posted" ? "Post again" : "Post PR comment"}</button>${state}</div>`
+    : `<p class="muted">Available when the run is finished.</p>${state}`}`;
+  const pv = $("#pv");
+  if (pv) pv.ontoggle = async () => {
+    if (!pv.open) return;
+    try {
+      const p = await api(`/api/jobs/${j.id}/preview`);
+      $("#pvbody").innerHTML = `<pre>${esc(p.markdown)}</pre><p class="hint">${p.screenshots.length} screenshot(s) attached: ${esc(p.screenshots.map(s => s.split("/").pop()).join(", ")) || "none"}</p>`;
+    } catch (err) { $("#pvbody").innerHTML = `<p class="err">${esc(err.message)}</p>`; }
+  };
+  const btn = $("#post");
+  if (btn) btn.onclick = async () => {
+    const again = c.status === "posted" ? "\n\nA comment was already posted; this adds another one." : "";
+    if (!confirm(`Post the report as a comment on ${j.pr} as your GitHub account?${again}`)) return;
+    btn.disabled = true;
+    try { await api(`/api/jobs/${j.id}/comment`, {artifact_url: $("#artifact_url").value}); box.dataset.key = ""; clearTimeout(timer); showJob(); }
+    catch (err) { btn.disabled = false; alert(err.message); }
+  };
+}
+
+// ---- live phone (rooted-vnc): noVNC through the server's TrollVNC proxy + harness buttons ----
+const NOVNC = "https://cdn.jsdelivr.net/npm/@novnc/novnc@1.7.0/core/rfb.js";
+let rfb = null;
+const store = {get: k => { try { return localStorage.getItem(k); } catch (_) { return null; } },
+               set: (k, v) => { try { localStorage.setItem(k, v); } catch (_) {} }};
+function setPhone(open) {
+  $("#phone").hidden = !open;
+  document.querySelector(".layout").classList.toggle("with-phone", open);
+  $("#phonetoggle").textContent = open ? "Hide phone" : "Live phone";
+  store.set("phone", open ? "1" : "0");
+  if (open) { checkBusy(true); if (!rfb) vncConnect(); } else vncDisconnect();
+}
+$("#phonetoggle").onclick = () => setPhone($("#phone").hidden);
+$("#phoneclose").onclick = () => setPhone(false);
+const vncState = t => $("#vncstate").textContent = t;
+async function vncConnect() {
+  $("#vncconnect").textContent = "Disconnect";
+  vncState("connecting…");
+  let RFB;
+  try { ({default: RFB} = await import(NOVNC)); }
+  catch (err) { vncState("could not load noVNC (needs internet for cdn.jsdelivr.net)"); $("#vncconnect").textContent = "Connect"; return; }
+  $("#screen").textContent = "";
+  const r = new RFB($("#screen"), `${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/api/vnc/ws`, {shared: true});
+  rfb = r;
+  r.scaleViewport = true; r.resizeSession = false; r.focusOnClick = true;
+  r.viewOnly = !$("#vnccontrol").checked;
+  r.addEventListener("connect", () => vncState("connected"));
+  // Fit the box to the phone's framebuffer so noVNC scales it with no bars (size is known after ServerInit).
+  const fit = () => { const w = r._fbWidth, h = r._fbHeight; if (w && h) document.querySelector(".layout").style.setProperty("--ar", `${w}/${h}`); };
+  r.addEventListener("connect", fit);
+  r.addEventListener("desktopname", fit);
+  r.addEventListener("disconnect", async e => {
+    if (rfb === r) rfb = null;
+    $("#vncconnect").textContent = "Connect";
+    let why = e.detail.clean ? "disconnected" : "connection lost";
+    try { const st = await api("/api/vnc/status"); if (st.last_error) why = st.last_error; } catch (_) {}
+    vncState(why);
+    if (!rfb) $("#screen").textContent = "Not connected.";
+  });
+}
+function vncDisconnect() { if (rfb) { const r = rfb; rfb = null; r.disconnect(); } }
+$("#vncconnect").onclick = () => rfb ? vncDisconnect() : vncConnect();
+$("#vnccontrol").onchange = e => { if (rfb) rfb.viewOnly = !e.target.checked; $("#screen").classList.toggle("control", e.target.checked); };
+let busyTimer = null;
+async function checkBusy(first) {
+  clearTimeout(busyTimer);
+  if ($("#phone").hidden) return;
+  try {
+    const {jobs} = await api("/api/state");
+    const busy = jobs.some(j => ACTIVE.has(j.status) && j.inputs.target === "rooted-vnc");
+    $("#busyhint").hidden = !busy;
+    if (first) { $("#vnccontrol").checked = !busy; $("#vnccontrol").onchange({target: $("#vnccontrol")}); }
+  } catch (_) {}
+  busyTimer = setTimeout(checkBusy, 5000);
+}
+async function device(action, body = {}) {
+  const btns = document.querySelectorAll("#phone .btns button, #typebtn");
+  btns.forEach(b => b.disabled = true);
+  $("#devmsg").textContent = `${action}…`;
+  try {
+    const job = (location.hash.match(/^#\/job\/([\w-]+)/) || [])[1];
+    const res = await api(`/api/device/${action}`, {...body, job});
+    $("#devmsg").textContent = res.message || "done";
+    if (res.url) { $("#lastshot").href = res.url; $("#lastshot img").src = res.url; $("#lastshot").hidden = false; }
+    if (action === "shot" && job && view?.job === job) { view.reportShown = null; }
+  } catch (err) { $("#devmsg").textContent = err.message; }
+  btns.forEach(b => b.disabled = false);
+}
+for (const b of document.querySelectorAll("#phone .btns button")) b.onclick = () => device(b.dataset.act);
+$("#typebtn").onclick = () => { const t = $("#typetext").value; if (t) device("type", {text: t}).then(() => $("#typetext").value = ""); };
+$("#typetext").onkeydown = e => { if (e.key === "Enter") { e.preventDefault(); $("#typebtn").click(); } };
+if (store.get("phone") === "1" && form.target.value === "rooted-vnc") setPhone(true);
+
+route();
+</script>
+</body>
+</html>

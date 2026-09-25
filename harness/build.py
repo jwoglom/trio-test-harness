@@ -150,6 +150,60 @@ def _gh_repo_url(slug: str) -> str:
     return f"https://github.com/{slug}.git"
 
 
+def _gh_slug(url: str) -> str:
+    m = re.search(r"github\.com[:/]([^/]+/[^/]+?)(?:\.git)?/?$", url)
+    return m.group(1).lower() if m else url
+
+
+def split_branch_spec(spec: str, src: Path) -> tuple[str, str]:
+    """A Trio branch spec -> (remote name or fetch URL, branch).
+
+      feat/x                                  origin (falls back to nightscout/Trio if origin lacks it)
+      upstream:feat/x   upstream@feat/x       a remote of the checkout (origin, upstream, ...)
+      owner/repo:feat/x owner/repo@feat/x     that GitHub repo
+      <git URL>#feat/x                        any repo
+    Git forbids ':' in branch names, so "a:b" is never a plain branch.
+    """
+    m = re.match(r"^(.+?)#(.+)$", spec)
+    if m:
+        return (m.group(1) if "://" in m.group(1) or m.group(1).startswith("git@") else _gh_repo_url(m.group(1))), m.group(2)
+    m = re.match(r"^([\w.-]+/[\w.-]+)[:@](.+)$", spec)
+    if m:
+        return _gh_repo_url(m.group(1)), m.group(2)
+    m = re.match(r"^([\w.-]+)[:@](.+)$", spec)
+    if m:
+        remotes = _git(["remote"], src, quiet=True).stdout.split()
+        if m.group(1) in remotes:
+            return m.group(1), m.group(2)
+        if ":" in spec:
+            raise HarnessError(f"{spec!r}: {m.group(1)!r} is not a remote of {src} ({', '.join(remotes)}); "
+                               "use owner/repo:branch for another repository")
+    return "origin", spec
+
+
+def _fetch_trio_branch(src: Path, br: str, ref: str) -> str:
+    """Fetch Trio branch spec `br` (see split_branch_spec) into `ref`. Returns the remote/URL it came from.
+
+    A bare name comes from origin, else from upstream / nightscout/Trio: origin is often a fork (jwoglom/Trio) that
+    does not carry every upstream branch (e.g. feat/tandem-closed-beta).
+    """
+    url, name = split_branch_spec(br, src)
+    if (url, name) != ("origin", br):
+        _git(["fetch", "--force", url, f"+{name}:{ref}"], src, timeout=900)
+        return url
+    cp = _git(["fetch", "--force", "origin", f"+{br}:{ref}"], src, check=False, timeout=900)
+    if cp.returncode == 0:
+        return "origin"
+    out = (cp.stderr or "") + (cp.stdout or "")
+    origin = _origin_url(src)
+    if "couldn't find remote ref" not in out or _gh_slug(origin) == DEFAULT_GH_REPO.lower():
+        raise HarnessError(f"git fetch origin {br} failed:\n{out[-2000:]}")
+    upstream = "upstream" if "upstream" in _git(["remote"], src, quiet=True).stdout.split() else _gh_repo_url(DEFAULT_GH_REPO)
+    log(f"branch {br} is not on origin ({_gh_slug(origin)}); fetching it from {DEFAULT_GH_REPO}")
+    _git(["fetch", "--force", upstream, f"+{br}:{ref}"], src, timeout=900)
+    return DEFAULT_GH_REPO
+
+
 def resolve_pr(pr: str) -> tuple[str, int]:
     """'123' | 'owner/repo#123' | GitHub PR URL -> (owner/repo, number)."""
     m = re.match(r"https://github\.com/([^/]+/[^/]+)/pull/(\d+)", pr)
@@ -246,6 +300,13 @@ def resolve_pr_target(pr: str, src: Path, trio_branch: str | None = None) -> dic
             continue
         seen.append(br)
         cp = _git(["show", f"origin/{br}:.gitmodules"], src, check=False, quiet=True)
+        if cp.returncode != 0 and br == trio_branch:
+            # asked for by name: it may be an upstream-only branch (origin is a fork)
+            try:
+                _fetch_trio_branch(src, br, "refs/th/trio-branch")
+                cp = _git(["show", "refs/th/trio-branch:.gitmodules"], src, check=False, quiet=True)
+            except HarnessError:
+                pass
         if cp.returncode != 0:
             continue
         for name, m in _parse_gitmodules(cp.stdout).items():
@@ -297,20 +358,14 @@ def prepare_source(*, branch: str | None = None, pr: str | None = None, repo: st
             else:
                 br = target["trio_branch"]
                 log(f"{target['slug']}#{target['number']} is a PR on submodule {target['submodule']}; using Trio {br}")
-                _git(["fetch", "--force", "origin", br], src, timeout=900)
-                _git(["checkout", "--force", "--detach", f"origin/{br}"], src)
+                _fetch_trio_branch(src, br, "refs/th/trio-branch")
+                _git(["checkout", "--force", "--detach", "refs/th/trio-branch"], src)
                 info["trio_branch"] = br
                 info["submodule_pr"] = target
                 submodules.append(f"{target['submodule']}={_gh_repo_url(target['slug'])}#pull/{target['number']}/head")
         else:
             assert branch
-            m = re.match(r"^(.+?)#(.+)$", branch) or re.match(r"^([\w.-]+/[\w.-]+)@(.+)$", branch)
-            if m:
-                url = m.group(1) if "://" in m.group(1) or m.group(1).startswith("git@") else _gh_repo_url(m.group(1))
-                br = m.group(2)
-            else:
-                url, br = "origin", branch
-            _git(["fetch", "--force", url, f"{br}:refs/th/branch"], src, timeout=900)
+            _fetch_trio_branch(src, branch, "refs/th/branch")
             _git(["checkout", "--force", "--detach", "refs/th/branch"], src)
             info["branch"] = branch
         # remove leftovers from a previous PR/branch (e.g. a submodule dir that does not exist on this branch),
@@ -473,12 +528,13 @@ def build(src: Path, target: str, *, configuration: str = "Debug", clean: bool =
         p = subprocess.Popen(cmd, cwd=src, env={**os.environ, **env}, stdout=subprocess.PIPE,
                              stderr=subprocess.STDOUT, text=True)
         tail: list[str] = []
+        stream = CONFIG.bool("TH_BUILD_LOG_STDOUT")   # `th webui` streams the whole build into its job log
         for line in p.stdout:  # type: ignore[union-attr]
             fh.write(line)
             tail.append(line)
             if len(tail) > 60:
                 tail.pop(0)
-            if re.search(r"error:|BUILD SUCCEEDED|BUILD FAILED|\*\* ", line):
+            if stream or re.search(r"error:|BUILD SUCCEEDED|BUILD FAILED|\*\* ", line):
                 print(line.rstrip(), flush=True)
         p.wait()
     if p.returncode != 0:

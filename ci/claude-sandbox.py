@@ -1,6 +1,6 @@
 """Write the Claude Code settings the CI agent runs under (sandbox + permissions), with this job's paths.
 
-    python ci/claude-sandbox.py OUT.json
+    python ci/claude-sandbox.py OUT.json [TARGET]     # TARGET: sim (default) or rooted-vnc (`th webui`)
 
 The agent may only run the harness CLI (plus sleep) through Bash; `--permission-mode dontAsk` and
 `--permission-prompts none` deny everything else, and the file tools cannot read outside the working
@@ -19,7 +19,15 @@ from pathlib import Path
 HARNESS = Path(__file__).resolve().parent.parent
 
 
-def settings() -> dict:
+def settings(target: str = "sim") -> dict:
+    network = {
+        "allowedDomains": [],
+        "strictAllowlist": True,
+        "allowUnixSockets": [str(HARNESS / "runs" / ".tmp" / f"daemon-{target}.sock")],
+    }
+    if target == "sim":
+        # read-only simctl queries (`th sim list`); managing the simulator needs writes it does not get
+        network["allowMachLookup"] = ["com.apple.coresimulator.*", "com.apple.CoreSimulator.*"]
     return {
         # Read, Glob and Grep refuse paths outside the working directories in every mode (Claude Code >= 2.1.257);
         # without it, `-p` runs read outside them unasked.
@@ -33,16 +41,10 @@ def settings() -> dict:
             "filesystem": {
                 "allowWrite": [str(HARNESS / "runs"), str(HARNESS / "build")],
             },
-            "network": {
-                "allowedDomains": [],
-                "strictAllowlist": True,
-                "allowUnixSockets": [str(HARNESS / "runs" / ".tmp" / "daemon-sim.sock")],
-                # read-only simctl queries (`th sim list`); managing the simulator needs writes it does not get
-                "allowMachLookup": ["com.apple.coresimulator.*", "com.apple.CoreSimulator.*"],
-            },
+            "network": network,
         },
     }
 
 
 if __name__ == "__main__":
-    Path(sys.argv[1]).write_text(json.dumps(settings(), indent=1) + "\n")
+    Path(sys.argv[1]).write_text(json.dumps(settings(sys.argv[2] if len(sys.argv) > 2 else "sim"), indent=1) + "\n")

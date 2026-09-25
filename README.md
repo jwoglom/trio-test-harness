@@ -127,6 +127,8 @@ gh workflow run e2e.yml -R jwoglom/trio-test-harness -f trio=feat/tandem -f subm
 
 - **Trio PR or branch**: a PR link, `owner/repo#N`, a nightscout/Trio PR number, or a branch. Blank means `dev`,
   or, with a submodule PR, the Trio branch whose `.gitmodules` has that submodule.
+  Branches: `feat/x` (origin, falling back to `upstream`/nightscout/Trio when origin lacks it), `upstream:feat/x` or
+  `origin:feat/x` (a remote of the checkout), `owner/repo:feat/x` (any GitHub repo); `@` works in place of `:`.
 - **Submodules**: PR links / `owner/repo#N` and `NAME@branch` (or `owner/repo@branch`), space-separated.
 - **The run's PR** (read into `pr.md`, and where a comment goes) is the Trio PR, else the first submodule PR.
   `ci/inputs.py` has the mapping onto `trio-test-e2e` flags.
@@ -147,6 +149,24 @@ Pull requests: write) `CLAUDE_CODE_OAUTH_TOKEN`, and `TRIO_TEST_HARNESS_USER_PAT
 HTTPS instead of SSH, and uses the workers' git mirrors (`TH_GIT_MIRRORS`) and prebuilt WebDriverAgent
 (`TH_WDA_PREBUILT`).
 
-## Safety
+## Web UI (the CI job, on this Mac)
+`./trio-test-harness webui` serves a page (default `http://127.0.0.1:8787`, open the printed `?token=` URL once) with the
+workflow's options plus the target, **rooted-vnc** (the jailbroken iPhone, default) or **simulator**. A run goes through the
+same stages as `e2e.yml`, but on this machine with its `harness.env`, `gh` login and `claude` login: `ci/inputs.py` →
+`trio-test-e2e` → the sandboxed agent (`ci/agent-prompt.md`, or `ci/agent-prompt-rooted-vnc.md` +
+`ci/agent-limits-rooted-vnc.md` for the phone) → the highlights review → `report.html`, shown in the page with the live log
+and the agent's findings. Nothing goes to GitHub until you press **Post PR comment** (it runs `th report pr` as you, so the
+screenshots are attached inline); ticking "Post the PR comment when done" does it automatically.
+
+- One job at a time; a job first waits for any other `trio-test-e2e` on the machine (another session on the same phone).
+- The agent gets `TH_RUN=<run dir>`, so its screenshots stay in its run even if another session moves `runs/.current`.
+  The harness daemon is started for the agent if none is running, and stopped afterwards only if the web UI started it.
+- Builds use `TRIO_REPO` from `harness.env` like any local `trio-test-e2e` run (PR checkouts leave it on a detached HEAD).
+- Job state: `runs/.webui/<job>/` (`job.json`, `log.txt`). The server binds to 127.0.0.1 and wants the token (a
+  SameSite=Strict cookie) because it can build, drive the phone and comment as you. `--token`/`-p <token>` sets the token
+  instead of the random one. `--host 0.0.0.0` (or
+  `TH_WEBUI_HOST=0.0.0.0` in `harness.env`; `--port`/`TH_WEBUI_PORT` likewise) makes it reachable from other machines,
+  still behind the token; it then prints the LAN URL too. Plain HTTP, so keep it to a network you trust.
+
 Only Trio's simulator CGM/pump and made-up values are used. Reports must not contain real health data, device identifiers,
 Apple IDs or tokens. Nothing here is medical advice; Trio builds produced by the harness are for testing only.

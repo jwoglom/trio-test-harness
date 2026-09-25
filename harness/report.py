@@ -12,6 +12,7 @@ import datetime as dt
 import html
 import io
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -47,6 +48,9 @@ class Run:
 
     @classmethod
     def current(cls, path: str | None = None) -> "Run":
+        # --run, then $TH_RUN (set by `th webui` for its agent, so another session's `run new` cannot redirect it),
+        # then the shared runs/.current pointer.
+        path = path or os.environ.get("TH_RUN")
         if path:
             return cls(Path(path).expanduser())
         if CURRENT.exists() and Path(CURRENT.read_text().strip()).exists():

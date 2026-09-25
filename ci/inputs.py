@@ -14,7 +14,8 @@ import sys
 
 PR_URL = re.compile(r"^https://github\.com/([\w.-]+)/([\w.-]+)/pull/(\d+)/?$")
 PR_SHORT = re.compile(r"^([\w.-]+)/([\w.-]+)#(\d+)$")
-BRANCH = re.compile(r"^[\w./-]+$")
+# branch, remote:branch / remote@branch, owner/repo:branch / owner/repo@branch (harness/build.py split_branch_spec)
+BRANCH = re.compile(r"^(?:[\w.-]+(?:/[\w.-]+)?[:@])?[\w./-]+$")
 SUB_BRANCH = re.compile(r"^(?:[\w.-]+/)?[\w.-]+@[\w./-]+$")   # NAME@branch or owner/repo@branch
 
 

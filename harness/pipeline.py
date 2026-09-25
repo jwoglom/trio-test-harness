@@ -202,7 +202,8 @@ def main(argv=None) -> int:
                    help="simulator | rooted-vnc (jailbroken iPhone: TrollVNC + SSH + AppSync) | iphone-usb (any iPhone via "
                         "macOS iPhone Mirroring; needs a signed build + devicectl)")
     p.add_argument("--pr", help="Trio PR or submodule PR (URL, owner/repo#N)")
-    p.add_argument("--branch", help="Trio branch instead of a PR")
+    p.add_argument("--branch", help="Trio branch instead of a PR: feat/x (origin, else upstream), upstream:feat/x, "
+                                      "owner/repo:feat/x")
     p.add_argument("--trio-branch", help="Trio branch to test a submodule PR against (default: derived from .gitmodules)")
     p.add_argument("--submodule", action="append", default=[], help="extra NAME@REF overrides")
     p.add_argument("--in-place", help="build this checkout as-is")

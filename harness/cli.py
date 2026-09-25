@@ -538,6 +538,13 @@ def cmd_report(args):
     return 0
 
 
+def cmd_webui(args):
+    from .webui import serve
+    serve(args.host or CONFIG.get("TH_WEBUI_HOST") or "127.0.0.1",
+          args.port or int(CONFIG.get("TH_WEBUI_PORT") or 8787), open_browser=args.open, token=args.token)
+    return 0
+
+
 # ---------------- flows / tests -----------------
 
 def cmd_flow(args):
@@ -717,6 +724,15 @@ def build_parser() -> argparse.ArgumentParser:
     rm = rps.add_parser("markdown", help="preview the PR comment body"); rm.add_argument("--run"); rm.add_argument("--columns", type=int, default=3)
     rm.add_argument("--max-shots", type=int); rm.add_argument("--artifact-url")
     rp.set_defaults(fn=cmd_report)
+
+    wu = sp.add_parser("webui", help="browser UI: run the e2e job (the CI workflow's options) on this machine; "
+                                     "post the PR comment only when asked")
+    wu.add_argument("--host", help="bind address, e.g. 0.0.0.0 for other machines (default $TH_WEBUI_HOST, else 127.0.0.1)")
+    wu.add_argument("--port", type=int, help="default $TH_WEBUI_PORT, else 8787")
+    wu.add_argument("--open", action="store_true", help="open the page in the default browser")
+    wu.add_argument("--token", "--password", "-p", dest="token", metavar="TOKEN",
+                    help="access token for the page (default: a random one kept in runs/.tmp/webui-token)")
+    wu.set_defaults(fn=cmd_webui)
 
     fl = sp.add_parser("flow", help="Trio UI flows"); fls = fl.add_subparsers(dest="sub", required=True)
     for name in ("onboarding-walk", "add-cgm-sim", "add-pump-sim", "back-home", "dismiss", "settle", "at-home"):
