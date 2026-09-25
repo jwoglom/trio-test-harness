@@ -1,14 +1,19 @@
-"""Minimal synchronous RFB (VNC) client: auth, raw-encoded framebuffer grabs,
+"""Minimal synchronous RFB (VNC) client: auth, zlib/raw framebuffer grabs,
 pointer and key events. Used for TrollVNC on the iPhone; vncdotool's Twisted
-client negotiated encodings TrollVNC never answered, so we speak plain RFB 3.8 here."""
+client negotiated encodings TrollVNC never answered, so we speak plain RFB 3.8 here.
+
+Frames come zlib-encoded (measured 2026-09-25 on TrollVNC: 259 KB instead of 5.8 MB per 828x1792 frame, ~160 ms
+instead of ~245 ms over Wi-Fi), with raw as the fallback; TH_VNC_RAW=1 asks for raw only."""
 from __future__ import annotations
 
 import socket
 import struct
 import time
+import zlib
 
 from PIL import Image
 
+from .config import CONFIG
 from .util import HarnessError
 
 KEYSYMS = {
@@ -65,7 +70,9 @@ class RFBClient:
         self.name = self._read(struct.unpack(">I", si[20:24])[0]).decode("utf-8", "replace")
         # 32bpp truecolor, little-endian, RGB in low 24 bits -> easy PIL conversion
         s.sendall(struct.pack(">BxxxBBBBHHHBBBxxx", 0, 32, 24, 0, 1, 255, 255, 255, 16, 8, 0))
-        s.sendall(struct.pack(">BxH", 2, 1) + struct.pack(">i", 0))  # raw encoding only
+        encodings = [0] if CONFIG.bool("TH_VNC_RAW") else [6, 0]   # zlib, raw
+        s.sendall(struct.pack(">BxH", 2, len(encodings)) + b"".join(struct.pack(">i", e) for e in encodings))
+        self._zlib = zlib.decompressobj()   # one zlib stream per connection (RFC 6143 7.7.2)
         return self
 
     def close(self) -> None:
@@ -101,8 +108,13 @@ class RFBClient:
                 nrects = struct.unpack(">H", self._read(2))[0]
                 for _ in range(nrects):
                     x, y, w, h, enc = struct.unpack(">HHHHi", self._read(12))
-                    if enc == 0:
-                        data = self._read(w * h * 4)
+                    if enc in (0, 6):
+                        if enc == 0:
+                            data = self._read(w * h * 4)
+                        else:
+                            data = self._zlib.decompress(self._read(struct.unpack(">I", self._read(4))[0]))
+                            if len(data) != w * h * 4:
+                                raise HarnessError(f"zlib rect {w}x{h}: {len(data)} bytes, expected {w * h * 4}")
                         rect = Image.frombytes("RGBA", (w, h), data, "raw", "BGRA")
                         img.paste(rect, (x, y))
                     elif enc == 1:  # CopyRect

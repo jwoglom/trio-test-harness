@@ -14,7 +14,9 @@ Device (as of 2026-09-19): the user's test iPhone, iOS 18.6.1, **rootless jailbr
 - `th device vnc-check` grabs a frame. `th --target rooted-vnc shot|tap|swipe|type|home` drive it. Right mouse button = Home,
   middle = Power (TrollVNC mapping). `th device wake` = power + swipe up when the screen is black.
   `th device lock` presses power (lock the phone to screenshot the Lock Screen and Live Activities); `th device unlock` brings it back.
-- Implementation: `harness/rfb.py`, our own minimal RFB 3.8 client (VNC auth, raw encoding, pointer/key events).
+- Implementation: `harness/rfb.py`, our own minimal RFB 3.8 client (VNC auth, zlib with raw fallback, pointer/key events).
+  zlib (2026-09-25): 259 KB instead of 5.8 MB per frame, ~165 ms instead of ~230 ms; `TH_VNC_RAW=1` forces raw.
+  The phone needs ~140 ms to produce any frame, so compression can't go much lower.
   vncdotool's Twisted client authenticated fine but never received a framebuffer from TrollVNC; do not go back to it.
 - The phone shows a "VNC client connected" banner on connect; harmless.
 - Text entry: tap the field first, then `th type`. Keys go through as HID events.

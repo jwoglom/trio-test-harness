@@ -1,8 +1,8 @@
 #!/bin/bash
 # One-shot end-to-end Trio test (see harness/pipeline.py). Flags or interactive prompts.
-HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-PY="$HERE/.venv/bin/python"
-[ -x "$PY" ] || { echo "trio-test-e2e: virtualenv missing; run $HERE/install.sh" >&2; exit 1; }
-export PATH="$HERE/.venv/bin:/usr/local/bin:/opt/homebrew/bin:$PATH"
-cd "$HERE" || exit 1
-exec "$PY" -m harness.pipeline "$@"
+# Bash builtins only (no $(dirname), no subshells, no second bash): each process launch costs ~0.1 s on the harness Mac.
+d=${BASH_SOURCE[0]}; if [[ $d == */* ]]; then d=${d%/*}; else d=.; fi
+cd "$d/.." || exit 1
+[ -x .venv/bin/python ] || { echo "trio-test-e2e: virtualenv missing; run $PWD/install.sh" >&2; exit 1; }
+export PATH="$PWD/.venv/bin:/usr/local/bin:/opt/homebrew/bin:$PATH"
+exec "$PWD/.venv/bin/python" -m harness.pipeline "$@"

@@ -1,8 +1,8 @@
 #!/bin/bash
 # Toolbox CLI of the Trio test harness (`th` is a short alias). Uses the repo-local virtualenv.
-HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-PY="$HERE/.venv/bin/python"
-if [ ! -x "$PY" ]; then echo "trio-test-harness: virtualenv missing; run $HERE/install.sh" >&2; exit 1; fi
-export PATH="$HERE/.venv/bin:/usr/local/bin:/opt/homebrew/bin:$PATH"
-cd "$HERE" || exit 1
-exec "$PY" -m harness.cli "$@"
+# Bash builtins only (no $(dirname), no subshells, no second bash): each process launch costs ~0.1 s on the harness Mac.
+d=${BASH_SOURCE[0]}; if [[ $d == */* ]]; then d=${d%/*}; else d=.; fi
+cd "$d/.." || exit 1
+[ -x .venv/bin/python ] || { echo "trio-test-harness: virtualenv missing; run $PWD/install.sh" >&2; exit 1; }
+export PATH="$PWD/.venv/bin:/usr/local/bin:/opt/homebrew/bin:$PATH"
+exec "$PWD/.venv/bin/python" -m harness.cli "$@"
