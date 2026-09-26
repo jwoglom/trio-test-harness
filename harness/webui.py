@@ -254,6 +254,9 @@ class Manager:
             if data.get("status") in ACTIVE and _server_alive(data.get("server_pid")):
                 continue                               # another web UI (a second instance) owns it: leave it alone
             if data.get("status") in ACTIVE:           # the server stopped while it was queued or running
+                for st in (data.get("stages") or {}).values():
+                    if st.get("status") == "running":
+                        st["status"] = "interrupted"
                 job.update(status="interrupted")
             if (data.get("comment") or {}).get("status") == "posting":
                 job.update(comment={**data["comment"], "status": "unknown",

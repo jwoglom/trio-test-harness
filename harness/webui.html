@@ -9,6 +9,7 @@
 @media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#0d1117;--fg:#e6edf3;--muted:#8d96a0;--card:#161b22;--line:#30363d;--accent:#4493f8;--ok:#3fb950;--bad:#f85149;--warn:#d29922;--input:#0d1117}}
 :root[data-theme="dark"]{--bg:#0d1117;--fg:#e6edf3;--muted:#8d96a0;--card:#161b22;--line:#30363d;--accent:#4493f8;--ok:#3fb950;--bad:#f85149;--warn:#d29922;--input:#0d1117}
 *{box-sizing:border-box}
+[hidden]{display:none !important}   /* e.g. #applogs is display:flex, which would otherwise override hidden */
 body{margin:0;background:var(--bg);color:var(--fg);font:14px/1.45 -apple-system,system-ui,sans-serif}
 header{padding:12px 16px;border-bottom:1px solid var(--line);display:flex;align-items:baseline;gap:12px}
 header h1{font-size:17px;margin:0} header a{color:inherit;text-decoration:none} header span{color:var(--muted);font-size:13px}
@@ -26,10 +27,14 @@ header h1{font-size:17px;margin:0} header a{color:inherit;text-decoration:none} 
 .typerow{display:flex;gap:6px;margin-top:8px}
 #lastshot img{max-width:120px;border:1px solid var(--line);border-radius:6px;margin-top:8px;display:block}
 header .spacer{flex:1}
-.layout.with-logs{grid-template-columns:340px minmax(0,1fr) 460px;max-width:none}
-.layout.with-logs.with-phone{grid-template-columns:340px minmax(0,1fr) 460px calc(var(--phone-h) * var(--ar) + 22px)}
-@media (max-width:1500px){.layout.with-logs.with-phone{grid-template-columns:340px minmax(0,1fr) calc(var(--phone-h) * var(--ar) + 22px)} .layout.with-logs.with-phone #applogs{grid-column:1 / -1;position:static;height:60vh}}
-@media (max-width:1100px){.layout.with-logs{grid-template-columns:340px minmax(0,1fr)} #applogs{grid-column:1 / -1;position:static;height:60vh}}
+.layout{--logs-w:560px}
+.layout.with-logs{grid-template-columns:340px minmax(0,1fr) var(--logs-w);max-width:none}
+.layout.with-logs.with-phone{grid-template-columns:340px minmax(0,1fr) var(--logs-w) calc(var(--phone-h) * var(--ar) + 22px)}
+#logsgrip{position:absolute;left:-12px;top:0;bottom:0;width:10px;cursor:col-resize;border-radius:4px}
+#logsgrip:hover,#logsgrip.dragging{background:var(--accent);opacity:.35}
+body.resizing{cursor:col-resize;user-select:none}
+@media (max-width:1500px){.layout.with-logs.with-phone{grid-template-columns:340px minmax(0,1fr) calc(var(--phone-h) * var(--ar) + 22px)} .layout.with-logs.with-phone #applogs{grid-column:1 / -1;position:static;height:60vh} .layout.with-logs.with-phone #logsgrip{display:none}}
+@media (max-width:1100px){.layout.with-logs{grid-template-columns:340px minmax(0,1fr)} #applogs{grid-column:1 / -1;position:static;height:60vh} #logsgrip{display:none}}
 @media (max-width:900px){.layout.with-logs,.layout.with-logs.with-phone{grid-template-columns:1fr}}
 #applogs{align-self:start;position:sticky;top:12px;padding:10px;display:flex;flex-direction:column;gap:8px;height:calc(100vh - 90px);min-width:0}
 #applogs .logbox{flex:1;min-height:0;overflow:auto;background:var(--bg);border:1px solid var(--line);border-radius:6px;padding:6px}
@@ -138,6 +143,7 @@ button.small{padding:2px 9px;font-size:12px;margin-top:8px;display:block}
   </form>
   <main id="main" class="stack"></main>
   <aside id="applogs" class="card" hidden>
+    <div id="logsgrip" title="Drag to resize; double-click to reset"></div>
     <div class="phonehead"><h2>Trio logs</h2><span id="logstate" class="hint"></span><span class="spacer" style="flex:1"></span>
       <label class="check" style="margin:0"><input type="checkbox" id="logfollow" checked>follow</label>
       <button id="logsclose" type="button" title="Hide the log pane">×</button></div>
@@ -190,6 +196,8 @@ async function api(path, body) {
   if (!r.ok) throw new Error(data.error || `HTTP ${r.status}`);
   return data;
 }
+const store = {get: k => { try { return localStorage.getItem(k); } catch (_) { return null; } },
+               set: (k, v) => { try { localStorage.setItem(k, v); } catch (_) {} }};
 const pill = s => s ? `<span class="pill ${esc(s)}">${esc(s)}</span>` : "";
 const what = i => [i.trio || (!i.submodules && "dev") || "", i.submodules, i.cherry_pick && `🍒 ${i.cherry_pick}`,
   i.submodule_cherry_pick && `🍒 ${i.submodule_cherry_pick}`].filter(Boolean).join(" + ");
@@ -468,6 +476,32 @@ function setLogs(open) {
   if (open) pollLogs();
 }
 $("#logstoggle").onclick = () => setLogs($("#applogs").hidden);
+// drag the pane's left edge: wider toward the main pane (which keeps at least 320px)
+function setLogsWidth(px) {
+  const layout = document.querySelector(".layout"), phone = $("#phone").hidden ? 0 : $("#phone").offsetWidth + 20;
+  const max = Math.max(360, window.innerWidth - 340 - 320 - phone - 72);
+  const w = Math.round(Math.min(Math.max(px, 360), max));
+  layout.style.setProperty("--logs-w", `${w}px`);
+  return w;
+}
+{
+  const grip = $("#logsgrip");
+  const saved = parseInt(store.get("logs-w") || "", 10);
+  if (saved) setLogsWidth(saved);
+  grip.onpointerdown = e => {
+    e.preventDefault();
+    grip.setPointerCapture(e.pointerId);
+    const x0 = e.clientX, w0 = $("#applogs").offsetWidth;
+    grip.classList.add("dragging"); document.body.classList.add("resizing");
+    grip.onpointermove = m => setLogsWidth(w0 + (x0 - m.clientX));
+    grip.onpointerup = () => {
+      grip.onpointermove = grip.onpointerup = null;
+      grip.classList.remove("dragging"); document.body.classList.remove("resizing");
+      store.set("logs-w", String($("#applogs").offsetWidth));
+    };
+  };
+  grip.ondblclick = () => { document.querySelector(".layout").style.removeProperty("--logs-w"); store.set("logs-w", ""); };
+}
 $("#logsclose").onclick = () => setLogs(false);
 const tandemOpen = () => $("#tandembox").classList.contains("open");
 $("#tandemtoggle").onclick = () => {
@@ -511,8 +545,6 @@ async function pollLogs() {
 // ---- live phone (rooted-vnc): noVNC through the server's TrollVNC proxy + harness buttons ----
 const NOVNC = "https://cdn.jsdelivr.net/npm/@novnc/novnc@1.7.0/core/rfb.js";
 let rfb = null;
-const store = {get: k => { try { return localStorage.getItem(k); } catch (_) { return null; } },
-               set: (k, v) => { try { localStorage.setItem(k, v); } catch (_) {} }};
 function setPhone(open) {
   $("#phone").hidden = !open;
   document.querySelector(".layout").classList.toggle("with-phone", open);
@@ -557,7 +589,7 @@ async function checkBusy(first) {
   if ($("#phone").hidden) return;
   try {
     const {jobs} = await api("/api/state");
-    const busy = jobs.some(j => j.inputs.target === "rooted-vnc" && j.stages?.agent?.status === "running");
+    const busy = jobs.some(j => ACTIVE.has(j.status) && j.inputs.target === "rooted-vnc" && j.stages?.agent?.status === "running");
     $("#busyhint").hidden = !busy;
     if (first) { $("#vnccontrol").checked = !busy; $("#vnccontrol").onchange({target: $("#vnccontrol")}); }
   } catch (_) {}
