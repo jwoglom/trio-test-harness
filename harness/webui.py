@@ -418,7 +418,10 @@ def run_job(job: Job) -> None:
         job.stage("agent", "passed" if arc == 0 else "failed")   # continue-on-error, as in CI
 
     # --- highlights: a separate pass with no memory of the session picks the relevant screenshots ---
-    if rd and not job.cancelled:
+    # Without an agent nothing was tested beyond launch/setup, so there is nothing to pick (the comment has no shots).
+    if rd and not job.cancelled and not inp.get("agent", True):
+        job.stage("highlights", "skipped", "no agent ran")
+    elif rd and not job.cancelled:
         job.stage("highlights", "running")
         prompt = (REPO_ROOT / "ci" / "highlights-prompt.md").read_text().format(run_dir=rd, extra=extra)
         if target != "sim":

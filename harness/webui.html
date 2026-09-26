@@ -145,6 +145,7 @@ button.small{padding:2px 9px;font-size:12px;margin-top:8px;display:block}
   <aside id="applogs" class="card" hidden>
     <div id="logsgrip" title="Drag to resize; double-click to reset"></div>
     <div class="phonehead"><h2>Trio logs</h2><span id="logstate" class="hint"></span><span class="spacer" style="flex:1"></span>
+      <input type="text" id="logfilter" placeholder="filter" title="Only lines containing this (case-insensitive)" style="width:160px;padding:3px 7px">
       <label class="check" style="margin:0"><input type="checkbox" id="logfollow" checked>follow</label>
       <button id="logsclose" type="button" title="Hide the log pane">×</button></div>
     <div class="logbox"><pre id="log-trio"></pre></div>
@@ -408,13 +409,12 @@ function renderContinue(j) {
     ctl.dataset.key = key;
     ctl.innerHTML = !ready ? "" : `<div class="cont">
       <div><h4>Continue on this Mac</h4>
-        <p class="hint" style="margin:0 0 6px">The agent's session with full access: edit, commit, push, rebuild, re-test. Opens at claude.ai/code; runs until stopped.</p>
+        <p class="hint" style="margin:0 0 6px">${j.agent_session ? "The agent's session" : "A new session with this run's details (no agent ran)"} with full access: edit, commit, push, rebuild, re-test. Opens at claude.ai/code; runs until stopped.</p>
         <label class="check"><input type="checkbox" id="contcopy" checked>Make repo copy</label>
         <div class="hint">Worktree at the tested commits and branches, so other runs can use the shared checkout.</div>
         <label for="contmode">Permission mode</label>
         <select id="contmode"><option value="acceptEdits">acceptEdits: edits go ahead, commands ask</option><option value="default">default: ask for edits and commands</option><option value="auto">auto: a classifier approves safe actions</option><option value="plan">plan: read-only until you approve a plan</option></select>
-        <div class="actions"><button class="primary" id="contlocal" ${j.agent_session ? "" : "disabled"}>Continue conversation</button>
-          ${j.agent_session ? "" : `<span class="hint">The agent's session was not found on this Mac.</span>`}</div></div>
+        <div class="actions"><button class="primary" id="contlocal">${j.agent_session ? "Continue conversation" : "Start session"}</button></div></div>
       <div><h4>Claude Code on the web</h4>
         <p class="hint" style="margin:0 0 6px">New cloud session on the PR's branch, given the findings and tested commits. No transcript, screenshots or iOS builds.</p>
         <div class="actions"><button id="contcloud">Start cloud session</button></div>
@@ -511,18 +511,31 @@ $("#tandemtoggle").onclick = () => {
   $("#tandemtoggle").textContent = `${open ? "▾" : "▸"} Tandem logs`;
   if (open) { clearTimeout(logTimer); pollLogs(); }
 };
-async function pollOne(which) {
+// each stream keeps its raw text; the filter box shows only the lines containing its text (case-insensitive)
+function renderLog(which, scroll) {
   const s = logStreams[which], pre = $(`#log-${which}`), box = pre.parentElement;
-  const r = await api(`/api/applogs?which=${which}&target=${encodeURIComponent(logTarget)}&off=${s.off ?? ""}`);
-  if (r.size === null) { if (!pre.textContent) pre.textContent = "(no log file yet)"; return; }
   const atEnd = box.scrollHeight - box.scrollTop - box.clientHeight < 40;
-  if (s.off === null) pre.textContent = r.offset < r.size || r.size > 64 * 1024 ? "… earlier lines not shown …\n" : "";
-  if (r.reset) pre.textContent += "\n——— new day's log ———\n";
-  if (r.text) pre.textContent += r.text;
-  if (pre.textContent.length > 600000) pre.textContent = "… earlier lines trimmed …\n" + pre.textContent.slice(-450000);
+  const f = $("#logfilter").value.trim().toLowerCase();
+  const raw = s.raw || "";
+  if (!f) pre.textContent = raw;
+  else {
+    const hits = raw.split("\n").filter(l => l.toLowerCase().includes(f));
+    pre.textContent = hits.length ? hits.join("\n") + "\n" : `(no lines containing "${$("#logfilter").value.trim()}")`;
+  }
+  if (scroll || ($("#logfollow").checked && atEnd)) box.scrollTop = box.scrollHeight;
+}
+$("#logfilter").oninput = () => { for (const k of Object.keys(logStreams)) renderLog(k, $("#logfollow").checked); };
+async function pollOne(which) {
+  const s = logStreams[which];
+  const r = await api(`/api/applogs?which=${which}&target=${encodeURIComponent(logTarget)}&off=${s.off ?? ""}`);
+  if (r.size === null) { if (!s.raw) { s.raw = "(no log file yet)"; renderLog(which); } return; }
+  const first = s.off === null;
+  if (first) s.raw = r.offset < r.size || r.size > 64 * 1024 ? "… earlier lines not shown …\n" : "";
+  if (r.reset) s.raw += "\n——— new day's log ———\n";
+  if (r.text) s.raw += r.text;
+  if (s.raw.length > 600000) s.raw = "… earlier lines trimmed …\n" + s.raw.slice(-450000);
   s.off = r.offset;
-  if ($("#logfollow").checked && (atEnd || s.first)) box.scrollTop = box.scrollHeight;
-  s.first = false;
+  if (first || r.text || r.reset) renderLog(which, first && $("#logfollow").checked);
   return r.offset < r.size;                   // more to read right away (a long gap)
 }
 async function pollLogs() {
@@ -531,7 +544,7 @@ async function pollLogs() {
   const t = form.target.value;
   if (t !== logTarget) {                      // target switched: start both logs over
     logTarget = t;
-    for (const [k, s] of Object.entries(logStreams)) { s.off = null; s.first = true; $(`#log-${k}`).textContent = ""; }
+    for (const [k, s] of Object.entries(logStreams)) { s.off = null; s.raw = ""; $(`#log-${k}`).textContent = ""; }
   }
   let more = false;
   try {

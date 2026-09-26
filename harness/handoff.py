@@ -24,6 +24,7 @@ import signal
 import subprocess
 import sys
 import threading
+import uuid
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
@@ -347,23 +348,30 @@ RULES = """- Screenshots and data from the harness are fake (Glucose Simulator, 
 
 
 def local_system_prompt(job: dict, rd: Path, workdir: Path, copy: bool, src: Path, repos: list[Repo],
-                        subs: dict[str, str], mode: str) -> str:
+                        subs: dict[str, str], mode: str, resumed: bool = True) -> str:
     target = "rooted-vnc" if job["inputs"]["target"] == "rooted-vnc" else "sim"
     where = (f"`{workdir}` is a git worktree copy of the harness's Trio checkout, made for you at exactly the commits "
              f"the run tested (the shared checkout `{src}` is left alone: another run may use it at any time)."
              if copy else
              f"`{workdir}` is the harness's own Trio checkout. It is shared: the next test run checks it out again "
              "(detached, discarding uncommitted changes), so commit and push before one starts.")
-    return f"""\
-# Continued from the trio-test-harness web UI
-
-The conversation so far was a sandboxed, non-interactive test run. That run is over: the person who started it pressed
+    intro = ("""The conversation so far was a sandboxed, non-interactive test run. That run is over: the person who started it pressed
 "Continue conversation" and is now talking to you through Remote Control (claude.ai/code or the Claude app). You can
 ask them questions again.
 
-The run's limits are lifted. This is a normal interactive Claude Code session (permission mode `{mode}`): you may read
-and edit files anywhere the person allows, use git and gh, build, commit and push. The run directory is still
-`{rd}` and `$TH_RUN` points at it, so new screenshots and notes land there.
+The run's limits are lifted.""" if resumed else f"""The person who ran a trio-test-harness test started this session from its web UI page ("Start session"; no agent
+ran in that test, so there is no earlier conversation) and is talking to you through Remote Control (claude.ai/code or
+the Claude app). The run is in `{rd}`: `pr.md` (what was tested), `steps.jsonl`, `report.html`. What it found:
+
+{findings(job, rd)}
+""")
+    return f"""\
+# {'Continued' if resumed else 'Started'} from the trio-test-harness web UI
+
+{intro}
+This is a normal interactive Claude Code session (permission mode `{mode}`): you may read and edit files anywhere the
+person allows, use git and gh, build, commit and push. `$TH_RUN` points at the run directory `{rd}`, so new screenshots
+and notes land there.
 
 ## Where to work
 
@@ -385,6 +393,11 @@ The harness daemon may be stopped; start it with `./trio-test-harness --target {
 FIRST_MESSAGE = ("(From the web UI) The test run is finished and I have continued this conversation with full access. "
                  "In a few lines: confirm the folder and branches you will work in (see the system prompt), and what "
                  "you would change or check next given your findings. Then wait for me.")
+
+
+FIRST_MESSAGE_NEW = ("(From the web UI) I started this session from a finished test run (details in the system prompt). "
+                     "In a few lines: confirm the folder and branches you will work in, what the run shows, and what you "
+                     "would change or check next. Then wait for me.")
 
 
 def cloud_prompt(job: dict, rd: Path, primary: Repo, repos: list[Repo], subs: dict[str, str]) -> str:
@@ -539,9 +552,7 @@ class Continuations:
     # --- the three kinds ---
 
     def start_local(self, job: dict, rd: Path, env: dict, *, copy: bool, mode: str, model: str) -> dict:
-        sid = agent_session(rd, job.get("agent_session"))
-        if not sid:
-            raise HarnessError("the agent's Claude Code session was not found (it did not start, or ran on another machine)")
+        sid = agent_session(rd, job.get("agent_session"))    # None: no agent ran; a new session gets the run's details
         if mode not in PERMISSION_MODES:
             raise HarnessError(f"permission mode must be one of {', '.join(PERMISSION_MODES)}")
         d, meta = self._new("local", copy=copy, permission_mode=mode, resumed=sid)
@@ -561,19 +572,22 @@ class Continuations:
             self._save(d, meta, step="setting up branches", workdir=str(workdir), src=str(src))
             setup_branches(workdir, repos, f"{rd.name}-{meta['id']}")
             (d / "repos.json").write_text(json.dumps([asdict(r) for r in repos], indent=1) + "\n")
-            system = local_system_prompt(job, rd, workdir, copy, src, repos, subs, mode)
+            system = local_system_prompt(job, rd, workdir, copy, src, repos, subs, mode, resumed=bool(sid))
             (d / "system-prompt.md").write_text(system)
             pr = job.get("pr") or job["inputs"].get("trio") or "Trio"
             name = f"Trio test follow-up: {pr}"[:80]
-            cmd = ["claude", "--resume", sid, "--fork-session", "--remote-control", name, "--add-dir", str(workdir),
+            new_sid = None if sid else str(uuid.uuid4())       # a new session gets a known id, to resume it later
+            cmd = ["claude", *(["--resume", sid, "--fork-session"] if sid else ["--session-id", new_sid]),
+                   "--remote-control", name, "--add-dir", str(workdir),
                    "--permission-mode", mode, "--append-system-prompt", system]
             if model:
                 cmd += ["--model", model]
-            cmd.append(FIRST_MESSAGE)
+            cmd.append(FIRST_MESSAGE if sid else FIRST_MESSAGE_NEW)
             self._save(d, meta, step="starting Claude Code", name=name,
                        repos=[{"name": r.name, "branch": r.branch, "local": r.local, "remote": r.remote, "note": r.note}
                               for r in repos],
-                       terminal=f"cd {REPO_ROOT} && claude --resume {sid} --fork-session --add-dir {workdir}")
+                       terminal=(f"cd {REPO_ROOT} && claude --resume {sid} --fork-session --add-dir {workdir}" if sid else
+                                 f"cd {REPO_ROOT} && claude --resume {new_sid} --add-dir {workdir}"))
             self._spawn(d, meta, cmd, {**env, "TH_RUN": str(rd)}, REPO_ROOT)
         except (HarnessError, OSError, subprocess.SubprocessError) as e:
             self._save(d, meta, status="failed", error=str(e)[-2000:], ended=_now())
