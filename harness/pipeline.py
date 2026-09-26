@@ -60,7 +60,8 @@ def stage_checkout(args) -> tuple[Path, dict]:
     from . import build as B
     log("== stage: checkout")
     src, info = B.prepare_source(branch=args.branch, pr=args.pr, in_place=Path(args.in_place) if args.in_place else None,
-                                 submodules=args.submodule, fetch=not args.no_fetch, trio_branch=args.trio_branch)
+                                 submodules=args.submodule, fetch=not args.no_fetch, trio_branch=args.trio_branch,
+                                 cherry_picks=args.cherry_pick, submodule_cherry_picks=args.submodule_cherry_pick)
     return src, info
 
 
@@ -72,9 +73,19 @@ def write_pr_notes(run, info: dict) -> Path:
     if info.get("submodule_pr"):
         t = info["submodule_pr"]
         lines.append(f"Submodule PR: {t['slug']}#{t['number']} on submodule `{t['submodule']}` (Trio @ {t['trio_branch']})")
+    for c in info.get("cherry_picks") or []:
+        lines.append(f"Cherry-picked onto Trio: {c['what']}: {c['applied']} commit(s)"
+                     + (f", {c['dropped']} already there" if c["dropped"] else ""))
+    for c in info.get("submodule_cherry_picks") or []:
+        lines.append(f"Cherry-picked onto submodule {c['submodule']}: {c['what']}: {c['applied']} commit(s)"
+                     + (f", {c['dropped']} already there" if c["dropped"] else ""))
     lines += [f"Commit: {info.get('sha','?')} {info.get('describe','')}", ""]
     if info.get("pr_body"):
         lines += ["## PR description", "", info["pr_body"].strip(), ""]
+    for c in (info.get("cherry_picks") or []) + (info.get("submodule_cherry_picks") or []):
+        if pr := c.get("pr"):
+            lines += [f"## Cherry-picked PR {pr['pr']}: {pr.get('title') or ''}", "", f"{pr.get('url') or ''}", "",
+                      (pr.get("body") or "(no description)").strip(), ""]
     lines += ["## Test plan (fill in from the description)", "",
               "1. Smoke: launch, home screen, Glucose Simulator + Pump Simulator (automated by trio-test-e2e).",
               "2. Exercise every user-visible change the description mentions; screenshot before/after each.",
@@ -149,22 +160,30 @@ def stage_launch(args, bi, run):
     return drv
 
 
+def smoke_devices(args) -> list[str]:
+    """What the smoke stage sets up: the Glucose Simulator and/or the Pump Simulator."""
+    if args.no_smoke:
+        return []
+    return [n for n, off in (("Glucose Simulator", args.no_cgm_sim), ("Pump Simulator", args.no_pump_sim)) if not off]
+
+
 def stage_smoke(args, drv, run):
     from .flows import trio as F
-    log("== stage: smoke (fake CGM + pump)")
+    want = smoke_devices(args)
+    log(f"== stage: smoke ({' + '.join(want)})")
     F.settle(drv, run)
     if F.devices_configured(drv):
         run.log_step("devices-present", "CGM and pump already configured from a previous install (app data kept); skipping setup")
         F.step(run, drv, "home-with-devices", "Home with devices already configured")
         return
-    if drv.find("Add CGM", exact=True):
+    if "Glucose Simulator" in want and drv.find("Add CGM", exact=True):
         F.add_cgm_simulator(drv, run)
         time.sleep(1.5)
-    if drv.find("Add pump", exact=True):
+    if "Pump Simulator" in want and drv.find("Add pump", exact=True):
         F.add_pump_simulator(drv, run)
     time.sleep(4)
     F.settle(drv, run)
-    F.step(run, drv, "home-with-devices", "Home with Glucose Simulator + Pump Simulator")
+    F.step(run, drv, "home-with-devices", f"Home with {' + '.join(want)}")
 
 
 def stage_report(args, run) -> Path:
@@ -205,6 +224,9 @@ def main(argv=None) -> int:
     p.add_argument("--branch", help="Trio branch instead of a PR: feat/x (origin, else upstream), upstream:feat/x, "
                                       "owner/repo:feat/x")
     p.add_argument("--trio-branch", help="Trio branch to test a submodule PR against (default: derived from .gitmodules)")
+    from .build import CHERRY_PICK_HELP, SUBMODULE_CHERRY_PICK_HELP
+    p.add_argument("--cherry-pick", action="append", metavar="SPEC", help=CHERRY_PICK_HELP)
+    p.add_argument("--submodule-cherry-pick", action="append", metavar="SPEC", help=SUBMODULE_CHERRY_PICK_HELP)
     p.add_argument("--submodule", action="append", default=[], help="extra NAME@REF overrides")
     p.add_argument("--in-place", help="build this checkout as-is")
     p.add_argument("--configuration", default="Debug")
@@ -214,6 +236,8 @@ def main(argv=None) -> int:
     p.add_argument("--skip-build", action="store_true", help="reuse build/last-build.json")
     p.add_argument("--skip-install", action="store_true")
     p.add_argument("--no-smoke", action="store_true", help="stop after reaching the home screen")
+    p.add_argument("--no-cgm-sim", action="store_true", help="smoke: do not add the Glucose Simulator")
+    p.add_argument("--no-pump-sim", action="store_true", help="smoke: do not add the Pump Simulator")
     p.add_argument("--hide-setup-screenshots", action="store_true",
                    help="leave the fake CGM/pump setup steps out of report.html and the PR comment once they "
                         "succeeded (kept in the run directory)")
@@ -241,9 +265,17 @@ def main(argv=None) -> int:
     from .build import BuildInfo
     src, info = stage_checkout(args)
     pr_url = info.get("pr_url")
+    # a branch with a cherry-picked PR on top is a test of that PR (its title, its comment)
+    picked = next((c["pr"] for c in (info.get("cherry_picks") or []) + (info.get("submodule_cherry_picks") or [])
+                   if c.get("pr")), None)
+    if picked and not info.get("pr"):
+        pr_url = pr_url or picked.get("url")
+        info.setdefault("pr_title", f"{picked.get('title')} (on {info.get('branch')})")
     if args.checkout_only:
         print(json.dumps(info, indent=2, default=str)); return 0
     name = (f"pr-{info['pr'].split('#')[-1]}" if info.get("pr") else (info.get("branch") or "inplace")).replace("/", "-")
+    if info.get("cherry_picks") or info.get("submodule_cherry_picks"):
+        name += "-picks"
     run = Run.new(f"{name}-{args.target}", {"target": args.target, "mode": args.mode,
                                              "title": f"Trio test: {info.get('pr_title') or info.get('branch') or 'in-place'} ({args.mode})",
                                              "pr_url": pr_url})
@@ -255,13 +287,14 @@ def main(argv=None) -> int:
         if not args.skip_install:
             stage_install(args, bi)
         drv = stage_launch(args, bi, run)
-        if not args.no_smoke:
+        if smoke_devices(args):
             first = len(run.steps())
             stage_smoke(args, drv, run)
             if args.hide_setup_screenshots:
                 # Only the fake CGM/pump setup is hidden; launch, home and everything after stay in the report.
                 run.update_meta(hidden_steps=[first, len(run.steps())])
-        run.finish("passed", "Trio launched, reached the home screen" + ("" if args.no_smoke else ", Glucose Simulator + Pump Simulator configured") + ".")
+        want = smoke_devices(args)
+        run.finish("passed", "Trio launched, reached the home screen" + (f", {' + '.join(want)} configured" if want else "") + ".")
     except Exception as e:  # noqa: BLE001
         run.finish("failed", f"{type(e).__name__}: {e}")
         stage_report(args, run)

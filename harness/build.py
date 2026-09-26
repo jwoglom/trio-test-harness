@@ -155,6 +155,27 @@ def _gh_slug(url: str) -> str:
     return m.group(1).lower() if m else url
 
 
+GH_LINK = re.compile(r"^https://github\.com/([\w.-]+/[\w.-]+)/(tree|commit|commits)/([^?#\s]+?)/?(?:[?#].*)?$")
+
+
+def github_link(spec: str) -> tuple[str, str, str] | None:
+    """A GitHub branch or commit link -> ("branch"|"commit", owner/repo, branch or sha); else None.
+    https://github.com/o/r/tree/feat/x, .../commits/feat/x, .../commit/<sha> (PR links are handled where PRs are)."""
+    m = GH_LINK.match(spec.strip())
+    if not m:
+        return None
+    slug, kind, ref = m.groups()
+    if kind == "commit" or (kind == "tree" and re.fullmatch(r"[0-9a-f]{40}", ref)):
+        return "commit", slug, ref
+    return "branch", slug, ref
+
+
+def link_as_spec(spec: str) -> str:
+    """A GitHub branch/commit link -> owner/repo@<branch or sha> (the form the submodule options take)."""
+    gl = github_link(spec)
+    return f"{gl[1]}@{gl[2]}" if gl else spec
+
+
 def split_branch_spec(spec: str, src: Path) -> tuple[str, str]:
     """A Trio branch spec -> (remote name or fetch URL, branch).
 
@@ -162,8 +183,11 @@ def split_branch_spec(spec: str, src: Path) -> tuple[str, str]:
       upstream:feat/x   upstream@feat/x       a remote of the checkout (origin, upstream, ...)
       owner/repo:feat/x owner/repo@feat/x     that GitHub repo
       <git URL>#feat/x                        any repo
+      https://github.com/o/r/tree/feat/x      a GitHub branch link (a /commit/<sha> link: that commit)
     Git forbids ':' in branch names, so "a:b" is never a plain branch.
     """
+    if gl := github_link(spec):
+        return _gh_repo_url(gl[1]), gl[2]
     m = re.match(r"^(.+?)#(.+)$", spec)
     if m:
         return (m.group(1) if "://" in m.group(1) or m.group(1).startswith("git@") else _gh_repo_url(m.group(1))), m.group(2)
@@ -220,6 +244,7 @@ def resolve_pr(pr: str) -> tuple[str, int]:
 def submodule_override(spec: str, src: Path) -> SubmoduleOverride:
     """--submodule spec -> override. Besides NAME@REF / NAME=URL#REF, accepts a submodule PR
     (URL or owner/repo#N) and owner/repo@BRANCH; the submodule is found in .gitmodules by repo name."""
+    spec = link_as_spec(spec)
     pr = re.match(r"^(?:https://github\.com/)?([\w.-]+/[\w.-]+)(?:/pull/|#)(\d+)/?$", spec)
     branch = None if pr else re.match(r"^([\w.-]+/[\w.-]+)@(.+)$", spec)
     if not (pr or branch):
@@ -229,7 +254,9 @@ def submodule_override(spec: str, src: Path) -> SubmoduleOverride:
     mods = _parse_gitmodules(gm.read_text()) if gm.exists() else {}
     for name, m in mods.items():
         if _repo_name(m.get("url", "")) == _repo_name(slug):
-            return SubmoduleOverride(name, ref)
+            # owner/repo@ref names the repo: a fork's branch or commit is fetched from that fork
+            same = _gh_slug(m.get("url", "")) == _gh_slug(_gh_repo_url(slug))
+            return SubmoduleOverride(name, ref, None if pr or same else _gh_repo_url(slug))
     raise HarnessError(f"{slug} is not a submodule of this Trio checkout ({', '.join(sorted(mods)) or 'none'})")
 
 
@@ -316,17 +343,227 @@ def resolve_pr_target(pr: str, src: Path, trio_branch: str | None = None) -> dic
                        "pass --trio-branch <branch that contains the submodule>")
 
 
+# A cherry-pick needs a committer; CI's hermetic git config has none. These commits never leave the checkout.
+PICK_ENV = {"GIT_COMMITTER_NAME": "trio-test-harness", "GIT_COMMITTER_EMAIL": "trio-test-harness@localhost"}
+
+
+
+CHERRY_PICK_HELP = ("commits to cherry-pick onto the Trio checkout, in order (repeatable): a Trio PR (link, owner/repo#N, "
+                    "number) = its own commits; a commit sha; a range A..B; or a branch (feat/x, remote:feat/x, "
+                    "owner/repo:feat/x) = its commits that are on neither the checkout nor the base branch")
+
+
+_PR_META: dict[str, dict] = {}
+
+
+def _pr_own_commits(repo: Path, slug: str, num: str, ref: str) -> list[str]:
+    """A PR's own commits, oldest first, merges skipped: GitHub's list for the PR (still right once it is merged,
+    when its base already contains its head). The objects come from fetching pull/N/head into `ref`."""
+    _git(["fetch", "--force", _gh_repo_url(slug), f"+pull/{num}/head:{ref}"], repo, timeout=900)
+    try:
+        cp = run(["gh", "api", "--paginate", f"repos/{slug}/pulls/{num}/commits?per_page=100",
+                  "--jq", ".[] | select((.parents | length) == 1) | .sha"], quiet=True)
+    except HarnessError:
+        raise HarnessError(f"{slug}#{num}: could not list the PR's commits (gh api failed); check `gh auth status`") from None
+    return cp.stdout.split()
+
+
+def _pick_commits(src: Path, spec: str, n: int) -> tuple[list[str], str]:
+    """One --cherry-pick spec -> (commits to apply, oldest first; a description)."""
+    spec = spec.strip()
+    ref = f"refs/th/pick-{n}"
+    pr = re.match(r"^(?:https://github\.com/([\w.-]+/[\w.-]+)/pull/(\d+)/?|([\w.-]+/[\w.-]+)#(\d+)|(\d{1,6}))$", spec)
+    if pr:
+        slug = pr.group(1) or pr.group(3) or CONFIG.get("TH_DEFAULT_GH_REPO", DEFAULT_GH_REPO)
+        num = pr.group(2) or pr.group(4) or pr.group(5)
+        try:
+            meta = json.loads(run(["gh", "pr", "view", num, "--repo", slug, "--json", "title,url,body"],
+                                  quiet=True).stdout)
+        except (HarnessError, ValueError):
+            raise HarnessError(f"--cherry-pick {spec}: gh pr view failed; check `gh auth status`") from None
+        commits = _pr_own_commits(src, slug, num, ref)
+        _PR_META[spec] = {"pr": f"{slug}#{num}", "title": meta.get("title"), "url": meta.get("url"), "body": meta.get("body")}
+        return commits, f"{slug}#{num} ({meta.get('title', '')})"
+    if (gl := github_link(spec)) and gl[0] == "commit":
+        if not _git(["rev-parse", "--verify", "--quiet", f"{gl[2]}^{{commit}}"], src, quiet=True, check=False).stdout.strip():
+            _fetch_commit(src, gl[2], [_gh_repo_url(gl[1])])
+        return [_git(["rev-parse", f"{gl[2]}^{{commit}}"], src, quiet=True).stdout.strip()], f"commit {gl[1]}@{gl[2][:10]}"
+    rng = re.match(r"^([\w./^~-]+)\.\.([\w./^~-]+)$", spec)
+    if rng:
+        for side in rng.groups():
+            if not _git(["rev-parse", "--verify", "--quiet", f"{side}^{{commit}}"], src, quiet=True, check=False).stdout.strip():
+                _fetch_commit(src, side)
+        commits = _git(["rev-list", "--reverse", "--no-merges", spec], src, quiet=True).stdout.split()
+        return commits, f"range {spec}"
+    if re.match(r"^[0-9a-f]{7,40}$", spec):
+        if not _git(["rev-parse", "--verify", "--quiet", f"{spec}^{{commit}}"], src, quiet=True, check=False).stdout.strip():
+            _fetch_commit(src, spec)
+        sha = _git(["rev-parse", f"{spec}^{{commit}}"], src, quiet=True).stdout.strip()
+        return [sha], f"commit {spec}"
+    # a branch: its own commits, i.e. those neither on the checkout nor on the base branch it grew from
+    _fetch_trio_branch(src, spec, ref)
+    base = CONFIG.get("TH_TRIO_BASE_BRANCH") or "dev"
+    excl = ["^HEAD"]
+    try:
+        _fetch_trio_branch(src, base, f"{ref}-base")
+        excl.append(f"^{ref}-base")
+    except HarnessError:
+        pass
+    commits = _git(["rev-list", "--reverse", "--no-merges", ref, *excl], src, quiet=True).stdout.split()
+    return commits, f"branch {spec} (its commits not on {base})"
+
+
+def _fetch_commit(src: Path, sha: str, extra: list[str] | None = None) -> None:
+    """A commit that is not in the checkout yet: GitHub serves full shas by id; short ones need a fetch of all heads."""
+    remotes = [*(extra or []), *[r for r in ("origin", "upstream") if r in _git(["remote"], src, quiet=True).stdout.split()]]
+    for i, r in enumerate(remotes):
+        want = [sha] if len(sha) == 40 else [f"+refs/heads/*:refs/th/heads-{i}/*"]
+        _git(["fetch", "--quiet", r, *want], src, check=False, timeout=900)
+        if _git(["rev-parse", "--verify", "--quiet", f"{sha}^{{commit}}"], src, quiet=True, check=False).stdout.strip():
+            return
+    raise HarnessError(f"--cherry-pick {sha}: commit not found in the checkout or on {', '.join(remotes) or 'its remotes'}"
+                       " (give the full 40-character sha, or owner/repo:branch / a PR instead)")
+
+
+def _apply_picks(repo: Path, commits: list[str], spec: str, what: str, start: str, flag: str = "--cherry-pick") -> dict:
+    """Cherry-pick `commits` onto `repo`'s HEAD. A conflict aborts, puts `repo` back at `start` and stops the build."""
+    if not commits:
+        raise HarnessError(f"{flag} {spec}: no commits to apply ({what})")
+    before = _git(["rev-parse", "HEAD"], repo, quiet=True).stdout.strip()
+    todo = [c for c in commits
+            if _git(["merge-base", "--is-ancestor", c, "HEAD"], repo, quiet=True, check=False).returncode != 0]
+    log(f"cherry-picking {len(todo)} commit(s) into {repo.name}: {what}"
+        + (f" ({len(commits) - len(todo)} already in its history)" if len(todo) < len(commits) else ""))
+    cp = (_git(["cherry-pick", "--empty=drop", "--allow-empty", *todo], repo, check=False, env=PICK_ENV, timeout=900)
+          if todo else None)
+    if cp is None:
+        return {"spec": spec, "what": what, "commits": [c[:10] for c in commits], "applied": 0,
+                "dropped": len(commits), **({"pr": _PR_META[spec]} if spec in _PR_META else {})}
+    if cp.returncode != 0:
+        stuck = _git(["rev-parse", "--short=10", "CHERRY_PICK_HEAD"], repo, quiet=True, check=False).stdout.strip()
+        files = _git(["diff", "--name-only", "--diff-filter=U"], repo, quiet=True, check=False).stdout.split()
+        subject = _git(["log", "-1", "--format=%s", stuck], repo, quiet=True, check=False).stdout.strip() if stuck else ""
+        _git(["cherry-pick", "--abort"], repo, quiet=True, check=False)
+        _git(["checkout", "--force", "--detach", start], repo, quiet=True, check=False)
+        raise HarnessError(f"{flag} {spec} does not apply cleanly: "
+                           + (f"commit {stuck} ({subject})" if stuck else "a commit") + " conflicts"
+                           + (f" in {', '.join(files)}" if files else "") + f"\n{(cp.stderr or cp.stdout)[-1500:]}")
+    applied = int(_git(["rev-list", "--count", f"{before}..HEAD"], repo, quiet=True).stdout.strip() or 0)
+    return {"spec": spec, "what": what, "commits": [c[:10] for c in commits], "applied": applied,
+            "dropped": len(commits) - applied, **({"pr": _PR_META[spec]} if spec in _PR_META else {})}
+
+
+def cherry_pick(src: Path, specs: list[str]) -> list[dict]:
+    """Apply each --cherry-pick spec onto the Trio checkout's HEAD, in order. Commits already there are dropped; a
+    conflict stops the build with the commit and files named, and leaves the checkout at the commit it started from."""
+    start = _git(["rev-parse", "HEAD"], src, quiet=True).stdout.strip()
+    out = []
+    for n, spec in enumerate(specs, 1):
+        commits, what = _pick_commits(src, spec, n)
+        out.append(_apply_picks(src, commits, spec, what, start))
+    return out
+
+
+SUBMODULE_CHERRY_PICK_HELP = (
+    "commits to cherry-pick onto a submodule, after the overrides, in order (repeatable): a submodule PR (link or "
+    "owner/repo#N) = its own commits; NAME@sha or NAME@A..B; or NAME@branch = its commits on neither the submodule's "
+    "checkout nor its default branch. NAME is the submodule (TandemKit) or owner/repo (that repo's branch or commits)")
+
+
+def _find_submodule(src: Path, key: str) -> str:
+    """Submodule path for a submodule name or a repo (owner/repo or its name), via .gitmodules."""
+    gm = src / ".gitmodules"
+    mods = _parse_gitmodules(gm.read_text()) if gm.exists() else {}
+    k = key.lower()
+    for name, m in mods.items():
+        if name.lower() == k or m.get("path", "").lower() == k or _repo_name(m.get("url", "")) == _repo_name(k):
+            return m.get("path") or name
+    raise HarnessError(f"{key} is not a submodule of this Trio checkout ({', '.join(sorted(mods)) or 'none'})")
+
+
+def _remote_default_branch(repo: Path, url: str) -> str | None:
+    cp = _git(["ls-remote", "--symref", url, "HEAD"], repo, quiet=True, check=False, timeout=120)
+    m = re.search(r"^ref: refs/heads/(\S+)\s+HEAD", cp.stdout, re.M)
+    return m.group(1) if m else None
+
+
+def _sub_pick_commits(src: Path, spec: str, n: int) -> tuple[str, list[str], str]:
+    """One --submodule-cherry-pick spec -> (submodule path, commits to apply oldest first, a description)."""
+    spec = link_as_spec(spec.strip())
+    ref = f"refs/th/subpick-{n}"
+    pr = re.match(r"^(?:https://github\.com/([\w.-]+/[\w.-]+)/pull/(\d+)/?|([\w.-]+/[\w.-]+)#(\d+))$", spec)
+    if pr:
+        slug, num = pr.group(1) or pr.group(3), pr.group(2) or pr.group(4)
+        path = _find_submodule(src, slug)
+        sub = src / path
+        try:
+            meta = json.loads(run(["gh", "pr", "view", num, "--repo", slug, "--json", "title,url,body"],
+                                  quiet=True).stdout)
+        except (HarnessError, ValueError):
+            raise HarnessError(f"--submodule-cherry-pick {spec}: gh pr view failed; check `gh auth status`") from None
+        commits = _pr_own_commits(sub, slug, num, ref)
+        _PR_META[spec] = {"pr": f"{slug}#{num}", "title": meta.get("title"), "url": meta.get("url"), "body": meta.get("body")}
+        return path, commits, f"{slug}#{num} ({meta.get('title', '')})"
+    m = re.match(r"^((?:[\w.-]+/)?[\w.-]+)@(.+)$", spec)
+    if not m:
+        raise HarnessError(f"--submodule-cherry-pick {spec!r}: use a PR link, owner/repo#N, NAME@sha, NAME@A..B or "
+                           "NAME@branch")
+    key, what_ref = m.groups()
+    path = _find_submodule(src, key)
+    sub = src / path
+    url = _gh_repo_url(key) if "/" in key else _origin_url(sub)
+    extra = [url] if "/" in key else []
+    rng = re.match(r"^([\w./^~-]+)\.\.([\w./^~-]+)$", what_ref)
+    if rng or re.match(r"^[0-9a-f]{7,40}$", what_ref):
+        for side in (rng.groups() if rng else [what_ref]):
+            if not _git(["rev-parse", "--verify", "--quiet", f"{side}^{{commit}}"], sub, quiet=True, check=False).stdout.strip():
+                _fetch_commit(sub, side, extra)
+        if rng:
+            return path, _git(["rev-list", "--reverse", "--no-merges", what_ref], sub, quiet=True).stdout.split(), \
+                f"{path} range {what_ref}"
+        return path, [_git(["rev-parse", f"{what_ref}^{{commit}}"], sub, quiet=True).stdout.strip()], f"{path} commit {what_ref}"
+    # a branch: its own commits, i.e. those neither on the submodule's checkout nor on the repo's default branch
+    _git(["fetch", "--force", url, f"+refs/heads/{what_ref}:{ref}"], sub, timeout=900)
+    excl = ["^HEAD"]
+    if (default := _remote_default_branch(sub, url)) and default != what_ref:
+        if _git(["fetch", "--force", url, f"+refs/heads/{default}:{ref}-base"], sub, check=False, timeout=900).returncode == 0:
+            excl.append(f"^{ref}-base")
+    commits = _git(["rev-list", "--reverse", "--no-merges", ref, *excl], sub, quiet=True).stdout.split()
+    return path, commits, f"{path} branch {what_ref}" + (f" (its commits not on {default})" if default else "")
+
+
+def submodule_cherry_pick(src: Path, specs: list[str]) -> list[dict]:
+    """Apply each --submodule-cherry-pick spec onto its submodule's HEAD, in order (see _sub_pick_commits)."""
+    starts: dict[str, str] = {}
+    out = []
+    for n, spec in enumerate(specs, 1):
+        path, commits, what = _sub_pick_commits(src, spec, n)
+        sub = src / path
+        starts.setdefault(path, _git(["rev-parse", "HEAD"], sub, quiet=True).stdout.strip())
+        out.append({"submodule": path, **_apply_picks(sub, commits, spec, what, starts[path], "--submodule-cherry-pick")})
+    return out
+
+
 def prepare_source(*, branch: str | None = None, pr: str | None = None, repo: str | None = None,
                    in_place: Path | None = None, submodules: list[str] | None = None,
-                   fetch: bool = True, trio_branch: str | None = None) -> tuple[Path, dict]:
+                   fetch: bool = True, trio_branch: str | None = None,
+                   cherry_picks: list[str] | None = None,
+                   submodule_cherry_picks: list[str] | None = None) -> tuple[Path, dict]:
     """Return (source_dir, git_info).
 
     * no branch/pr: build the checkout as-is (cloned first if missing)
     * --branch / --pr for Trio: fetched and checked out (detached) in the checkout dir
     * --pr for a submodule repo (e.g. TandemKit): Trio is checked out at the branch that pins that submodule
       (--trio-branch, else TH_TRIO_BASE_BRANCH, dev, feat/tandem, main) and the submodule is switched to the PR head
+    * submodule_cherry_picks (--submodule-cherry-pick): applied onto submodules after the overrides
+    * cherry_picks (--cherry-pick): applied in order onto whichever Trio was checked out (see cherry_pick);
+      with no branch/PR they need one, so TH_TRIO_BASE_BRANCH is checked out first
     """
     info: dict = {}
+    if (cherry_picks or submodule_cherry_picks) and in_place:
+        raise HarnessError("cherry-picks need a branch or PR checkout, not --in-place (commit into that folder instead)")
+    if cherry_picks and not branch and not pr:
+        branch = CONFIG.get("TH_TRIO_BASE_BRANCH") or "dev"
     src = Path(in_place).expanduser().resolve() if in_place else ensure_checkout()
     if not (src / "Trio.xcworkspace").exists() and not branch and not pr:
         # fresh --no-checkout clone: materialize the default branch
@@ -371,6 +608,8 @@ def prepare_source(*, branch: str | None = None, pr: str | None = None, repo: st
         # remove leftovers from a previous PR/branch (e.g. a submodule dir that does not exist on this branch),
         # but keep ignored files (ConfigOverride.xcconfig, Xcode user data) — the checkout may be the user's own clone
         _git(["clean", "-fd", "-e", "ConfigOverride.xcconfig"], src, quiet=True)
+        if cherry_picks:
+            info["cherry_picks"] = cherry_pick(src, cherry_picks)
     if fetch:
         log("syncing git submodules (first run downloads LoopKit & friends; several minutes)")
         _git(["submodule", "sync", "--recursive"], src, quiet=True)
@@ -390,6 +629,8 @@ def prepare_source(*, branch: str | None = None, pr: str | None = None, repo: st
         _git(["checkout", "--force", "--detach", "FETCH_HEAD"], sub)
         _git(["submodule", "update", "--init", "--recursive"], sub, check=False, timeout=1800)
         info.setdefault("submodule_overrides", []).append(asdict(ov))
+    if submodule_cherry_picks:
+        info["submodule_cherry_picks"] = submodule_cherry_pick(src, submodule_cherry_picks)
     info["sha"] = _git(["rev-parse", "--short=10", "HEAD"], src, quiet=True).stdout.strip()
     info["describe"] = _git(["log", "-1", "--format=%s"], src, quiet=True).stdout.strip()
     info["submodules"] = {}

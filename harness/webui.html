@@ -26,6 +26,16 @@ header h1{font-size:17px;margin:0} header a{color:inherit;text-decoration:none} 
 .typerow{display:flex;gap:6px;margin-top:8px}
 #lastshot img{max-width:120px;border:1px solid var(--line);border-radius:6px;margin-top:8px;display:block}
 header .spacer{flex:1}
+.layout.with-logs{grid-template-columns:340px minmax(0,1fr) 460px;max-width:none}
+.layout.with-logs.with-phone{grid-template-columns:340px minmax(0,1fr) 460px calc(var(--phone-h) * var(--ar) + 22px)}
+@media (max-width:1500px){.layout.with-logs.with-phone{grid-template-columns:340px minmax(0,1fr) calc(var(--phone-h) * var(--ar) + 22px)} .layout.with-logs.with-phone #applogs{grid-column:1 / -1;position:static;height:60vh}}
+@media (max-width:1100px){.layout.with-logs{grid-template-columns:340px minmax(0,1fr)} #applogs{grid-column:1 / -1;position:static;height:60vh}}
+@media (max-width:900px){.layout.with-logs,.layout.with-logs.with-phone{grid-template-columns:1fr}}
+#applogs{align-self:start;position:sticky;top:12px;padding:10px;display:flex;flex-direction:column;gap:8px;height:calc(100vh - 90px);min-width:0}
+#applogs .logbox{flex:1;min-height:0;overflow:auto;background:var(--bg);border:1px solid var(--line);border-radius:6px;padding:6px}
+#applogs pre{font-size:11px}
+button.linkish{border:0;background:none;padding:0;font-size:13px;color:var(--muted);text-align:left}
+#tandembox.open{flex:1;display:flex;flex-direction:column;min-height:0} #tandembox.open .logbox{margin-top:6px}
 .card{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:14px 16px}
 h2{font-size:15px;margin:0 0 10px} h3{font-size:14px;margin:0 0 8px}
 label{display:block;font-size:12px;color:var(--muted);margin:10px 0 3px}
@@ -51,7 +61,7 @@ th{font-size:12px;color:var(--muted);font-weight:500} tr.job{cursor:pointer} tr.
 .pill.running,.pill.posting{background:var(--accent)} .pill.partial,.pill.waiting,.pill.inconclusive,.pill.unknown{background:var(--warn)}
 .stages{display:flex;gap:6px;flex-wrap:wrap;margin:10px 0}
 .stage{border:1px solid var(--line);border-radius:6px;padding:3px 9px;font-size:12px;background:var(--bg)}
-.stage.passed{border-color:var(--ok)} .stage.failed{border-color:var(--bad)} .stage.running{border-color:var(--accent)}
+.stage.skipped{opacity:.6} .stage.passed{border-color:var(--ok)} .stage.failed{border-color:var(--bad)} .stage.running{border-color:var(--accent)}
 .facts{display:grid;grid-template-columns:max-content 1fr;gap:3px 14px;font-size:13px;margin:8px 0}
 .facts dt{color:var(--muted)} .facts dd{margin:0;word-break:break-word}
 pre{margin:0;white-space:pre-wrap;word-break:break-word;font:12px/1.4 ui-monospace,SFMono-Regular,Menlo,monospace}
@@ -61,11 +71,19 @@ iframe{width:100%;height:80vh;border:1px solid var(--line);border-radius:8px;bac
 #form{align-self:start}
 .muted{color:var(--muted)} a{color:var(--accent)}
 .findings{white-space:pre-wrap;font-size:13px}
+ul.examples{color:var(--muted);font-size:12px;margin:4px 0 0;padding-left:18px} ul.examples li{margin:1px 0}
+button.small{padding:2px 9px;font-size:12px;margin-top:8px;display:block}
+.section{margin:16px 0 4px;padding:10px 12px;border:1px solid var(--line);border-radius:6px;background:var(--bg)}
+.addrow{display:flex;gap:6px;align-items:center} .addrow button{padding:4px 9px}
+.pill.live{background:var(--accent)} .pill.starting{background:var(--warn)} .pill.created,.pill.sent{background:var(--ok)}
+.cont{display:grid;grid-template-columns:1fr 1fr;gap:14px} @media (max-width:1100px){.cont{grid-template-columns:1fr}}
+.cont>div{border:1px solid var(--line);border-radius:6px;padding:10px 12px;background:var(--bg)} .cont h4{margin:0 0 4px;font-size:13px}
+.controw{border-top:1px solid var(--line);padding:8px 0;font-size:13px} .controw:first-child{border-top:0}
+.controw code{font-size:12px;word-break:break-all}
 </style>
 </head>
 <body>
-<header><h1><a href="#/">Trio Test Runner</a></h1><span>runs on this machine · nothing goes to GitHub until you post</span>
-  <span class="spacer"></span><button id="phonetoggle" type="button" hidden>Live phone</button></header>
+<header><h1><a href="#/">Trio Test Runner</a></h1><span class="spacer"></span><button id="logstoggle" type="button">Show Trio logs</button><button id="phonetoggle" type="button" hidden>Live phone</button></header>
 <div class="layout">
   <form id="form" class="card" autocomplete="off">
     <h2>New run</h2>
@@ -75,28 +93,37 @@ iframe{width:100%;height:80vh;border:1px solid var(--line);border-radius:8px;bac
       <label><input type="radio" name="target" value="simulator">simulator</label>
     </div>
     <label for="trio">Trio PR or branch</label>
-    <input type="text" id="trio" name="trio" placeholder="PR link, owner/repo#N, 1234, or branch">
-    <div class="hint">Branch forms: <code>feat/x</code> (origin, else upstream), <code>upstream:feat/x</code>, <code>owner/repo:feat/x</code>. Blank: dev, or the branch that has the submodule.</div>
-    <label for="submodules">Submodules</label>
-    <input type="text" id="submodules" name="submodules" placeholder="jwoglom/TandemKit#395  TandemKit@branch">
-    <div class="hint">PR links, owner/repo#N, or NAME@branch; space-separated. The comment goes to the Trio PR, else the first submodule PR.</div>
+    <input type="text" id="trio" name="trio">
+    <ul class="examples"><li><code>branch-name</code></li><li><code>upstream:branch-name</code></li><li><code>jwoglom/Trio@branch-name</code></li><li>GitHub link</li></ul>
+    <div class="adds" id="adds-cherry_pick"></div>
+    <button type="button" class="small" data-add="cherry_pick" data-label="Trio cherry-pick">Add cherry-pick</button>
+    <div class="adds" id="adds-submodule_override"></div>
+    <button type="button" class="small" data-add="submodule_override" data-label="Submodule override">Add submodule override</button>
+    <div class="adds" id="adds-submodule_cherry_pick"></div>
+    <button type="button" class="small" data-add="submodule_cherry_pick" data-label="Submodule cherry-pick">Add submodule cherry-pick</button>
+    <label class="check"><input type="checkbox" name="skip_onboarding" checked>Skip onboarding</label>
+    <label class="check"><input type="checkbox" name="cgm_sim" checked>Use Glucose Simulator</label>
+    <label class="check"><input type="checkbox" name="pump_sim" checked>Use Pump Simulator</label>
+    <div class="section">
+    <label class="check" style="margin-top:0"><input type="checkbox" name="agent" checked>Trigger agent</label>
+    <datalist id="models"><option value="sonnet"><option value="opus"><option value="haiku"></datalist>
+    <fieldset id="agentfields">
+      <div class="row">
+        <div><label for="claude_model">Claude model</label>
+          <input type="text" id="claude_model" name="claude_model" value="sonnet" list="models"></div>
+        <div><label for="agent_minutes">Time limit (min)</label>
+          <input type="number" id="agent_minutes" name="agent_minutes" value="30" min="1" max="180"></div>
+      </div>
+      <label for="agent_instructions">Extra focus for the agent</label>
+      <textarea id="agent_instructions" name="agent_instructions" placeholder="e.g. check the bolus sheet"></textarea>
+    </fieldset>
+    </div>
+    <label class="check"><input type="checkbox" name="post_comment">Post the PR comment when done</label>
     <div class="row">
       <div><label for="configuration">Configuration</label>
         <select id="configuration" name="configuration"><option>Debug</option><option>Release</option></select></div>
-      <div><label for="claude_model">Claude model</label>
-        <input type="text" id="claude_model" name="claude_model" value="sonnet" list="models"></div>
-    </div>
-    <datalist id="models"><option value="sonnet"><option value="opus"><option value="haiku"></datalist>
-    <label class="check"><input type="checkbox" name="skip_onboarding" checked>Skip onboarding</label>
-    <label class="check"><input type="checkbox" name="smoke" checked>Configure the Glucose Simulator + Pump Simulator</label>
-    <label for="agent_instructions">Extra focus for the agent</label>
-    <textarea id="agent_instructions" name="agent_instructions" placeholder="e.g. check the bolus sheet"></textarea>
-    <div class="row">
-      <div><label for="agent_minutes">Agent time limit (min)</label>
-        <input type="number" id="agent_minutes" name="agent_minutes" value="30" min="1" max="180"></div>
       <div><label for="xcode">Xcode</label><select id="xcode" name="xcode"><option value="">harness.env / newest</option></select></div>
     </div>
-    <label class="check"><input type="checkbox" name="post_comment">Post the PR comment when done</label>
     <details class="more" id="simbox"><summary>Simulator</summary>
       <fieldset id="simfields">
         <label for="sim_device">Device</label>
@@ -110,11 +137,19 @@ iframe{width:100%;height:80vh;border:1px solid var(--line);border-radius:8px;bac
     <div class="actions"><button class="primary" type="submit">Run</button><span class="err" id="formerr"></span></div>
   </form>
   <main id="main" class="stack"></main>
+  <aside id="applogs" class="card" hidden>
+    <div class="phonehead"><h2>Trio logs</h2><span id="logstate" class="hint"></span><span class="spacer" style="flex:1"></span>
+      <label class="check" style="margin:0"><input type="checkbox" id="logfollow" checked>follow</label>
+      <button id="logsclose" type="button" title="Hide the log pane">×</button></div>
+    <div class="logbox"><pre id="log-trio"></pre></div>
+    <div id="tandembox"><button type="button" id="tandemtoggle" class="linkish">▸ Tandem logs</button>
+      <div class="logbox" hidden><pre id="log-tandem"></pre></div></div>
+  </aside>
   <aside id="phone" class="card" hidden>
     <div class="phonehead"><h2>iPhone</h2><span id="vncstate" class="hint">not connected</span><span class="spacer" style="flex:1"></span>
       <button id="vncconnect" type="button">Connect</button><button id="phoneclose" type="button" title="Hide the phone panel">×</button></div>
-    <label class="check"><input type="checkbox" id="vnccontrol">Control: clicks tap, drags swipe, keys type, right-click is Home</label>
-    <div class="hint" id="busyhint" hidden>A run is driving the phone; taking control can disturb it.</div>
+    <label class="check" title="Clicks tap, drags swipe, keys type, right-click is Home"><input type="checkbox" id="vnccontrol">Control iPhone</label>
+    <div class="hint" id="busyhint" hidden>An agent is currently controlling the phone</div>
     <div id="screen">Connect to see the phone over TrollVNC.</div>
     <div class="btns">
       <button type="button" data-act="shot" title="Native-resolution screenshot; added to the open run if it is finished">Screenshot</button>
@@ -135,6 +170,19 @@ const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&": "&amp;", "<": "
 const ANSI = /\x1b\[[0-9;?]*[A-Za-z]/g;
 const ACTIVE = new Set(["queued", "waiting", "running"]);
 const STAGES = [["e2e", "checkout → build → install → launch → smoke"], ["agent", "agent"], ["highlights", "review"]];
+const E2E_STEPS = ["checkout", "build", "install", "launch", "smoke", "report"];
+// the trio-test-e2e stage as its own steps: done, the one running (or that failed), and not reached
+function e2eChips(j) {
+  const st = j.stages?.e2e?.status, seen = j.e2e_steps || [];
+  if (!st) return `<span class="stage">${E2E_STEPS.join(" → ")}</span>`;
+  const last = seen[seen.length - 1];
+  return E2E_STEPS.map(s => {
+    let cls = "";
+    if (seen.includes(s)) cls = s !== last ? "passed" : st === "running" ? "running" : st === "failed" ? "failed" : "passed";
+    else if (st !== "running") cls = "skipped";
+    return `<span class="stage ${cls}">${esc(s)}${cls === "running" ? " · running" : cls === "failed" ? " · failed" : ""}</span>`;
+  }).join("");
+}
 
 async function api(path, body) {
   const r = await fetch(path, body === undefined ? {} : {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(body)});
@@ -143,7 +191,8 @@ async function api(path, body) {
   return data;
 }
 const pill = s => s ? `<span class="pill ${esc(s)}">${esc(s)}</span>` : "";
-const what = i => [i.trio || (!i.submodules && "dev") || "", i.submodules].filter(Boolean).join(" + ");
+const what = i => [i.trio || (!i.submodules && "dev") || "", i.submodules, i.cherry_pick && `🍒 ${i.cherry_pick}`,
+  i.submodule_cherry_pick && `🍒 ${i.submodule_cherry_pick}`].filter(Boolean).join(" + ");
 const when = t => t ? t.replace("T", " ").slice(5, 16) : "";
 
 // ---- form ----
@@ -154,8 +203,13 @@ function syncTarget() {
   if (sim) $("#simbox").open = true;
   $("#phonetoggle").hidden = sim;
 }
-form.addEventListener("change", e => { if (e.target.name === "target") syncTarget(); });
+function syncAgent() {
+  const on = form.agent.checked;
+  $("#agentfields").disabled = !on;
+}
+form.addEventListener("change", e => { if (e.target.name === "target") syncTarget(); if (e.target.name === "agent") syncAgent(); });
 syncTarget();
+syncAgent();
 api("/api/options").then(o => {
   for (const x of o.xcodes) $("#xcode").insertAdjacentHTML("beforeend", `<option value="${esc(x)}">${esc(x.split("/").pop().replace(/\.app$/, ""))}</option>`);
   if (o.defaults.xcode && o.xcodes.includes(o.defaults.xcode)) $("#xcode").value = o.defaults.xcode;
@@ -163,10 +217,25 @@ api("/api/options").then(o => {
   $("#sim_runtimes").innerHTML = o.sim_runtimes.map(d => `<option value="${esc(d)}">`).join("");
   $("#sim_device").placeholder = o.defaults.sim_device || "iPhone 16";
 }).catch(() => {});
+// "Add cherry-pick" / "Add submodule override": one field per item, each with its own label and a remove button
+let addSeq = 0;
+for (const b of form.querySelectorAll("button[data-add]")) b.onclick = () => {
+  const id = `add${++addSeq}`, box = $(`#adds-${b.dataset.add}`);
+  box.insertAdjacentHTML("beforeend", `<div class="added"><label for="${id}">${esc(b.dataset.label)}</label>
+    <div class="addrow"><input type="text" id="${id}" data-multi="${esc(b.dataset.add)}"><button type="button" title="Remove">×</button></div></div>`);
+  const row = box.lastElementChild;
+  row.querySelector("button").onclick = () => row.remove();
+  $(`#${id}`).focus();
+};
+const multi = name => [...form.querySelectorAll(`[data-multi="${name}"]`)].map(i => i.value.trim()).filter(Boolean);
+
 form.addEventListener("submit", async e => {
   e.preventDefault();
   const f = Object.fromEntries(new FormData(form));
-  for (const k of ["skip_onboarding", "smoke", "post_comment"]) f[k] = form[k].checked;
+  f.cherry_pick = multi("cherry_pick").join(" ");
+  f.submodule_cherry_pick = multi("submodule_cherry_pick").join(" ");
+  f.submodules = multi("submodule_override").join(" ");
+  for (const k of ["skip_onboarding", "cgm_sim", "pump_sim", "post_comment", "agent"]) f[k] = form[k].checked;
   $("#formerr").textContent = "";
   try {
     const job = await api("/api/jobs", f);
@@ -208,13 +277,17 @@ async function showJob() {
       <section class="card" id="jobhead"></section>
       <section class="card" id="comment"></section>
       <section class="card" id="findings" hidden><h3>Agent findings</h3><div class="findings"></div></section>
+      <section class="card" id="continue" hidden><h3>Continue</h3><div id="contctl"></div><div id="contlist"></div></section>
       <section id="report" hidden></section>
-      <section class="card"><h3>Log <label class="check" style="display:inline-flex;margin:0 0 0 10px"><input type="checkbox" id="follow" checked>follow</label></h3>
+      <section class="card"><h3 style="display:flex;align-items:center;gap:10px">Log <label class="check" style="display:inline-flex;margin:0"><input type="checkbox" id="follow" checked>follow</label>
+        <span style="flex:1"></span><span class="hint" id="copymsg"></span><button type="button" id="copylog" title="Copy the whole log (all of log.txt, not only what is shown)">Copy</button></h3>
         <div class="log"><pre id="log"></pre></div></section>`;
     $("#follow").onchange = e => v.follow = e.target.checked;
+    $("#copylog").onclick = () => copyLog(v.job);
   }
   renderHead(j);
   renderComment(j, v);
+  renderContinue(j);
   const findings = (j.agent_summary || "").trim();
   $("#findings").hidden = !findings;
   $("#findings .findings").textContent = findings;
@@ -234,14 +307,34 @@ async function showJob() {
     v.offset = l.offset;
     if (v.follow && l.text) pre.parentElement.scrollTop = pre.parentElement.scrollHeight;
   } catch (_) {}
-  const busy = ACTIVE.has(j.status) || j.comment?.status === "posting";
+  const busy = ACTIVE.has(j.status) || j.comment?.status === "posting" || (j.continuations || []).some(c => c.status === "starting");
   if (v === view) timer = setTimeout(showJob, busy ? 2000 : 10000);
+}
+
+async function copyLog(id) {
+  const msg = t => { $("#copymsg").textContent = t; setTimeout(() => { if ($("#copymsg")) $("#copymsg").textContent = ""; }, 3000); };
+  try {
+    const r = await fetch(`/api/jobs/${id}/log.txt`);
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    const text = (await r.text()).replace(ANSI, "");
+    try { await navigator.clipboard.writeText(text); }
+    catch (_) {   // plain HTTP from another machine: no async clipboard API
+      const ta = document.createElement("textarea");
+      ta.value = text; ta.style.position = "fixed"; ta.style.opacity = "0";
+      document.body.appendChild(ta); ta.select();
+      const ok = document.execCommand("copy");
+      ta.remove();
+      if (!ok) throw new Error("the browser refused");
+    }
+    msg(`copied ${Math.round(text.length / 1024)} KB`);
+  } catch (err) { msg(`copy failed: ${err.message}`); }
 }
 
 function renderHead(j) {
   const i = j.inputs, st = j.stages || {};
-  const facts = [["Target", i.target], ["Trio", i.trio || "(default)"], ["Submodules", i.submodules], ["PR", j.pr],
-    ["Model", `${i.claude_model}, ${i.agent_minutes} min`], ["Configuration", i.configuration],
+  const facts = [["Target", i.target], ["Trio", i.trio || "(default)"],
+    ["Trio cherry-picks", i.cherry_pick], ["Submodule overrides", i.submodules], ["Submodule cherry-picks", i.submodule_cherry_pick], ["PR", j.pr],
+    ["Agent", i.agent === false ? "not triggered" : `${i.claude_model}, ${i.agent_minutes} min`], ["Configuration", i.configuration],
     ["Focus", i.agent_instructions], ["Run", j.run_name], ["Started", when(j.created)]].filter(f => f[1]);
   $("#jobhead").innerHTML = `
     <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
@@ -250,7 +343,7 @@ function renderHead(j) {
       ${ACTIVE.has(j.status) ? `<button class="danger" id="cancel">Cancel</button>` : ""}
       ${j.has_report ? `<a href="/jobs/${esc(j.id)}/report.html" target="_blank" rel="noopener">Open report ↗</a>` : ""}
     </div>
-    <div class="stages">${STAGES.map(([k, label]) => `<span class="stage ${esc(st[k]?.status || "")}">${esc(label)}${st[k]?.status ? ` · ${esc(st[k].status)}` : ""}</span>`).join("")}</div>
+    <div class="stages">${e2eChips(j)}${STAGES.slice(1).map(([k, label]) => `<span class="stage ${esc(st[k]?.status || "")}">${esc(label)}${st[k]?.status ? ` · ${esc(st[k].status)}` : ""}</span>`).join("")}</div>
     ${j.run_summary ? `<p style="margin:6px 0">${esc(j.run_summary)}</p>` : ""}
     ${j.error ? `<p class="err">${esc(j.error)}</p>` : ""}
     <dl class="facts">${facts.map(([k, x]) => `<dt>${esc(k)}</dt><dd>${esc(x)}</dd>`).join("")}</dl>`;
@@ -263,6 +356,7 @@ function renderHead(j) {
 
 function renderComment(j, v) {
   const box = $("#comment"), c = j.comment || {};
+  box.hidden = ACTIVE.has(j.status);          // nothing to post until the run has finished
   if (!j.pr) { box.innerHTML = `<h3>PR comment</h3><p class="muted">This run has no PR (Trio branch only), so there is nothing to comment on.</p>`; return; }
   const ready = !ACTIVE.has(j.status) && j.run_name;
   const key = `${j.status}|${c.status}|${j.finished}`;
@@ -294,6 +388,124 @@ function renderComment(j, v) {
     try { await api(`/api/jobs/${j.id}/comment`, {artifact_url: $("#artifact_url").value}); box.dataset.key = ""; clearTimeout(timer); showJob(); }
     catch (err) { btn.disabled = false; alert(err.message); }
   };
+}
+
+// ---- continue: the agent's own conversation with full access, or a cloud session (harness/handoff.py) ----
+const KINDS = {local: "Conversation on this Mac", cloud: "Cloud session", followup: "Sent to the PR's session"};
+function renderContinue(j) {
+  const ctl = $("#contctl"), ready = !ACTIVE.has(j.status) && j.run_name;
+  $("#continue").hidden = !ready;            // nothing to continue until the run has finished
+  const key = `${ready}|${!!j.agent_session}|${j.pr_session}`;
+  if (ctl.dataset.key !== key) {
+    ctl.dataset.key = key;
+    ctl.innerHTML = !ready ? "" : `<div class="cont">
+      <div><h4>Continue on this Mac</h4>
+        <p class="hint" style="margin:0 0 6px">The agent's session with full access: edit, commit, push, rebuild, re-test. Opens at claude.ai/code; runs until stopped.</p>
+        <label class="check"><input type="checkbox" id="contcopy" checked>Make repo copy</label>
+        <div class="hint">Worktree at the tested commits and branches, so other runs can use the shared checkout.</div>
+        <label for="contmode">Permission mode</label>
+        <select id="contmode"><option value="acceptEdits">acceptEdits: edits go ahead, commands ask</option><option value="default">default: ask for edits and commands</option><option value="auto">auto: a classifier approves safe actions</option><option value="plan">plan: read-only until you approve a plan</option></select>
+        <div class="actions"><button class="primary" id="contlocal" ${j.agent_session ? "" : "disabled"}>Continue conversation</button>
+          ${j.agent_session ? "" : `<span class="hint">The agent's session was not found on this Mac.</span>`}</div></div>
+      <div><h4>Claude Code on the web</h4>
+        <p class="hint" style="margin:0 0 6px">New cloud session on the PR's branch, given the findings and tested commits. No transcript, screenshots or iOS builds.</p>
+        <div class="actions"><button id="contcloud">Start cloud session</button></div>
+        ${j.pr_session ? `<p class="hint" style="margin:10px 0 4px">Session that wrote the PR: <a href="${esc(j.pr_session)}" target="_blank" rel="noopener">${esc(j.pr_session.replace("https://", ""))}</a></p>
+        <div class="actions" style="margin-top:4px"><button id="contfollow">Send findings to that session</button></div>` : ""}</div></div>`;
+    const go = async (btn, body, ask) => {
+      if (ask && !confirm(ask)) return;
+      btn.disabled = true;
+      try { await api(`/api/jobs/${j.id}/continue`, body); clearTimeout(timer); showJob(); }
+      catch (err) { alert(err.message); }
+      btn.disabled = false;
+    };
+    const b1 = $("#contlocal"), b2 = $("#contcloud"), b3 = $("#contfollow");
+    if (b1) b1.onclick = () => go(b1, {kind: "local", copy: $("#contcopy").checked, permission_mode: $("#contmode").value},
+      "Start a Claude Code session on this Mac, outside the sandbox, that can edit, commit and push as you?");
+    if (b2) b2.onclick = () => go(b2, {kind: "cloud"}, "Create a Claude Code cloud session on the PR's branch with these findings?");
+    if (b3) b3.onclick = () => go(b3, {kind: "followup"}, `Send the findings as a message to ${j.pr_session}?`);
+  }
+  const list = j.continuations || [];
+  const html = list.slice().reverse().map(c => {
+    const link = c.url ? `<a href="${esc(c.url)}" target="_blank" rel="noopener">Open in claude.ai ↗</a>` : "";
+    const facts = [];
+    if (c.step && c.status === "starting") facts.push(esc(c.step) + "…");
+    if (c.workdir) facts.push(`folder <code>${esc(c.workdir)}</code>${c.copy ? (c.copy_removed ? " (copy removed)" : " (worktree copy)") : " (shared checkout)"}`);
+    for (const r of c.repos || []) if (r.local) facts.push(`${esc(r.name)}: branch <code>${esc(r.local)}</code> → <code>${esc(r.remote)}/${esc(r.branch)}</code>${r.note ? ` <span class="hint">${esc(r.note)}</span>` : ""}`);
+    if (c.repo) facts.push(`repo <code>${esc(c.repo)}</code> branch <code>${esc(c.branch)}</code>`);
+    if (c.terminal && c.status !== "live") facts.push(`in a terminal: <code>${esc(c.terminal)}</code>`);
+    const live = c.kind === "local" && (c.status === "live" || c.status === "starting");
+    const btns = [live ? `<button class="danger" data-stop="${esc(c.id)}">Stop</button>` : "",
+      c.kind === "local" && c.copy && c.workdir && !c.copy_removed && !live ? `<button data-rmcopy="${esc(c.id)}">Remove copy</button>` : ""].join("");
+    return `<div class="controw"><div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap"><b>${esc(KINDS[c.kind] || c.kind)}</b>${pill(c.status)}
+      <span class="hint">${esc(when(c.created))}</span>${link}<span style="flex:1"></span>${btns}</div>
+      ${facts.map(f => `<div>${f}</div>`).join("")}${c.error ? `<pre class="err">${esc(c.error)}</pre>` : ""}</div>`;
+  }).join("");
+  const box = $("#contlist");
+  if (box.dataset.html !== html) {
+    box.dataset.html = html;
+    box.innerHTML = html ? `<div style="margin-top:12px">${html}</div>` : "";
+    for (const b of box.querySelectorAll("[data-stop]")) b.onclick = async () => {
+      if (!confirm("Stop this session? Its conversation is kept; you can resume it in a terminal.")) return;
+      try { await api(`/api/jobs/${j.id}/continue/${b.dataset.stop}/stop`, {}); showJob(); } catch (err) { alert(err.message); }
+    };
+    for (const b of box.querySelectorAll("[data-rmcopy]")) b.onclick = async () => {
+      if (!confirm("Remove the worktree copy? Refused if anything is uncommitted; local branches (and their commits) are kept.")) return;
+      try { await api(`/api/jobs/${j.id}/continue/${b.dataset.rmcopy}/remove-copy`, {}); showJob(); } catch (err) { alert(err.message); }
+    };
+  }
+}
+
+// ---- app logs pane: Trio's log (and TandemKit's, when expanded) streamed from the installed app ----
+const logStreams = {trio: {off: null}, tandem: {off: null}};
+let logTimer = null, logTarget = null;
+function setLogs(open) {
+  $("#applogs").hidden = !open;
+  document.querySelector(".layout").classList.toggle("with-logs", open);
+  $("#logstoggle").textContent = open ? "Hide Trio logs" : "Show Trio logs";
+  store.set("applogs", open ? "1" : "0");
+  clearTimeout(logTimer);
+  if (open) pollLogs();
+}
+$("#logstoggle").onclick = () => setLogs($("#applogs").hidden);
+$("#logsclose").onclick = () => setLogs(false);
+const tandemOpen = () => $("#tandembox").classList.contains("open");
+$("#tandemtoggle").onclick = () => {
+  const open = !tandemOpen();
+  $("#tandembox").classList.toggle("open", open);
+  $("#tandembox .logbox").hidden = !open;
+  $("#tandemtoggle").textContent = `${open ? "▾" : "▸"} Tandem logs`;
+  if (open) { clearTimeout(logTimer); pollLogs(); }
+};
+async function pollOne(which) {
+  const s = logStreams[which], pre = $(`#log-${which}`), box = pre.parentElement;
+  const r = await api(`/api/applogs?which=${which}&target=${encodeURIComponent(logTarget)}&off=${s.off ?? ""}`);
+  if (r.size === null) { if (!pre.textContent) pre.textContent = "(no log file yet)"; return; }
+  const atEnd = box.scrollHeight - box.scrollTop - box.clientHeight < 40;
+  if (s.off === null) pre.textContent = r.offset < r.size || r.size > 64 * 1024 ? "… earlier lines not shown …\n" : "";
+  if (r.reset) pre.textContent += "\n——— new day's log ———\n";
+  if (r.text) pre.textContent += r.text;
+  if (pre.textContent.length > 600000) pre.textContent = "… earlier lines trimmed …\n" + pre.textContent.slice(-450000);
+  s.off = r.offset;
+  if ($("#logfollow").checked && (atEnd || s.first)) box.scrollTop = box.scrollHeight;
+  s.first = false;
+  return r.offset < r.size;                   // more to read right away (a long gap)
+}
+async function pollLogs() {
+  clearTimeout(logTimer);
+  if ($("#applogs").hidden) return;
+  const t = form.target.value;
+  if (t !== logTarget) {                      // target switched: start both logs over
+    logTarget = t;
+    for (const [k, s] of Object.entries(logStreams)) { s.off = null; s.first = true; $(`#log-${k}`).textContent = ""; }
+  }
+  let more = false;
+  try {
+    more = await pollOne("trio");
+    if (tandemOpen()) more = (await pollOne("tandem")) || more;
+    $("#logstate").textContent = t === "simulator" ? "simulator" : "iPhone";
+  } catch (err) { $("#logstate").textContent = err.message.slice(0, 120); }
+  logTimer = setTimeout(pollLogs, more ? 200 : 2500);
 }
 
 // ---- live phone (rooted-vnc): noVNC through the server's TrollVNC proxy + harness buttons ----
@@ -345,7 +557,7 @@ async function checkBusy(first) {
   if ($("#phone").hidden) return;
   try {
     const {jobs} = await api("/api/state");
-    const busy = jobs.some(j => ACTIVE.has(j.status) && j.inputs.target === "rooted-vnc");
+    const busy = jobs.some(j => j.inputs.target === "rooted-vnc" && j.stages?.agent?.status === "running");
     $("#busyhint").hidden = !busy;
     if (first) { $("#vnccontrol").checked = !busy; $("#vnccontrol").onchange({target: $("#vnccontrol")}); }
   } catch (_) {}
@@ -368,6 +580,7 @@ for (const b of document.querySelectorAll("#phone .btns button")) b.onclick = ()
 $("#typebtn").onclick = () => { const t = $("#typetext").value; if (t) device("type", {text: t}).then(() => $("#typetext").value = ""); };
 $("#typetext").onkeydown = e => { if (e.key === "Enter") { e.preventDefault(); $("#typebtn").click(); } };
 if (store.get("phone") === "1" && form.target.value === "rooted-vnc") setPhone(true);
+if (store.get("applogs") === "1") setLogs(true);
 
 route();
 </script>

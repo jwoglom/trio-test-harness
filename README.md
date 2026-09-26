@@ -53,6 +53,16 @@ user-written `ConfigOverride.xcconfig` in the checkout is read for its `DEVELOPE
 Source selection: `TRIO_REPO` is the checkout the harness uses (this machine: `~/repos/Trio`; default elsewhere:
 `<harness>/Trio`, cloned on demand with `TH_TRIO_REFERENCE` as a git reference). A PR on a submodule repo is detected
 through `.gitmodules` of the candidate Trio branches (`--trio-branch`, `TH_TRIO_BASE_BRANCH`, dev, feat/tandem, main).
+`--cherry-pick SPEC` (repeatable; "Add cherry-pick" under the Trio field in the web UI, `cherry_pick` in CI) applies
+commits onto whatever Trio was checked out, in order, locally. A SPEC is a Trio PR (its own commits as GitHub lists them,
+merges skipped; this works for merged PRs too), a commit sha, a range `A..B`, or a branch (its commits on neither the
+checkout nor `TH_TRIO_BASE_BRANCH`). For example, `--branch upstream:feat/tandem-closed-beta --cherry-pick
+nightscout/Trio#1580` tests a dev PR on the branch that has TandemKit. `--submodule-cherry-pick SPEC` does the same for a
+submodule, after the overrides: a submodule PR (link or `owner/repo#N`), `NAME@sha`, `NAME@A..B`, or `NAME@branch` (its
+commits on neither the submodule's checkout nor its repo's default branch). NAME is the submodule, or `owner/repo` to
+fetch from that repo. Commits already in the history are dropped. A conflict stops the checkout with the commit and files
+named, and puts the repo back where it was. The first cherry-picked PR gets the PR comment when the run has no PR of its
+own, and its description goes into `pr.md`.
 
 ## Setup
 
@@ -93,10 +103,18 @@ See `docs/HANDOFF.md` for the current state and `docs/phone-setup.md` for the iP
 ## CLI overview (`./trio-test-harness --help`; `th` = short alias in `bin/`)
 `doctor` · `build` · `install` · `launch` · `sim {list,runtimes,install-runtime,boot,shutdown,erase,container,defaults,openurl}` ·
 `device {list,vnc-check,serve-ipa,wake,ssh,diag,vnc-restart,kill,apps}` · `daemon {start,stop,status,restart}` · `wda {build,start,stop,status}` · `shot` · `tap` · `swipe` · `drag` · `scroll` · `type` · `key` · `home` · `tap-text` · `find` ·
-`tree` · `wait-text` · `ocr` · `run {new,current,use,note,finish,list,steps}` · `report {html,pr,markdown}` ·
+`tree` · `wait-text` · `ocr` · `logs [trio|tandem|watch|all]` · `run {new,current,use,note,finish,list,steps}` · `report {html,pr,markdown}` ·
 `flow {onboarding-walk,add-cgm-sim,add-pump-sim,back-home,dismiss,at-home}` · `test smoke`
 
 Runs live in `runs/<timestamp>-<name>/` (`screenshots/`, `steps.jsonl`, `run.json`, `report.html`).
+
+`th logs` reads the installed app's log files: Trio's `Documents/logs/log.txt`, TandemKit's
+`Documents/tandem/tandem_log.txt` (info and above; debug goes to OSLog only) and the watch log, plus each one's `*_prev`
+file for the previous day. It filters with `--grep REGEX [-i]`, `--since 10m|2h|<ISO time>` and `--level warning`
+(TandemKit), prints the last `-n` entries (default 200; multi-line entries stay whole, `all` merges by time), lists sizes
+with `--files`, and copies the files into the run's `logs/` with `--save`. It reads from the simctl container or over SSH,
+or through the target's daemon when one runs, so the sandboxed web UI/CI agent can use it (restart a daemon started
+before this command existed). Logs from the phone may hold real device data: keep them out of reports and PRs.
 
 ## PR reporting
 `./trio-test-harness report pr <PR> [--artifact-url <link>] [--max-shots N]` posts a comment whose screenshots are uploaded
@@ -167,6 +185,26 @@ screenshots are attached inline); ticking "Post the PR comment when done" does i
   instead of the random one. `--host 0.0.0.0` (or
   `TH_WEBUI_HOST=0.0.0.0` in `harness.env`; `--port`/`TH_WEBUI_PORT` likewise) makes it reachable from other machines,
   still behind the token; it then prints the LAN URL too. Plain HTTP, so keep it to a network you trust.
+
+**Continue** (a finished job's page, `harness/handoff.py`) carries the run past the sandboxed agent:
+- **Continue conversation**: `claude --resume <agent session> --fork-session --remote-control` on this Mac, outside the
+  sandbox (the agent's `claude -p` gets a known `--session-id`; older jobs are matched by their prompt). The copy keeps
+  everything the agent saw and can edit, commit, push, rebuild and re-test. You drive it at the claude.ai/code link the page
+  shows, or in the Claude app. It runs detached in a pseudo-terminal (`harness/ptyrun.py`), so it outlives a web UI restart
+  until **Stop** is pressed. The permission mode is picked on the page (acceptEdits by default).
+- **Make repo copy** (on by default): a git worktree of `TRIO_REPO` at `runs/.worktrees/<run>`, with each submodule a
+  worktree of the checkout's own submodule repo at the tested commit (no downloads, about 15 s). Other runs can keep using
+  the shared checkout. In the copy (or, unticked, in the shared checkout, only while it is still at the tested commits), Trio
+  and every overridden submodule get a local branch named after the tested branch, tracking it on a matching remote (added if
+  missing). If that name is taken, the branch is `th/<run>-<n>/<branch>`. **Remove copy** refuses while anything is
+  uncommitted and keeps the branches.
+- **Start cloud session**: `claude --cloud` from a one-commit checkout of the PR's head branch (the repository under test),
+  with the findings and every repo, branch and commit the run built in its first message. It is one repo, gets no transcript
+  or screenshots, and cannot build iOS apps.
+- **Send findings to that session**: shown when the PR description links the claude.ai/code session that wrote it;
+  `claude -p … --cloud <session>` queues the findings there.
+
+State: `runs/.webui/<job>/continue-<n>/` (`meta.json`, `terminal.log`, `system-prompt.md` or `prompt.md`).
 
 Only Trio's simulator CGM/pump and made-up values are used. Reports must not contain real health data, device identifiers,
 Apple IDs or tokens. Nothing here is medical advice; Trio builds produced by the harness are for testing only.

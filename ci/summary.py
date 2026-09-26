@@ -43,6 +43,8 @@ def main(argv=None) -> int:
     built = {k: v for k, v in built.items() if v}
     if built:
         out.append("- **Built:** " + ", ".join(f"{k} `{v}`" for k, v in built.items()))
+    for c in (git.get("cherry_picks") or []) + (git.get("submodule_cherry_picks") or []):
+        out.append(f"- **Cherry-picked onto {c.get('submodule') or 'Trio'}:** {c['what']} ({c['applied']} commit(s))")
     if git.get("packages_note"):
         out.append(f"- **Packages:** ⚠️ {git['packages_note']}")
     subs = git.get("submodules") or {}

@@ -16,7 +16,7 @@ macOS iPhone Mirroring using phone-harness; driver written and window capture ve
 `docs/phone-setup.md`). `--target device` still works as an alias of `rooted-vnc`.
 
 ## Entry points (2026-09-20)
-- `./trio-test-e2e [--mode simulator|rooted-vnc|iphone-usb] [--pr URL | --branch B] [--trio-branch B] [--onboarding preseed|walk] [--skip-build]
+- `./trio-test-e2e [--mode simulator|rooted-vnc|iphone-usb] [--pr URL | --branch B] [--trio-branch B] [--cherry-pick SPEC]... [--onboarding preseed|walk] [--skip-build]
   [--no-smoke] [--comment ask|auto|never] [--artifact-url URL] [--agent|--no-agent] [--yes]` — prompts for anything missing on
   a TTY. Submodule PRs are resolved via `.gitmodules` (verified with jwoglom/TandemKit#395 → Trio feat/tandem).
 - `./trio-test-harness webui` (2026-09-24): browser form with the CI workflow's options + target (rooted-vnc default, or

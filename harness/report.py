@@ -196,6 +196,9 @@ def render_html(run: Run, out: Path | None = None) -> Path:
     ]
     if git.get("submodule_overrides"):
         facts.append(("Submodules", "; ".join(f"{o['name']} @ {o['ref']}" for o in git["submodule_overrides"])))
+    if git.get("cherry_picks") or git.get("submodule_cherry_picks"):
+        facts.append(("Cherry-picked", "; ".join(f"{c.get('submodule') or 'Trio'}: {c['what']} ({c['applied']} commits)"
+                                                 for c in (git.get("cherry_picks") or []) + (git.get("submodule_cherry_picks") or []))))
     if hide_b > hide_a:
         facts.append(("Setup", f"{hide_b - hide_a} Glucose Simulator + Pump Simulator provisioning steps, "
                                "collapsed under All steps"))
@@ -288,6 +291,11 @@ def render_markdown(run: Run, *, columns: int = 3, max_shots: int | None = None,
     lines.append(f"- **Commit:** `{git.get('sha','?')}` {git.get('describe','')}  ")
     if git.get("trio_branch"):
         lines.append(f"- **Trio branch:** `{git['trio_branch']}`  ")
+    picks = (git.get("cherry_picks") or []) + (git.get("submodule_cherry_picks") or [])
+    if picks:
+        lines.append("- **Cherry-picked:** " + "; ".join(
+            f"{c.get('submodule') or 'Trio'}: {c['what']} ({c['applied']} commit{'s' if c['applied'] != 1 else ''})"
+            for c in picks) + "  ")
     if git.get("submodule_overrides"):
         lines.append("- **Submodules:** " + "; ".join(f"`{o['name']}` @ `{o['ref']}`" for o in git["submodule_overrides"]) + "  ")
     lines.append(f"- **Xcode:** {build.get('xcode','?')} · **Result:** {status}")

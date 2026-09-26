@@ -6,7 +6,8 @@ installed, launched and on the home screen{smoke_note}. Follow the trio-test-e2e
 1. Read `{run_dir}/pr.md` (PR title, description, submodule info) and turn it into concrete checks (trio-pr-plan skill).
 2. Exercise them with the trio-ui-drive skill using `./trio-test-harness --target sim ...` (or `./bin/th --target sim ...`),
    screenshotting every meaningful state into this run (`shot --name ... --note ...`) and recording observations
-   with `./trio-test-harness run note "..."`. Look at each screenshot before tapping.
+   with `./trio-test-harness run note "..."`. Look at each screenshot before tapping. Check what happened behind the
+   UI in the app's logs: `./trio-test-harness --target sim logs trio --since 5m` (or `--grep`; see your limits).
 3. Finish with `./trio-test-harness run finish passed|failed|partial --summary "..."` and `./trio-test-harness report html`.
 
 The simulator can show everything a phone would, including the Lock Screen and Live Activities:

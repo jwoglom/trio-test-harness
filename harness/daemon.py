@@ -135,6 +135,9 @@ def _serve_connection(conn, drv, target, _shutdown) -> None:
                     method, args, kwargs = req["method"], _decode(req.get("args", [])), _decode(req.get("kwargs", {}))
                     if method == "ping":
                         resp = {"ok": True, "result": {"target": target, "pid": os.getpid(), "kind": drv.kind}}
+                    elif method == "app_files":      # `th logs` from a sandbox that can reach only this socket
+                        from .applogs import read_files
+                        resp = {"ok": True, "result": read_files(target, *args, **kwargs)}
                     elif method == "shutdown":
                         f.write(b'{"ok": true, "result": "bye"}\n'); f.flush()
                         _shutdown()

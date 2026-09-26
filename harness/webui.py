@@ -14,6 +14,9 @@ Nothing goes to GitHub until "Post PR comment" is pressed (or "post when done" w
 (one phone, one simulator) and first wait for any other trio-test-e2e on this machine. Each job's state is in
 runs/.webui/<job>/ (job.json, log.txt, claude-settings.json); the run itself is a normal runs/<run> directory.
 
+A finished job can be continued (harness/handoff.py): the agent's own conversation resumed on this Mac with full access
+through Remote Control (optionally in a git worktree copy of the Trio checkout), or a Claude Code cloud session.
+
 Access needs the token in the printed URL (kept in runs/.tmp/webui-token, stored as a SameSite=Strict cookie):
 the server can build, drive the phone and comment as you, so other pages and other users must not reach it.
 """
@@ -32,6 +35,7 @@ import subprocess
 import sys
 import threading
 import time
+import uuid
 from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -71,6 +75,16 @@ class Job:
         self.lock = threading.RLock()
         self.proc: subprocess.Popen | None = None
         self.cancelled = False
+        self._continuations = None
+        self._steps: list[str] = []      # trio-test-e2e steps seen in log.txt ("== stage: build"), in order
+        self._steps_off = 0
+
+    @property
+    def continuations(self):
+        from .handoff import Continuations
+        if self._continuations is None:
+            self._continuations = Continuations(self.dir)
+        return self._continuations
 
     @property
     def id(self) -> str:
@@ -127,6 +141,26 @@ class Job:
             out = fh.read().decode(errors="replace")
         return (-1 if self.cancelled else rc), out
 
+    def e2e_steps(self) -> list[str]:
+        """The trio-test-e2e steps reached so far (checkout, build, install, launch, smoke, report), read from the new
+        part of log.txt only: a build log is several MB."""
+        with self.lock:
+            if self.data.get("e2e_steps") and (self.data.get("stages", {}).get("e2e") or {}).get("status") != "running":
+                return self.data["e2e_steps"]
+            try:
+                with open(self.log_path, "rb") as fh:
+                    fh.seek(self._steps_off)
+                    chunk = fh.read()
+            except OSError:
+                return self._steps
+            end = chunk.rfind(b"\n") + 1           # a partial last line is read again next time
+            self._steps_off += end
+            for m in re.finditer(rb"== stage: ([a-z]+)", chunk[:end]):
+                name = m.group(1).decode()
+                if name not in self._steps:
+                    self._steps.append(name)
+            return self._steps
+
     def cancel(self) -> None:
         self.cancelled = True
         if self.proc:
@@ -141,6 +175,7 @@ class Job:
             d = dict(self.data, id=self.id)
         rd = self.run_dir()
         d["has_report"] = bool(rd and (rd / "report.html").exists())
+        d["e2e_steps"] = self.e2e_steps()
         if rd:
             meta = read_json(rd / "run.json", {}) or {}
             d["run_status"], d["run_summary"] = meta.get("status"), meta.get("summary")
@@ -150,6 +185,12 @@ class Job:
             d["agent_summary"] = s.read_text() if s.exists() else ""
             hl = read_json(rd / "highlights.json", None)
             d["verdict"] = hl.get("verdict") if isinstance(hl, dict) else None
+            from . import handoff as H
+            d["continuations"] = self.continuations.list()
+            d["agent_session"] = H.agent_session(rd, self.data.get("agent_session"))
+            if d["agent_session"] and d["agent_session"] != self.data.get("agent_session"):
+                self.update(agent_session=d["agent_session"])      # found by its prompt (older job): look once
+            d["pr_session"] = H.pr_session(rd)
         return d
 
 
@@ -187,6 +228,14 @@ def _job_env(inp: dict) -> dict:
     return env
 
 
+def _server_alive(pid) -> bool:
+    """Is `pid` another running `trio-test-harness webui`?"""
+    if not isinstance(pid, int) or pid == os.getpid():
+        return False
+    cp = subprocess.run(["ps", "-p", str(pid), "-o", "command="], capture_output=True, text=True)
+    return "webui" in cp.stdout
+
+
 def _other_pipelines() -> list[str]:
     cp = subprocess.run(["pgrep", "-fl", "harness.pipeline"], capture_output=True, text=True)
     return [l for l in cp.stdout.splitlines() if l.strip()]
@@ -202,6 +251,8 @@ class Manager:
             if not isinstance(data, dict):
                 continue
             job = Job(d, data)
+            if data.get("status") in ACTIVE and _server_alive(data.get("server_pid")):
+                continue                               # another web UI (a second instance) owns it: leave it alone
             if data.get("status") in ACTIVE:           # the server stopped while it was queued or running
                 job.update(status="interrupted")
             if (data.get("comment") or {}).get("status") == "posting":
@@ -214,13 +265,13 @@ class Manager:
 
     def submit(self, form: dict) -> Job:
         inp = self.validate(form)
-        e2e_args, pr = _ci("inputs").plan(inp["trio"], inp["submodules"])
+        e2e_args, pr = _ci("inputs").plan(inp["trio"], inp["submodules"], inp["cherry_pick"], inp["submodule_cherry_pick"])
         jid = dt.datetime.now().strftime("%Y%m%d-%H%M%S")
         while (JOBS_DIR / jid).exists():
             jid += "x"
         (JOBS_DIR / jid).mkdir(parents=True)
         job = Job(JOBS_DIR / jid, {"created": _now(), "status": "queued", "inputs": inp, "e2e_args": e2e_args,
-                                   "pr": pr, "stages": {}, "comment": None})
+                                   "pr": pr, "stages": {}, "comment": None, "server_pid": os.getpid()})
         job.save()
         job.log_path.touch()
         self.jobs[jid] = job
@@ -253,10 +304,12 @@ class Manager:
         if xcode and xcode not in _xcodes():
             raise ValueError(f"xcode: {xcode} is not installed")
         return {"target": target, "trio": text("trio"), "submodules": text("submodules", 1000),
+                "cherry_pick": text("cherry_pick", 1000), "submodule_cherry_pick": text("submodule_cherry_pick", 1000),
                 "configuration": conf, "skip_onboarding": bool(f.get("skip_onboarding", True)),
-                "smoke": bool(f.get("smoke", True)), "claude_model": model,
+                "cgm_sim": bool(f.get("cgm_sim", f.get("smoke", True))),
+                "pump_sim": bool(f.get("pump_sim", f.get("smoke", True))), "claude_model": model,
                 "agent_instructions": text("agent_instructions", 4000), "agent_minutes": minutes,
-                "post_comment": bool(f.get("post_comment")), "xcode": xcode,
+                "post_comment": bool(f.get("post_comment")), "xcode": xcode, "agent": bool(f.get("agent", True)),
                 "sim_device": text("sim_device", 100), "sim_runtime": text("sim_runtime", 100)}
 
     # --- running ---
@@ -289,6 +342,12 @@ class Manager:
             time.sleep(10)
 
 
+def _sims(inp: dict) -> list[str]:
+    """The fake devices a job sets up (jobs from before the split have one "smoke" flag)."""
+    old = inp.get("smoke", True)
+    return [n for n, k in (("Glucose Simulator", "cgm_sim"), ("Pump Simulator", "pump_sim")) if inp.get(k, old)]
+
+
 def run_job(job: Job) -> None:
     """The workflow's steps: e2e -> agent -> highlights -> report.html -> (optional) PR comment."""
     inp = job.data["inputs"]
@@ -303,23 +362,29 @@ def run_job(job: Job) -> None:
            "--configuration", inp["configuration"], "--onboarding", "preseed" if inp["skip_onboarding"] else "walk",
            *job.data["e2e_args"]]
     # The fake CGM/pump setup steps are left out of report.html and the comment, as in CI.
-    cmd += ["--hide-setup-screenshots"] if inp["smoke"] else ["--no-smoke"]
+    sims = _sims(inp)
+    cmd += ["--hide-setup-screenshots"] if sims else ["--no-smoke"]
+    cmd += ["--no-cgm-sim"] if sims and "Glucose Simulator" not in sims else []
+    cmd += ["--no-pump-sim"] if sims and "Pump Simulator" not in sims else []
     rc, out = job.sh(cmd, env)
     # The pipeline prints its run directory at the end ("run: <dir>"); runs/.current may belong to another session.
     m = re.findall(r"^run:\s+(/\S.*)$", out, re.M)
     if m:
         job.update(run_dir=m[-1].strip())
+    job.update(e2e_steps=list(job.e2e_steps()))
     job.stage("e2e", "passed" if rc == 0 else "failed")
     rd = job.run_dir()
 
     # --- agent: Claude Code tests what the PR describes, sandboxed as in CI ---
-    if rc == 0 and rd:
+    if rc == 0 and rd and not inp.get("agent", True):
+        job.stage("agent", "skipped", "Trigger agent was off")
+    elif rc == 0 and rd:
         job.stage("agent", "running")
         settings = job.dir / "claude-settings.json"
         settings.write_text(json.dumps(_ci("claude-sandbox").settings(target), indent=1) + "\n")
         prompt_file, limits_file = (("agent-prompt.md", "agent-limits.md") if target == "sim"
                                     else ("agent-prompt-rooted-vnc.md", "agent-limits-rooted-vnc.md"))
-        smoke_note = (", with the Glucose Simulator and Pump Simulator configured" if inp["smoke"] else "")
+        smoke_note = f", with the {' and '.join(sims)} configured" if sims else ""
         prompt = (REPO_ROOT / "ci" / prompt_file).read_text().format(run_dir=rd, smoke_note=smoke_note, extra=extra)
         from . import daemon as D
         # The daemon holds the VNC/WDA connection outside the sandbox. Another session may already run one:
@@ -327,12 +392,17 @@ def run_job(job: Job) -> None:
         started = False
         if not D.is_running(target):
             started = job.sh(["./trio-test-harness", "--target", target, "daemon", "start"], env)[0] == 0
+        # A known session id, so "Continue conversation" can resume it (harness/handoff.py).
+        sid = str(uuid.uuid4())
+        job.update(agent_session=sid)
         agent_env = {**env, "TH_RUN": str(rd), "PROMPT": prompt, "MODEL": inp["claude_model"], "SETTINGS": str(settings),
+                     "SID": sid,
                      "LIMITS": (REPO_ROOT / "ci" / limits_file).read_text(), "OUT": str(rd / "agent-summary.md"), "PY": py}
         arc = -1
         try:
             arc, _ = job.sh(["bash", "-c",
                              'set -o pipefail; claude -p "$PROMPT" --model "$MODEL" --output-format stream-json --verbose '
+                             '--session-id "$SID" '
                              '--permission-mode dontAsk --permission-prompts none --settings "$SETTINGS" '
                              '--append-system-prompt "$LIMITS" '
                              '--allowedTools "Bash(./trio-test-harness:*)" "Bash(./bin/th:*)" "Bash(sleep:*)" Read Glob Grep '
@@ -538,6 +608,51 @@ class Handler(BaseHTTPRequestHandler):
             return self._json({"error": str(e)[:600]}, 502)
         return self._json({"error": f"unknown action {action}"}, 404)
 
+    def _applogs(self, q: dict):
+        """New bytes of the installed app's Trio or TandemKit log (the log pane polls this; harness/applogs.py)."""
+        from . import applogs as A
+        which = (q.get("which") or ["trio"])[0]
+        rel = {"trio": "logs/log.txt", "tandem": "tandem/tandem_log.txt"}.get(which)
+        target = TARGETS.get((q.get("target") or ["rooted-vnc"])[0])
+        if not rel or not target:
+            return self._json({"error": "which: trio|tandem, target: rooted-vnc|simulator"}, 400)
+        off = (q.get("off") or [""])[0]
+        try:
+            res = A.read_tail(target, A.default_bundle(target), rel, int(off) if off.isdigit() else None)
+        except (HarnessError, OSError) as e:
+            return self._json({"error": str(e)[-600:]}, 502)
+        return self._json(res)
+
+    def _continue(self, job: Job, body: dict):
+        """Carry a finished run on (harness/handoff.py): local | cloud | followup."""
+        rd = job.run_dir()
+        if job.data.get("status") in ACTIVE:
+            return self._json({"error": "wait for the run to finish"}, 409)
+        if not rd:
+            return self._json({"error": "this job has no run"}, 409)
+        kind = str(body.get("kind") or "")
+        env = _base_env()
+        try:
+            if kind == "local":
+                mode = str(body.get("permission_mode") or "acceptEdits")
+                model = str(body.get("model") or job.data["inputs"].get("claude_model") or "")
+                if model and not MODEL.match(model):
+                    return self._json({"error": "model: letters, digits and . : - [ ] only"}, 400)
+                meta = job.continuations.start_local(job.data, rd, env, copy=bool(body.get("copy", True)),
+                                                     mode=mode, model=model)
+            elif kind == "cloud":
+                meta = job.continuations.start_cloud(job.data, rd, env)
+            elif kind == "followup":
+                from . import handoff as H
+                session = str(body.get("session") or H.pr_session(rd) or "")
+                meta = job.continuations.send_followup(job.data, rd, env, session)
+            else:
+                return self._json({"error": "kind must be local, cloud or followup"}, 400)
+        except HarnessError as e:
+            return self._json({"error": str(e)}, 409)
+        job.note(f"continue: {kind} #{meta['id']} started")
+        return self._json(meta, 201)
+
     # --- routes ---
     def do_GET(self):
         u = urlparse(self.path)
@@ -558,6 +673,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._json({"jobs": [j.public() for j in jobs[:100]]})
         if parts == ["api", "options"]:
             return self._json(options())
+        if parts == ["api", "applogs"]:
+            return self._applogs(q)
         if parts == ["api", "vnc", "ws"]:
             return self._vnc_ws()
         if parts == ["api", "vnc", "status"]:
@@ -571,6 +688,9 @@ class Handler(BaseHTTPRequestHandler):
         if len(parts) >= 3 and parts[:2] == ["api", "jobs"] and (job := self._job(parts[2])):
             if len(parts) == 3:
                 return self._json(job.public(full=True))
+            if parts[3] == "log.txt":          # the whole log, for the Copy button
+                data = job.log_path.read_bytes() if job.log_path.exists() else b""
+                return self._send(200, data, "text/plain; charset=utf-8")
             if parts[3] == "log":
                 asked = int((q.get("offset") or ["0"])[0] or 0)
                 size = job.log_path.stat().st_size if job.log_path.exists() else 0
@@ -637,6 +757,16 @@ class Handler(BaseHTTPRequestHandler):
                 job.update(comment={"status": "posting", "at": _now()})
                 threading.Thread(target=post_comment, args=(job, url), daemon=True).start()
                 return self._json(job.public())
+            if parts[3] == "continue":
+                return self._continue(job, body)
+        if (len(parts) == 6 and parts[:2] == ["api", "jobs"] and parts[3] == "continue" and parts[5] in ("stop", "remove-copy")
+                and (job := self._job(parts[2]))):
+            try:
+                if parts[5] == "stop":
+                    return self._json(job.continuations.stop(parts[4]))
+                return self._json(job.continuations.remove_copy(parts[4]))
+            except HarnessError as e:
+                return self._json({"error": str(e)}, 409)
         return self._send(404, "not found", "text/plain")
 
 

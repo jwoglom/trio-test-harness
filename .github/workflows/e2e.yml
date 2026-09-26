@@ -14,6 +14,12 @@ on:
       submodules:
         description: "Submodules (PR links or branches: PR link, owner/repo#N, or NAME@branch; space-separated)"
         type: string
+      cherry_pick:
+        description: "Cherry-pick onto Trio, in order (Trio PR = its own commits, commit sha, A..B, or branch; space-separated)"
+        type: string
+      submodule_cherry_pick:
+        description: "Cherry-pick onto submodules, in order (submodule PR, NAME@sha, NAME@A..B, NAME@branch; space-separated)"
+        type: string
       configuration:
         description: "Build configuration"
         type: choice
@@ -70,6 +76,8 @@ jobs:
       # Inputs reach scripts only through env, never interpolated into them.
       IN_TRIO: ${{ inputs.trio }}
       IN_SUBMODULES: ${{ inputs.submodules }}
+      IN_CHERRY_PICK: ${{ inputs.cherry_pick }}
+      IN_SUBMODULE_CHERRY_PICK: ${{ inputs.submodule_cherry_pick }}
       IN_CONFIGURATION: ${{ inputs.configuration }}
       IN_SKIP_ONBOARDING: ${{ inputs.skip_onboarding }}
       IN_SMOKE: ${{ inputs.smoke }}
@@ -87,7 +95,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # Maps the two source fields onto trio-test-e2e flags (rules in ci/inputs.py) and picks the PR
+      # Maps the source fields onto trio-test-e2e flags (rules in ci/inputs.py) and picks the PR
       # the run is about: the Trio PR, else the first submodule PR.
       - name: Validate inputs
         id: v

@@ -10,6 +10,11 @@ try to work around them.
   normally (`shot`, `tap`, `tap-text`, `find`, `type`, `swipe`, `scroll`, `home`, `device lock`, `device unlock`,
   `flow ...`, `run ...`, `report ...`). Commands that go to the phone directly over SSH or USB (`device ssh`,
   `device diag`, `device vnc-restart`, `install`, `build`, ...) are expected to fail; you do not need them.
+- App logs: `./trio-test-harness --target rooted-vnc logs [trio|tandem|all] [--grep REGEX -i] [--since 10m] [--level warning]
+  [-n N]` reads Trio's and TandemKit's log files from the app through the daemon (`logs --help`; `logs all --save`
+  copies them into the run's `logs/` for Read/Grep). Use them to confirm what the app did behind a screen (a bolus
+  recorded, a pump error, a history entry). Quote only the lines that matter, and leave out anything identifying (pump
+  or sensor serial numbers, device names, IDs, tokens) from notes, the summary and screenshots' notes.
 - `./trio-test-harness --help` and `<command> --help` show the syntax. `--target` goes before the command:
   `./trio-test-harness --target rooted-vnc shot --name x`.
 - If something you need is denied, do not look for another way in. Record it with `./trio-test-harness run note "..."`

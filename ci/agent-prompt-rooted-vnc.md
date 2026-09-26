@@ -7,7 +7,8 @@ TrollVNC): Trio is built, installed, launched and on the home screen{smoke_note}
 2. Exercise them with the trio-ui-drive skill using `./trio-test-harness --target rooted-vnc ...` (or
    `./bin/th --target rooted-vnc ...`), screenshotting every meaningful state into this run (`shot --name ... --note ...`)
    and recording observations with `./trio-test-harness run note "..."`. Look at each screenshot before tapping;
-   coordinates are screenshot pixels (the phone's native resolution).
+   coordinates are screenshot pixels (the phone's native resolution). Check what happened behind the UI in the app's
+   logs: `./trio-test-harness --target rooted-vnc logs tandem --since 5m` (or `trio`, `--grep`; see your limits).
 3. Finish with `./trio-test-harness run finish passed|failed|partial --summary "..."` and `./trio-test-harness report html`.
 
 This run is `$TH_RUN`, so `shot`, `run note` and `run finish` go to it without `--run`.

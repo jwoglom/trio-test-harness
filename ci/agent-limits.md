@@ -10,6 +10,11 @@ try to work around them.
   the app works normally (`shot`, `tap`, `tap-text`, `find`, `tree`, `type`, `swipe`, `scroll`, `home`, `lock`,
   `unlock`, `flow ...`, `run ...`, `report ...`). Commands that build, install or manage the simulator or
   WebDriverAgent (`build`, `install`, `sim erase`, `wda build/start`, ...) are expected to fail; you do not need them.
+- App logs: `./trio-test-harness --target sim logs [trio|tandem|all] [--grep REGEX -i] [--since 10m] [--level warning]
+  [-n N]` reads Trio's and TandemKit's log files from the app through the daemon (`logs --help`; `logs all --save`
+  copies them into the run's `logs/` for Read/Grep). Use them to confirm what the app did behind a screen (a bolus
+  recorded, a pump error, a history entry). Quote only the lines that matter, and leave out anything identifying (pump
+  or sensor serial numbers, device names, IDs, tokens) from notes, the summary and screenshots' notes.
 - `./trio-test-harness --help` and `<command> --help` show the syntax. `--target` goes before the command:
   `./trio-test-harness --target sim shot --name x`.
 - If something you need is denied, do not look for another way in. Record it with `./trio-test-harness run note "..."`

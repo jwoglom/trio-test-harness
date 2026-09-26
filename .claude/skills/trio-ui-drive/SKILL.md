@@ -19,7 +19,8 @@ phone over TrollVNC (tesseract OCR), or any iPhone through iPhone Mirroring (Vis
 ## Primitives
 `tap X Y [--duration s]` · `swipe X1 Y1 X2 Y2` · `drag X1 Y1 X2 Y2 [--hold 0.8 --duration 0.8 --settle 0.5]` (long-press then move: SwiftUI drag & drop) · `scroll down|up|left|right [--amount 0.5]` · `type "text"` (focus a field first) ·
 `key return|backspace|tab|escape` · `home` · `tap-text "label" [--exact] [--index n]` · `tree [--filter t] [--all]` (sim only) ·
-`find "text"` · `wait-text "text"` · `ocr file.png [--find text]`.
+`find "text"` · `wait-text "text"` · `ocr file.png [--find text]` · `logs [trio|tandem|all] [--grep RE -i] [--since 10m] [--level warning] [-n N] [--save]`
+(the app's own log files, to confirm what happened behind a screen; see `th logs --help`).
 Simulator extras: `th sim defaults <key> <value> [--type -bool]` (UserDefaults of the app), `th sim container` (data path),
 `th sim openurl <url>`, `th sim erase` (factory reset the harness simulator),
 `th lock` / `th unlock` / `th locked` (lock the simulator through WebDriverAgent; `shot` then captures the real Lock Screen).

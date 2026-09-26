@@ -138,10 +138,15 @@ def ssh_target() -> tuple[str, str, str]:
     return CONFIG.get("TH_SSH_USER") or "mobile", host, CONFIG.get("TH_SSH_PORT") or "22"
 
 
-def ssh_run(cmd: str, *, check: bool = True, timeout: int = 60, quiet: bool = True):
+def ssh_run(cmd: str, *, check: bool = True, timeout: int = 60, quiet: bool = True, mux: bool = False):
+    """mux: reuse one SSH connection for a minute (the web UI's log pane polls every couple of seconds)."""
     user, host, port = ssh_target()
-    return run(["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=8", "-o", "StrictHostKeyChecking=accept-new",
-                "-p", port, f"{user}@{host}", cmd], check=check, timeout=timeout, quiet=quiet)
+    opts = ["-o", "BatchMode=yes", "-o", "ConnectTimeout=8", "-o", "StrictHostKeyChecking=accept-new"]
+    if mux:      # the socket path must stay under ~104 bytes: ~/.ssh, not the harness folder
+        (Path.home() / ".ssh").mkdir(mode=0o700, exist_ok=True)
+        opts += ["-o", "ControlMaster=auto", "-o", f"ControlPath={Path.home() / '.ssh' / 'cm-th-%C'}",
+                 "-o", "ControlPersist=60"]
+    return run(["ssh", *opts, "-p", port, f"{user}@{host}", cmd], check=check, timeout=timeout, quiet=quiet)
 
 
 def ssh_ok() -> bool:

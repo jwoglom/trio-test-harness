@@ -4,6 +4,7 @@
     ./trio-test-ci -s jwoglom/TandemKit#395 --comment
     ./trio-test-ci 1234 --model opus
     ./trio-test-ci feat/tandem -s TandemKit@my-branch --instructions "check the bolus sheet"
+    ./trio-test-ci upstream:feat/tandem-closed-beta -c nightscout/Trio#1580   # a dev PR on the tandem branch
     ./trio-test-ci --attach 35955500012          # follow a run again after Ctrl-C
 
 Prints the run URL, then follows it with `gh run watch` (live step progress) and prints the job's
@@ -45,6 +46,10 @@ def parse_args(argv=None) -> argparse.Namespace:
                         "(blank: dev, or the branch that has the submodule)")
     p.add_argument("-s", "--submodule", action="append", default=[], metavar="REF",
                    help="submodule PR (link or owner/repo#N) or NAME@branch; repeatable")
+    p.add_argument("--submodule-cherry-pick", action="append", default=[], metavar="REF",
+                   help="cherry-pick onto a submodule, in order: a submodule PR, NAME@sha, NAME@A..B or NAME@branch; repeatable")
+    p.add_argument("-c", "--cherry-pick", action="append", default=[], metavar="REF",
+                   help="cherry-pick onto Trio, in order: a Trio PR (its own commits), commit sha, A..B or branch; repeatable")
     p.add_argument("--configuration", choices=["Debug", "Release"])
     p.add_argument("--walk-onboarding", action="store_true", help="tap through onboarding instead of skipping it")
     p.add_argument("--no-smoke", action="store_true", help="do not configure the Glucose Simulator + Pump Simulator")
@@ -69,6 +74,10 @@ def workflow_fields(a: argparse.Namespace) -> dict[str, str]:
     f = {"trio": a.trio}
     if a.submodule:
         f["submodules"] = " ".join(a.submodule)
+    if a.cherry_pick:
+        f["cherry_pick"] = " ".join(a.cherry_pick)
+    if a.submodule_cherry_pick:
+        f["submodule_cherry_pick"] = " ".join(a.submodule_cherry_pick)
     if a.configuration:
         f["configuration"] = a.configuration
     if a.walk_onboarding:

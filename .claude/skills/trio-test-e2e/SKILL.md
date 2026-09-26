@@ -10,7 +10,7 @@ The deterministic stages live in one script; you run it, then do the exploratory
 1. Build the command from the request (ask only for what is missing; the script also prompts on a TTY):
    ```
    cd ~/repos/trio-test-harness
-   ./trio-test-e2e --mode simulator|rooted-vnc|iphone-usb --pr <Trio or submodule PR URL> [--trio-branch feat/tandem] [--onboarding walk] [--yes]
+   ./trio-test-e2e --mode simulator|rooted-vnc|iphone-usb --pr <Trio or submodule PR URL> [--trio-branch feat/tandem] [--cherry-pick <PR|sha|A..B|branch>] [--onboarding walk] [--yes]
    ./trio-test-e2e --mode simulator --branch dev            # a branch instead of a PR
    ./trio-test-e2e --mode rooted-vnc --skip-build --skip-install   # reuse the last build
    ```

@@ -155,7 +155,8 @@ def cmd_build(args):
     from . import build as B
     src, info = B.prepare_source(branch=args.branch, pr=args.pr, repo=args.repo,
                                  in_place=Path(args.in_place) if args.in_place else None,
-                                 submodules=args.submodule, fetch=not args.no_fetch, trio_branch=args.trio_branch)
+                                 submodules=args.submodule, fetch=not args.no_fetch, trio_branch=args.trio_branch,
+                                 cherry_picks=args.cherry_pick, submodule_cherry_picks=args.submodule_cherry_pick)
     if args.checkout_only:
         print(json.dumps(info, indent=2)); return 0
     target = _target(args)
@@ -262,6 +263,42 @@ def cmd_launch(args):
 
 
 # ---------------- sim / device utilities -----------------
+
+def _applogs_doc() -> str:
+    from . import applogs
+    return applogs.__doc__
+
+
+def cmd_logs(args):
+    """Trio / TandemKit / watch log files from the installed app (harness/applogs.py)."""
+    from . import applogs as A
+    from .build import BuildInfo
+    target = _target(args)
+    bi = BuildInfo.load()
+    built_for = "sim" if bi and bi.target == "sim" else "rooted-vnc" if bi and str(bi.target).startswith("device") else None
+    bundle = args.bundle_id or (bi.bundle_id if bi and built_for == target else CONFIG.bundle_id(target))
+    names = list(A.FILES) if args.which == "all" else [args.which]
+    rels = [r for n in names for r in A.FILES[n]]
+    got = A.fetch(target, bundle, rels)
+    texts = {n: {r: got.get(r) for r in A.FILES[n]} for n in names}
+    if args.files:
+        for n, files in texts.items():
+            for r, t in files.items():
+                print(f"{n:7} Documents/{r:30} " + ("missing" if t is None else f"{len(t.splitlines())} lines, {len(t) // 1024} KB"))
+        return 0
+    if args.save:
+        dest = _run(args).path / "logs"
+        for p in A.save(texts, dest):
+            print(p)
+        return 0
+    if all(t is None for f in texts.values() for t in f.values()):
+        raise HarnessError(f"no log files yet in {bundle}'s Documents ({', '.join(rels)})")
+    rows = A.query(texts, grep=args.grep, ignore_case=args.ignore_case,
+                   since=A.parse_since(args.since) if args.since else None, level=args.level,
+                   lines=args.lines or None)
+    print("\n".join(rows) if rows else "(no matching entries)")
+    return 0
+
 
 def cmd_sim(args):
     from . import xcode
@@ -633,6 +670,10 @@ def build_parser() -> argparse.ArgumentParser:
     b.add_argument("--pr", help="PR number | owner/repo#N | PR URL")
     b.add_argument("--repo", help="GitHub owner/repo to fetch --branch from (default: Trio origin)")
     b.add_argument("--trio-branch", help="for submodule PRs: the Trio branch that pins that submodule")
+    from .build import CHERRY_PICK_HELP
+    b.add_argument("--cherry-pick", action="append", metavar="SPEC", help=CHERRY_PICK_HELP)
+    from .build import SUBMODULE_CHERRY_PICK_HELP
+    b.add_argument("--submodule-cherry-pick", action="append", metavar="SPEC", help=SUBMODULE_CHERRY_PICK_HELP)
     b.add_argument("--in-place", help="build this existing checkout as-is (e.g. ~/repos/Trio with local changes)")
     b.add_argument("--submodule", action="append", default=[], help="NAME@REF | NAME@pr/N | NAME=URL#REF (repeatable)")
     b.add_argument("--configuration", default="Debug")
@@ -656,6 +697,21 @@ def build_parser() -> argparse.ArgumentParser:
     l.add_argument("--via", choices=["auto", "ssh", "vnc", "devicectl"], default="auto"); l.add_argument("--app-name", default="Trio")
     l.set_defaults(fn=cmd_launch)
 
+    lg = sp.add_parser("logs", help="Trio / TandemKit / watch log files from the installed app (filter, tail, save)",
+                       description=_applogs_doc(),
+                       formatter_class=argparse.RawDescriptionHelpFormatter)
+    lg.add_argument("which", nargs="?", default="all", choices=["trio", "tandem", "watch", "all"],
+                    help="which log (default all, merged by time)")
+    lg.add_argument("-g", "--grep", metavar="REGEX", help="only entries matching (Python regex; multi-line entries match as a whole)")
+    lg.add_argument("-i", "--ignore-case", action="store_true")
+    lg.add_argument("--since", metavar="WHEN", help="30s, 10m, 2h, 1d, or an ISO time")
+    lg.add_argument("--level", choices=["info", "warning", "error"], help="TandemKit: at least this level")
+    lg.add_argument("-n", "--lines", type=int, default=200, help="last N entries (default 200; 0 = all)")
+    lg.add_argument("--files", action="store_true", help="list the log files and their sizes")
+    lg.add_argument("--save", action="store_true", help="copy the log files into the current run's logs/ (read them with Read/Grep)")
+    lg.add_argument("--run", help="run dir for --save (default: $TH_RUN / the current run)")
+    lg.add_argument("--bundle-id", help="default: the last build's, else the target's")
+    lg.set_defaults(fn=cmd_logs)
     s = sp.add_parser("sim", help="simulator management"); ss = s.add_subparsers(dest="sub", required=True)
     for name in ("list", "runtimes", "boot", "shutdown", "erase"):
         ss.add_parser(name)
