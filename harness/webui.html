@@ -413,7 +413,7 @@ function renderContinue(j) {
         <label class="check"><input type="checkbox" id="contcopy" checked>Make repo copy</label>
         <div class="hint">Worktree at the tested commits and branches, so other runs can use the shared checkout.</div>
         <label for="contmode">Permission mode</label>
-        <select id="contmode"><option value="acceptEdits">acceptEdits: edits go ahead, commands ask</option><option value="default">default: ask for edits and commands</option><option value="auto">auto: a classifier approves safe actions</option><option value="plan">plan: read-only until you approve a plan</option></select>
+        <select id="contmode"><option value="auto" selected>auto: a classifier approves safe actions</option><option value="acceptEdits">acceptEdits: edits go ahead, commands ask</option><option value="default">default: ask for edits and commands</option><option value="plan">plan: read-only until you approve a plan</option></select>
         <div class="actions"><button class="primary" id="contlocal">${j.agent_session ? "Continue conversation" : "Start session"}</button></div></div>
       <div><h4>Claude Code on the web</h4>
         <p class="hint" style="margin:0 0 6px">New cloud session on the PR's branch, given the findings and tested commits. No transcript, screenshots or iOS builds.</p>

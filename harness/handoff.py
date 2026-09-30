@@ -28,13 +28,13 @@ import uuid
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
-from .build import _gh_slug, _git, split_branch_spec
+from .build import _gh_slug, _git, isolate_submodule_worktrees, split_branch_spec
 from .config import CONFIG, REPO_ROOT
 from .util import HarnessError, read_json, write_json
 
 SESSION_URL = re.compile(r"https://claude\.ai/code/(session_[A-Za-z0-9]+)")
 WORKTREES = CONFIG.runs_dir / ".worktrees"
-PERMISSION_MODES = ("acceptEdits", "default", "auto", "plan")
+PERMISSION_MODES = ("auto", "acceptEdits", "default", "plan")
 SHA = re.compile(r"^[0-9a-f]{7,40}$")
 
 
@@ -214,6 +214,7 @@ def worktree(src: Path, trio_sha: str, subs: dict[str, str], name: str) -> Path:
         n += 1
         dest = WORKTREES / f"{name}-{n}"
     _git(["worktree", "add", "--detach", str(dest), trio_sha], src, quiet=True)
+    isolate_submodule_worktrees(src)
     missing = []
     for path in sorted(subs, key=lambda p: p.count("/")):
         sub_src, sha = src / path, subs[path]
@@ -383,6 +384,10 @@ To re-test a change, build that folder with the harness and install/launch it as
 trio-launch skills), for example
 `./trio-test-harness --target {target} build --in-place {workdir}{' --trollstore' if target == 'rooted-vnc' else ''}` from `{REPO_ROOT}`.
 The harness daemon may be stopped; start it with `./trio-test-harness --target {target} daemon start` if a command needs it.
+Look settings and screens up in Trio's docs before navigating: `./trio-test-harness docs search "..."` / `docs page ...`
+(https://triodocs.org as text: where each option lives, defaults, limits).
+Before driving the device, run `./trio-test-harness busy`: it names whatever holds the device (another test run) or says
+idle, and nothing else counts. Do not infer runs from process lists; idle `claude ./trio-test-e2e ...` sessions are not runs.
 
 ## Rules
 
@@ -411,7 +416,8 @@ build or run iOS apps: changes are re-tested by the person with the harness afte
 {_repo_lines(None, repos, subs)}
 
 Clone other repositories from GitHub if you need them (Trio: `git clone --recurse-submodules`, then check out the
-commits above).
+commits above). Trio's documentation is https://triodocs.org (MkDocs; `search/search_index.json` has every section's
+text): look settings and screens up there.
 
 ## Test results
 

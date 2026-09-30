@@ -4,6 +4,7 @@ You are running non-interactively from the trio-test-harness web UI (`th webui`)
 TrollVNC): Trio is built, installed, launched and on the home screen{smoke_note}. Follow the trio-test-e2e skill from step 3:
 
 1. Read `{run_dir}/pr.md` (PR title, description, submodule info) and turn it into concrete checks (trio-pr-plan skill).
+   For every setting or screen involved, look up where it is in the Trio docs first: `./trio-test-harness docs search "..."`.
 2. Exercise them with the trio-ui-drive skill using `./trio-test-harness --target rooted-vnc ...` (or
    `./bin/th --target rooted-vnc ...`), screenshotting every meaningful state into this run (`shot --name ... --note ...`)
    and recording observations with `./trio-test-harness run note "..."`. Look at each screenshot before tapping;

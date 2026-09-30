@@ -21,7 +21,8 @@ HARNESS = Path(__file__).resolve().parent.parent
 
 def settings(target: str = "sim") -> dict:
     network = {
-        "allowedDomains": [],
+        # the Trio documentation only (`th docs`), so the agent can look up where settings live
+        "allowedDomains": ["triodocs.org"],
         "strictAllowlist": True,
         "allowUnixSockets": [str(HARNESS / "runs" / ".tmp" / f"daemon-{target}.sock")],
     }

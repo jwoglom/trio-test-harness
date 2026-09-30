@@ -8,6 +8,7 @@ description: Drive and screenshot the Trio app (or any iOS UI) on the iOS Simula
 `cd ~/repos/trio-test-harness`; `th` = `./trio-test-harness` (short alias `bin/th`). Pick the target with `--target sim|rooted-vnc|iphone-usb` (or `export TH_TARGET=…`): simulator (WDA tree), jailbroken
 phone over TrollVNC (tesseract OCR), or any iPhone through iPhone Mirroring (Vision OCR, `th home` = ⌘1, Spotlight = ⌘3).
 **All coordinates are screenshot pixels** (same for both targets). Look at every screenshot before acting.
+**Is the device free?** `th busy` (the device lock) is the only answer: it names the run holding it, or says idle. Never judge from process lists; an idle `claude ./trio-test-e2e ...` session is not a run.
 
 ## Loop
 1. `th shot --name <state> --note "<what this shows>"` → prints the PNG path → **Read it**.
@@ -28,6 +29,8 @@ Phone extras: `th device wake` (power + swipe up), `th device vnc-check`, Spotli
 The phone driver cannot kill or launch by bundle id: use the App Switcher / Spotlight through taps.
 
 ## Trio facts (dev / 0.8.x)
+- **Where is a setting?** Look it up before searching screens: `th docs search "<name>"` / `th docs page <path>[#section]`
+  / `th docs toc` read https://triodocs.org (the official docs) as text, with the menu path, defaults and limits.
 - **Onboarding** (fresh install): Welcome → Before you begin → force-close warning → overview → **Nightscout** (tap "Skip
   Nightscout Setup", then Next) → Units & Pump (pump picker excludes the simulator) → glucose target → basal → carb ratio → ISF
   (chapter-complete screens need one more Next) → delivery limits (5 substeps) → algorithm info → autosens → SMB (10 substeps) →

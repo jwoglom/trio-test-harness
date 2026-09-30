@@ -6,6 +6,9 @@ description: One-shot end-to-end Trio test by running `trio-test-e2e` (checkout 
 # trio-test-e2e — invoke `trio-test-e2e`
 
 The deterministic stages live in one script; you run it, then do the exploratory part.
+Look up every setting or screen you need in the Trio docs first (`./trio-test-harness docs search "..."`, `docs page ...`):
+they say where it is in the app and what it does.
+**Is the device free?** `th busy` (the device lock) is the only answer: it names the run holding it, or says idle. Never judge from process lists; an idle `claude ./trio-test-e2e ...` session is not a run. The script holds the lock for its run (and waits for it).
 
 1. Build the command from the request (ask only for what is missing; the script also prompts on a TTY):
    ```

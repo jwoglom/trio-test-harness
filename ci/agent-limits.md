@@ -15,6 +15,10 @@ try to work around them.
   copies them into the run's `logs/` for Read/Grep). Use them to confirm what the app did behind a screen (a bolus
   recorded, a pump error, a history entry). Quote only the lines that matter, and leave out anything identifying (pump
   or sensor serial numbers, device names, IDs, tokens) from notes, the summary and screenshots' notes.
+- Trio docs: `./trio-test-harness docs search "<words>"`, `docs toc`, `docs page <path or URL>[#section]` read
+  https://triodocs.org (the official Trio documentation) as text. **Always look a setting or option up there first** to
+  learn which screen it is on, what it is called and what it does, then go to it in the app; do not hunt through
+  screens. The docs can lag the PR under test: if the app differs, say so in your notes.
 - `./trio-test-harness --help` and `<command> --help` show the syntax. `--target` goes before the command:
   `./trio-test-harness --target sim shot --name x`.
 - If something you need is denied, do not look for another way in. Record it with `./trio-test-harness run note "..."`

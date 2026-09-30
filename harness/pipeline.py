@@ -215,6 +215,53 @@ def hand_off_to_agent(run, pr_url: str | None, mode: str) -> None:
     os.execv(claude, [claude, prompt])
 
 
+def run_stages(args):
+    """checkout -> build -> install -> launch -> smoke -> report. Returns (exit code, run, PR URL, pr.md)."""
+    from .report import Run
+    from .build import BuildInfo
+    src, info = stage_checkout(args)
+    pr_url = info.get("pr_url")
+    # a branch with a cherry-picked PR on top is a test of that PR (its title, its comment)
+    picked = next((c["pr"] for c in (info.get("cherry_picks") or []) + (info.get("submodule_cherry_picks") or [])
+                   if c.get("pr")), None)
+    if picked and not info.get("pr"):
+        pr_url = pr_url or picked.get("url")
+        info.setdefault("pr_title", f"{picked.get('title')} (on {info.get('branch')})")
+    if args.checkout_only:
+        print(json.dumps(info, indent=2, default=str)); return 0, None, None, None
+    name = (f"pr-{info['pr'].split('#')[-1]}" if info.get("pr") else (info.get("branch") or "inplace")).replace("/", "-")
+    if info.get("cherry_picks") or info.get("submodule_cherry_picks"):
+        name += "-picks"
+    run = Run.new(f"{name}-{args.target}", {"target": args.target, "mode": args.mode,
+                                             "title": f"Trio test: {info.get('pr_title') or info.get('branch') or 'in-place'} ({args.mode})",
+                                             "pr_url": pr_url})
+    notes = write_pr_notes(run, info)
+    print(f"\n--- {notes} ---\n" + notes.read_text() + "\n---\n")
+    try:
+        bi = BuildInfo.load() if args.skip_build else stage_build(args, src, info)
+        run.update_meta(build=bi.__dict__)
+        if not args.skip_install:
+            stage_install(args, bi)
+        drv = stage_launch(args, bi, run)
+        if smoke_devices(args):
+            first = len(run.steps())
+            stage_smoke(args, drv, run)
+            if args.hide_setup_screenshots:
+                # Only the fake CGM/pump setup is hidden; launch, home and everything after stay in the report.
+                run.update_meta(hidden_steps=[first, len(run.steps())])
+        want = smoke_devices(args)
+        run.finish("passed", "Trio launched, reached the home screen" + (f", {' + '.join(want)} configured" if want else "") + ".")
+    except Exception as e:  # noqa: BLE001
+        run.finish("failed", f"{type(e).__name__}: {e}")
+        stage_report(args, run)
+        log(f"FAILED: {e}")
+        print(f"run: {run.path}")
+        return 1, run, pr_url, notes
+    html = stage_report(args, run)
+    print(f"\nrun:    {run.path}\nreport: {html}\npr.md:  {notes}")
+    return 0, run, pr_url, notes
+
+
 def main(argv=None) -> int:
     p = argparse.ArgumentParser(prog="trio-test-e2e", description="End-to-end Trio test: checkout → build → install → smoke → report")
     p.add_argument("--mode", choices=sorted(MODES),
@@ -261,48 +308,15 @@ def main(argv=None) -> int:
         elif ans:
             args.branch = ans
 
-    from .report import Run
-    from .build import BuildInfo
-    src, info = stage_checkout(args)
-    pr_url = info.get("pr_url")
-    # a branch with a cherry-picked PR on top is a test of that PR (its title, its comment)
-    picked = next((c["pr"] for c in (info.get("cherry_picks") or []) + (info.get("submodule_cherry_picks") or [])
-                   if c.get("pr")), None)
-    if picked and not info.get("pr"):
-        pr_url = pr_url or picked.get("url")
-        info.setdefault("pr_title", f"{picked.get('title')} (on {info.get('branch')})")
-    if args.checkout_only:
-        print(json.dumps(info, indent=2, default=str)); return 0
-    name = (f"pr-{info['pr'].split('#')[-1]}" if info.get("pr") else (info.get("branch") or "inplace")).replace("/", "-")
-    if info.get("cherry_picks") or info.get("submodule_cherry_picks"):
-        name += "-picks"
-    run = Run.new(f"{name}-{args.target}", {"target": args.target, "mode": args.mode,
-                                             "title": f"Trio test: {info.get('pr_title') or info.get('branch') or 'in-place'} ({args.mode})",
-                                             "pr_url": pr_url})
-    notes = write_pr_notes(run, info)
-    print(f"\n--- {notes} ---\n" + notes.read_text() + "\n---\n")
-    try:
-        bi = BuildInfo.load() if args.skip_build else stage_build(args, src, info)
-        run.update_meta(build=bi.__dict__)
-        if not args.skip_install:
-            stage_install(args, bi)
-        drv = stage_launch(args, bi, run)
-        if smoke_devices(args):
-            first = len(run.steps())
-            stage_smoke(args, drv, run)
-            if args.hide_setup_screenshots:
-                # Only the fake CGM/pump setup is hidden; launch, home and everything after stay in the report.
-                run.update_meta(hidden_steps=[first, len(run.steps())])
-        want = smoke_devices(args)
-        run.finish("passed", "Trio launched, reached the home screen" + (f", {' + '.join(want)} configured" if want else "") + ".")
-    except Exception as e:  # noqa: BLE001
-        run.finish("failed", f"{type(e).__name__}: {e}")
-        stage_report(args, run)
-        log(f"FAILED: {e}")
-        print(f"run: {run.path}")
-        return 1
-    html = stage_report(args, run)
-    print(f"\nrun:    {run.path}\nreport: {html}\npr.md:  {notes}")
+    # The device lock (harness/busy.py) says who drives the target; `th busy` and the web UI read it. Released
+    # before the hand-off below, so an interactive session left open afterwards never holds the device.
+    from contextlib import nullcontext
+    from . import busy
+    what = f"trio-test-e2e {args.pr or args.branch or 'in-place'}" + (f" + cherry-picks" if args.cherry_pick else "")
+    with nullcontext() if args.checkout_only else busy.hold(args.target, what, mode=args.mode):
+        rc, run, pr_url, notes = run_stages(args)
+    if rc or run is None:
+        return rc
     inside_claude = bool(os.environ.get("CLAUDECODE"))
     if args.agent is None:
         args.agent = (not inside_claude) and _tty() and shutil.which("claude") is not None

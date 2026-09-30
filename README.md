@@ -64,6 +64,16 @@ fetch from that repo. Commits already in the history are dropped. A conflict sto
 named, and puts the repo back where it was. The first cherry-picked PR gets the PR comment when the run has no PR of its
 own, and its description goes into `pr.md`.
 
+Build caching: one persistent DerivedData (`TH_DERIVED_DATA`, ~11 GB here) holds the resolved SwiftPM packages, the
+module cache and every target's incremental state. What used to defeat it is git: every file git writes gets the current
+time as its mtime, and each checkout rewrites files that end up byte-identical (a submodule reset before an override, a
+cherry-pick re-applied onto its base), which Xcode and the Swift driver read as changes; the dependency cascade then
+recompiled the whole Trio module (about 700 files, 7-8 min on this Mac) even for an unchanged PR. After every checkout the
+harness therefore stamps each clean tracked file, in the checkout and all submodules, with an mtime derived from its git
+blob hash (`stabilize_mtimes` in `harness/build.py`): identical content always carries the identical timestamp, so only
+real changes reach the compiler, and a changed file (a different blob) still gets a different mtime. Files with
+uncommitted changes keep their real mtime. `TH_STABLE_MTIMES=0` turns it off; `--clean` still wipes DerivedData.
+
 ## Setup
 
 ```
@@ -107,6 +117,12 @@ See `docs/HANDOFF.md` for the current state and `docs/phone-setup.md` for the iP
 `flow {onboarding-walk,add-cgm-sim,add-pump-sim,back-home,dismiss,at-home}` · `test smoke`
 
 Runs live in `runs/<timestamp>-<name>/` (`screenshots/`, `steps.jsonl`, `run.json`, `report.html`).
+
+`th docs search "<words>" | toc | page <path or URL>[#section]` reads https://triodocs.org (Trio's MkDocs documentation) as
+text: search runs over the site's own search index (every section's title and text) and prints links and snippets, `toc`
+lists all pages as a tree (from the sitemap), `page` prints a page's article (headings, lists, tables, admonitions,
+links) or one section. Pages are cached for a day in `runs/.tmp/triodocs/`. The web UI/CI agent's sandbox allows
+`triodocs.org` (and nothing else) for it, and the agents are told to look settings up there before navigating.
 
 `th logs` reads the installed app's log files: Trio's `Documents/logs/log.txt`, TandemKit's
 `Documents/tandem/tandem_log.txt` (info and above; debug goes to OSLog only) and the watch log, plus each one's `*_prev`
@@ -176,7 +192,9 @@ same stages as `e2e.yml`, but on this machine with its `harness.env`, `gh` login
 and the agent's findings. Nothing goes to GitHub until you press **Post PR comment** (it runs `th report pr` as you, so the
 screenshots are attached inline); ticking "Post the PR comment when done" does it automatically.
 
-- One job at a time; a job first waits for any other `trio-test-e2e` on the machine (another session on the same phone).
+- One job at a time; a job first waits until its target is free: `th busy` shows the device lock that `trio-test-e2e`
+  holds for its run and a web UI job for its agent step (`harness/busy.py`). The OS frees it when the holder exits, so it
+  is never stale, and it is the only signal: process lists are not (an idle `claude ./trio-test-e2e ...` session is not a run).
 - The agent gets `TH_RUN=<run dir>`, so its screenshots stay in its run even if another session moves `runs/.current`.
   The harness daemon is started for the agent if none is running, and stopped afterwards only if the web UI started it.
 - Builds use `TRIO_REPO` from `harness.env` like any local `trio-test-e2e` run (PR checkouts leave it on a detached HEAD).
@@ -191,7 +209,7 @@ screenshots are attached inline); ticking "Post the PR comment when done" does i
   sandbox (the agent's `claude -p` gets a known `--session-id`; older jobs are matched by their prompt). The copy keeps
   everything the agent saw and can edit, commit, push, rebuild and re-test. You drive it at the claude.ai/code link the page
   shows, or in the Claude app. It runs detached in a pseudo-terminal (`harness/ptyrun.py`), so it outlives a web UI restart
-  until **Stop** is pressed. The permission mode is picked on the page (acceptEdits by default).
+  until **Stop** is pressed. The permission mode is picked on the page (auto by default).
 - **Make repo copy** (on by default): a git worktree of `TRIO_REPO` at `runs/.worktrees/<run>`, with each submodule a
   worktree of the checkout's own submodule repo at the tested commit (no downloads, about 15 s). Other runs can keep using
   the shared checkout. In the copy (or, unticked, in the shared checkout, only while it is still at the tested commits), Trio

@@ -41,6 +41,7 @@ DEFAULTS = {
     "TH_SSH_PORT": "22",
     "TH_IPA_HTTP_PORT": "8765",       # local HTTP server used for TrollStore installs
     "TH_IPA_HTTP_HOST": "",           # IP/hostname the iPhone can reach; blank = auto (LAN IP)
+    "TH_STABLE_MTIMES": "1",         # 0: leave file mtimes as git wrote them (every checkout then looks changed to Xcode)
     "TH_BUILD_LOG_STDOUT": "",        # 1: print every xcodebuild line too (it always goes to build/xcodebuild-<target>.log)
     "TH_WEBUI_HOST": "127.0.0.1",     # `th webui` bind address; 0.0.0.0 = reachable from other machines (token still required)
     "TH_WEBUI_PORT": "8787",

@@ -10,6 +10,9 @@ description: Turn a Trio (or Trio submodule) pull request into a concrete, scree
 2. Classify every change as: UI (which screen? Home, Settings ▸ Devices/Therapy/Algorithm/Features/Notifications/Services,
    onboarding, treatments sheet, history, adjustments), pump/CGM driver (which device? can the fake devices reach it?),
    algorithm/oref (observable via Settings ▸ Algorithm and the home forecast/IOB/COB numbers), or non-UI (build/tests only).
+   For every setting, option or screen the PR touches, look it up in the Trio docs first:
+   `th docs search "<setting name>"` (then `th docs page <link>`) gives the screen path (e.g. Settings → Therapy → Units
+   and Limits → Max Bolus), defaults, limits and what it does. Put that path in the check. The docs can lag the PR.
 3. Write the plan as numbered checks with expected results into `runs/<run>/pr.md` under "Test plan", each mapped to
    `th` actions (tap-text labels, values to type, what to screenshot). Include a negative check where the PR fixes a bug.
 4. State what cannot be tested with fake devices (real pump/CGM protocol paths, Nightscout, HealthKit) so the report is honest.

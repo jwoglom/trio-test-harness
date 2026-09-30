@@ -130,9 +130,17 @@ macOS iPhone Mirroring using phone-harness; driver written and window capture ve
 - The `--trollstore` install path exists but is irrelevant for an iOS 18 phone; the IPA it builds is what `--appsync` installs.
 - **Two Claude Code sessions on one phone collide.** A second session's `trio-test-e2e` relaunched Trio mid-test and, because
   `runs/.current` is a single shared pointer, redirected the other session's screenshots into its own run. Before driving the
-  phone, `pgrep -fl harness.pipeline` and wait; always pass `--run <dir>` to `th shot`/`run note`/`run finish` when two runs
+  phone, run `./trio-test-harness busy` and wait while it names a holder (the device lock; process lists mislead:
+  an idle `claude ./trio-test-e2e ...` session is not a run); always pass `--run <dir>` to `th shot`/`run note`/`run finish` when two runs
   may exist. `Run` paths are now made absolute and step screenshots are stored run-relative (a relative `--run runs/x` used
   to log `runs/x/screenshots/…`, which the report could not find and drew as black cards).
+- **Every build recompiled all of Trio** (2026-09-30 analysis of the web UI logs: 702/702 Trio files even for a byte-identical
+  re-run, 7-8 min of xcodebuild on this 2-core Intel MacBook Pro). Cause: git stamps every file it writes with the current
+  time, and the checkout stage rewrites unchanged files (submodule reset then override, cherry-pick re-applied); Xcode and
+  the Swift driver treat the new mtime as a change and the cascade takes the whole app module with it. Fix: after the
+  checkout, `stabilize_mtimes` gives every clean tracked file an mtime derived from its git blob hash (`TH_STABLE_MTIMES`,
+  README "Build caching"). Not done, and probably not worth it on this disk: a DerivedData per Trio base branch, or Xcode's
+  content-addressed compilation cache (`COMPILATION_CACHE_ENABLE_CACHING=YES`); the disk was at 100% during the analysis.
 - SwiftUI drag & drop needs a long press before the move: use `th drag`, not `th swipe`. On the simulator `drag` maps to
   WDA's `dragfromtoforduration` (its duration is the press-hold time).
 

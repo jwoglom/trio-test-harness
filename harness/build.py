@@ -14,6 +14,7 @@ import os
 import plistlib
 import re
 import shutil
+import stat
 import zipfile
 from dataclasses import dataclass, asdict, field
 from pathlib import Path
@@ -544,6 +545,125 @@ def submodule_cherry_pick(src: Path, specs: list[str]) -> list[dict]:
     return out
 
 
+def _module_gitdirs(src: Path) -> list[Path]:
+    """The checkout's submodule git dirs (.git/modules/<name>, nested .../modules/<name>), not their worktrees/."""
+    root = src / ".git" / "modules"
+    if not root.is_dir():
+        return []
+    return sorted(p.parent for p in root.rglob("HEAD")
+                  if (p.parent / "config").is_file() and "worktrees" not in p.parent.relative_to(root).parts)
+
+
+def isolate_submodule_worktrees(src: Path) -> None:
+    """Keep each submodule's core.worktree per-worktree (extensions.worktreeConfig + config.worktree). Without this,
+    `git submodule update` inside a worktree copy (handoff.worktree) rewrites core.worktree in the submodule's shared
+    config to point at the copy, and every submodule command in the checkout then fails ("cannot chdir to …")."""
+    for gd in _module_gitdirs(src):
+        cfg = gd / "config"
+        wt = _git(["config", "--file", str(cfg), "core.worktree"], src, quiet=True, check=False).stdout.strip()
+        if not wt:
+            continue
+        _git(["config", "--file", str(cfg), "extensions.worktreeConfig", "true"], src, quiet=True)
+        _git(["config", "--file", str(gd / "config.worktree"), "core.worktree", wt], src, quiet=True)
+        _git(["config", "--file", str(cfg), "--unset", "core.worktree"], src, quiet=True)
+
+
+def repair_submodule_worktrees(src: Path) -> None:
+    """Point submodule core.worktree settings that a worktree copy (runs/.worktrees/<copy>/<path>) hijacked back at
+    the checkout's own <path>."""
+    marker = f"/{CONFIG.runs_dir.name}/.worktrees/"
+    for gd in _module_gitdirs(src):
+        for cfg in (gd / "config", gd / "config.worktree"):
+            if not cfg.is_file():
+                continue
+            wt = _git(["config", "--file", str(cfg), "core.worktree"], src, quiet=True, check=False).stdout.strip()
+            if marker not in wt:
+                continue
+            rest = wt.split(marker, 1)[1].split("/", 1)[1:]     # drop the copy's folder name
+            target = src / rest[0] if rest else None
+            if not target or not (target / ".git").is_file():
+                continue
+            rel = os.path.relpath(target, gd)
+            log(f"repairing {gd.relative_to(src)}: core.worktree pointed at a worktree copy, now {rel}")
+            _git(["config", "--file", str(cfg), "core.worktree", rel], src, quiet=True)
+
+
+# ---------------- stable mtimes -----------------
+
+MTIME_EPOCH = 1262304000   # 2010-01-01T00:00:00Z: blob-derived mtimes land in 2010..2018, always in the past
+
+
+def blob_mtime(sha: str) -> int:
+    """A timestamp that depends only on a blob's content, so the same bytes get the same mtime in every checkout."""
+    return MTIME_EPOCH + int(sha[:7], 16)
+
+
+def stabilize_mtimes(src: Path) -> int:
+    """Stamp every clean tracked file in the checkout and its submodules with an mtime derived from its git blob hash.
+
+    git gives every file it writes the current time, and each run rewrites files that end up byte-identical (the
+    submodule reset before an override, a cherry-pick re-applied onto its base). Xcode's build system and the Swift
+    driver take the new mtime as a change, the dependency cascade then recompiles the whole Trio module even though
+    nothing differs. With the mtime keyed on the blob hash, identical content looks untouched in every build while
+    changed content (a different blob) still gets a different mtime. Files with uncommitted changes keep their real
+    mtime. TH_STABLE_MTIMES=0 disables it. Returns the number of files re-stamped."""
+    if not CONFIG.bool("TH_STABLE_MTIMES"):
+        return 0
+    from concurrent.futures import ThreadPoolExecutor
+    # one listing for the checkout and every nested submodule: "mode sha stage\tpath", paths relative to src
+    entries = _git(["ls-files", "-s", "-z", "--recurse-submodules"], src, quiet=True).stdout.split("\0")
+    repos = [src]
+    files: list[tuple[Path, int]] = []
+    for entry in entries:
+        meta, _, rel = entry.partition("\t")
+        parts = meta.split()
+        if len(parts) != 3 or parts[2] != "0":
+            continue
+        if parts[0] == "160000":              # a submodule that is not checked out (recursion stops there)
+            continue
+        if parts[0] in ("100644", "100755"):  # not symlinks
+            files.append((src / rel, blob_mtime(parts[1])))
+    # every checked-out submodule, from .gitmodules (git submodule status --recursive takes seconds here)
+    pending = [src]
+    while pending:
+        repo = pending.pop()
+        gm = repo / ".gitmodules"
+        if not gm.is_file():
+            continue
+        for m in _parse_gitmodules(gm.read_text()).values():
+            sub = repo / m["path"] if m.get("path") else None
+            if sub and (sub / ".git").exists():
+                repos.append(sub)
+                pending.append(sub)
+
+    def dirty_files(repo: Path) -> set[Path]:
+        """Files whose content differs from the index (git status refreshes the stat cache as a side effect)."""
+        out = _git(["status", "--porcelain", "-z", "--untracked-files=no", "--ignore-submodules=all"], repo,
+                   quiet=True, check=False).stdout
+        return {repo / e[3:] for e in out.split("\0") if len(e) > 3}
+
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        dirty = set().union(*pool.map(dirty_files, repos))
+    n = 0
+    for path, t in files:
+        if path in dirty:
+            continue                          # uncommitted changes keep their real mtime
+        ns = t * 10**9
+        try:
+            st = path.lstat()
+            if not stat.S_ISREG(st.st_mode) or st.st_mtime_ns == ns:
+                continue
+            os.utime(path, ns=(ns, ns), follow_symlinks=False)
+        except OSError:
+            continue
+        n += 1
+    if n:
+        # re-stamped files no longer match git's cached stat data; refresh so later git commands do not re-hash them
+        with ThreadPoolExecutor(max_workers=4) as pool:
+            list(pool.map(lambda r: _git(["update-index", "-q", "--refresh"], r, quiet=True, check=False), repos))
+    return n
+
+
 def prepare_source(*, branch: str | None = None, pr: str | None = None, repo: str | None = None,
                    in_place: Path | None = None, submodules: list[str] | None = None,
                    fetch: bool = True, trio_branch: str | None = None,
@@ -565,6 +685,8 @@ def prepare_source(*, branch: str | None = None, pr: str | None = None, repo: st
     if cherry_picks and not branch and not pr:
         branch = CONFIG.get("TH_TRIO_BASE_BRANCH") or "dev"
     src = Path(in_place).expanduser().resolve() if in_place else ensure_checkout()
+    repair_submodule_worktrees(src)
+    isolate_submodule_worktrees(src)
     if not (src / "Trio.xcworkspace").exists() and not branch and not pr:
         # fresh --no-checkout clone: materialize the default branch
         _git(["checkout", "--force", CONFIG.get("TH_TRIO_BASE_BRANCH") or "dev"], src, check=False)
@@ -631,6 +753,10 @@ def prepare_source(*, branch: str | None = None, pr: str | None = None, repo: st
         info.setdefault("submodule_overrides", []).append(asdict(ov))
     if submodule_cherry_picks:
         info["submodule_cherry_picks"] = submodule_cherry_pick(src, submodule_cherry_picks)
+    n = stabilize_mtimes(src)
+    if n:
+        log(f"stable mtimes: {n} files stamped from their git blob hashes (identical content keeps its old mtime, "
+            "so xcodebuild recompiles only real changes)")
     info["sha"] = _git(["rev-parse", "--short=10", "HEAD"], src, quiet=True).stdout.strip()
     info["describe"] = _git(["log", "-1", "--format=%s"], src, quiet=True).stdout.strip()
     info["submodules"] = {}

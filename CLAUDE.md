@@ -16,6 +16,9 @@ Conventions:
 - Everything goes through `./trio-test-e2e` (whole pipeline, `harness/pipeline.py`) and `./trio-test-harness` (every stage and primitive,
   `harness/cli.py`). Add features there, not as ad-hoc scripts. `trio-test-e2e` from a plain terminal hands off to `claude`
   after the smoke stage; inside Claude Code (CLAUDECODE set) it never spawns another Claude.
+- Trio's documentation (https://triodocs.org): `./trio-test-harness docs search|toc|page` reads it as text. Always look a
+  setting or option up there to find where it lives in the app before navigating or documenting it.
+- Whether the phone or simulator is in use: `./trio-test-harness busy` (the device lock, `harness/busy.py`) is the only answer. `trio-test-e2e` holds it for its run and a web UI job for its agent step; the OS frees it when they exit. Never infer a run from process lists: idle `claude` sessions started as `claude ./trio-test-e2e --pr ...` keep that text in their command line for days and drive nothing.
 - All UI coordinates are **screenshot pixels** for both targets. Look at the PNG before tapping.
 - Secrets/machine settings live in `harness.env` and `.env` (both gitignored). Never commit them, never print the VNC password.
 - Screenshots may contain only fake data (Trio's Glucose Simulator / Pump Simulator). No UDIDs, Apple IDs, tokens, or real CGM data in reports or PRs.

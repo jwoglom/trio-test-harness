@@ -264,6 +264,48 @@ def cmd_launch(args):
 
 # ---------------- sim / device utilities -----------------
 
+def cmd_busy(args):
+    """Who is driving each target, from the device lock (harness/busy.py). Exit 1 if the asked target is busy."""
+    from . import busy
+    one = getattr(args, "target", None) or os.environ.get("TH_TARGET")
+    targets = [norm_target(one)] if one else list(busy.TARGETS)
+    held = False
+    for t in targets:
+        h = busy.holder(t)
+        held = held or bool(h)
+        print(f"{t:11} " + (f"busy: {busy.describe(h)}" if h else "idle"))
+    return 1 if held and one else 0
+
+
+def cmd_docs(args):
+    """Search / browse https://triodocs.org as text (harness/triodocs.py)."""
+    from . import triodocs as T
+    if args.sub == "search":
+        hits = T.search(" ".join(args.query), limit=args.limit)
+        if not hits:
+            print("no matches; try other words, or `th docs toc`")
+        for h in hits:
+            print(f"{h['title']}  —  {h['page']}\n  {h['url']}\n  {h['snippet']}\n")
+    elif args.sub == "toc":
+        for depth, title, path in T.toc():
+            if args.depth and depth > args.depth:
+                continue
+            print(f"{'  ' * max(depth - 1, 0)}- {title}  ({path or '/'})")
+    else:
+        print(T.page(args.ref))
+    return 0
+
+
+def _docs_doc() -> str:
+    from . import triodocs
+    return triodocs.__doc__
+
+
+def _busy_doc() -> str:
+    from . import busy
+    return busy.__doc__
+
+
 def _applogs_doc() -> str:
     from . import applogs
     return applogs.__doc__
@@ -697,6 +739,18 @@ def build_parser() -> argparse.ArgumentParser:
     l.add_argument("--via", choices=["auto", "ssh", "vnc", "devicectl"], default="auto"); l.add_argument("--app-name", default="Trio")
     l.set_defaults(fn=cmd_launch)
 
+    dc = sp.add_parser("docs", help="search / browse the Trio docs (triodocs.org) as text: search, toc, page",
+                       description=_docs_doc(), formatter_class=argparse.RawDescriptionHelpFormatter)
+    dcs = dc.add_subparsers(dest="sub", required=True)
+    d1 = dcs.add_parser("search", help="best-matching sections, with links and snippets")
+    d1.add_argument("query", nargs="+"); d1.add_argument("-n", "--limit", type=int, default=8)
+    d2 = dcs.add_parser("toc", help="every page as a tree"); d2.add_argument("--depth", type=int, help="only this many levels")
+    d3 = dcs.add_parser("page", help="a page (or one #section) as text")
+    d3.add_argument("ref", help="path (settings/…/) or a triodocs.org URL; #anchor for one section")
+    dc.set_defaults(fn=cmd_docs)
+    bz = sp.add_parser("busy", help="who is driving each target (the device lock; the only thing that counts)",
+                       description=_busy_doc(), formatter_class=argparse.RawDescriptionHelpFormatter)
+    bz.set_defaults(fn=cmd_busy)
     lg = sp.add_parser("logs", help="Trio / TandemKit / watch log files from the installed app (filter, tail, save)",
                        description=_applogs_doc(),
                        formatter_class=argparse.RawDescriptionHelpFormatter)

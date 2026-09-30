@@ -236,9 +236,6 @@ def _server_alive(pid) -> bool:
     return "webui" in cp.stdout
 
 
-def _other_pipelines() -> list[str]:
-    cp = subprocess.run(["pgrep", "-fl", "harness.pipeline"], capture_output=True, text=True)
-    return [l for l in cp.stdout.splitlines() if l.strip()]
 
 
 class Manager:
@@ -336,13 +333,15 @@ class Manager:
 
     @staticmethod
     def _wait_for_others(job: Job) -> None:
-        announced = False
-        while not job.cancelled and (others := _other_pipelines()):
+        """Wait while anything holds the job's target (the device lock, harness/busy.py; `th busy` shows it)."""
+        from . import busy
+        target, announced = TARGETS[job.data["inputs"]["target"]], False
+        while not job.cancelled and (h := busy.holder(target)):
             if not announced:
                 job.update(status="waiting")
-                job.note("waiting for another trio-test-e2e on this machine to finish:\n  " + "\n  ".join(others))
+                job.note(f"waiting for {target}: {busy.describe(h)}")
                 announced = True
-            time.sleep(10)
+            time.sleep(5)
 
 
 def _sims(inp: dict) -> list[str]:
@@ -398,6 +397,12 @@ def run_job(job: Job) -> None:
         # A known session id, so "Continue conversation" can resume it (harness/handoff.py).
         sid = str(uuid.uuid4())
         job.update(agent_session=sid)
+        # The agent drives the device: hold its lock (another run may have taken it since the e2e step ended).
+        from . import busy
+        lock = busy.hold(target, f"web UI job {job.id}: agent ({job.data.get('pr') or inp['trio'] or 'dev'})",
+                         on_wait=lambda h: job.note(f"waiting for {target}: {busy.describe(h)}"),
+                         cancelled=lambda: job.cancelled)
+        lock.__enter__()
         agent_env = {**env, "TH_RUN": str(rd), "PROMPT": prompt, "MODEL": inp["claude_model"], "SETTINGS": str(settings),
                      "SID": sid,
                      "LIMITS": (REPO_ROOT / "ci" / limits_file).read_text(), "OUT": str(rd / "agent-summary.md"), "PY": py}
@@ -411,6 +416,7 @@ def run_job(job: Job) -> None:
                              '--allowedTools "Bash(./trio-test-harness:*)" "Bash(./bin/th:*)" "Bash(sleep:*)" Read Glob Grep '
                              '| "$PY" ci/agent-stream.py "$OUT"'], agent_env, timeout=inp["agent_minutes"] * 60)
         finally:
+            lock.__exit__(None, None, None)
             if started:
                 D.stop(target)
                 job.note(f"stopped the {target} daemon")
@@ -640,7 +646,7 @@ class Handler(BaseHTTPRequestHandler):
         env = _base_env()
         try:
             if kind == "local":
-                mode = str(body.get("permission_mode") or "acceptEdits")
+                mode = str(body.get("permission_mode") or "auto")
                 model = str(body.get("model") or job.data["inputs"].get("claude_model") or "")
                 if model and not MODEL.match(model):
                     return self._json({"error": "model: letters, digits and . : - [ ] only"}, 400)
