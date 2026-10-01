@@ -862,6 +862,10 @@ def resolve_packages(src: Path, scheme: str) -> str | None:
     return PACKAGES_RERESOLVED
 
 
+# `path:line:col: error: …`, `xcodebuild: error: …`, `error: …`; not a quoted source line such as `var error: Error?`.
+DIAGNOSTIC_ERROR = re.compile(r"(?:^|: )error: ")
+
+
 class BuildTimeout(HarnessError):
     """xcodebuild was stopped at its deadline; DerivedData keeps what it compiled, so the next build resumes."""
 
@@ -941,7 +945,7 @@ def build(src: Path, target: str, *, configuration: str = "Debug", clean: bool =
             tail.append(line)
             if len(tail) > 60:
                 tail.pop(0)
-            if stream or re.search(r"error:|BUILD SUCCEEDED|BUILD FAILED|\*\* ", line):
+            if stream or DIAGNOSTIC_ERROR.search(line) or re.search(r"BUILD SUCCEEDED|BUILD FAILED|\*\* ", line):
                 print(line.rstrip(), flush=True)
         p.wait()
         if timer:
@@ -949,7 +953,7 @@ def build(src: Path, target: str, *, configuration: str = "Debug", clean: bool =
     if timed_out:
         raise BuildTimeout(f"xcodebuild stopped after {timeout / 60:.0f} min; full log: {log_path}")
     if p.returncode != 0:
-        errs = [l for l in Path(log_path).read_text().splitlines() if "error:" in l]
+        errs = [l for l in Path(log_path).read_text().splitlines() if DIAGNOSTIC_ERROR.search(l)]
         raise HarnessError("xcodebuild failed. Errors:\n" + "\n".join(errs[-20:]) + f"\nfull log: {log_path}")
     app = dd / "Build" / "Products" / products / "Trio.app"
     if not app.exists():
