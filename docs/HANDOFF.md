@@ -25,6 +25,19 @@ macOS iPhone Mirroring using phone-harness; driver written and window capture ve
 - `TRIO_REPO` on this machine is the user's `~/repos/Trio` (their choice); PR/branch checkouts happen there (detached HEAD,
   `git clean -fd` keeps ignored files). Elsewhere the default is `<harness>/Trio`.
 
+## TandemKit stress lane (2026-10-01)
+`th stress run` + `.github/workflows/stress-sim.yml` (nightly, 60-minute job on the workers): Trio closed-beta with
+TandemKit `dev`, built with the virtual pump + ThreadSanitizer, on the simulator against faketandem, with seeded chaos and
+per-round recovery checks; findings filed as issues here (`th stress file-issues`). See `docs/stress.md`.
+- Verified on Linux only: the faketandem module against a real emulator, and the chaos + recovery-check +
+  detector + summary path against a real TandemKit driver (TandemKit's Linux TSan integration build running a host loop,
+  standing in for Trio). Unit tests: `.venv/bin/python -m unittest discover -s tests` (the live-emulator test runs when
+  `TH_FAKETANDEM_BIN`/`TH_FAKETANDEM_JAR` are set).
+- **Not yet run on a Mac.** The first worker run should confirm the Xcode-side assumptions listed at the end of
+  `docs/stress.md` (TSan app build, `simctl launch --stderr`, `SIMCTL_CHILD_*`, Trio restoring the seeded pump and
+  settings, crash-report location). Expect the first run per worker to stop at "build-incomplete"/"built-only" while the
+  persistent DerivedData fills.
+
 ## What exists
 - `bin/th` CLI + `harness/` package (see README for the command list). Skills in `.claude/skills/`.
 - Source selection & build: `harness/build.py` (in-place checkout, branch, PR, fork, submodule overrides, ad-hoc simulator
