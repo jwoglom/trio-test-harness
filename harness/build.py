@@ -784,7 +784,8 @@ def _user_override_team(src: Path) -> str | None:
     return m.group(1) if m else None
 
 
-def harness_xcconfig(src: Path, target: str, *, dev_warning: bool = False) -> tuple[Path, str]:
+def harness_xcconfig(src: Path, target: str, *, dev_warning: bool = False,
+                     conditions: tuple[str, ...] = (), settings: dict[str, str] | None = None) -> tuple[Path, str]:
     """Write the harness's build settings to build/override-<target>.xcconfig (inside the harness, NOT the checkout)
     and return (path, team). Passed to xcodebuild with -xcconfig, which layers on top of the project's own
     Config.xcconfig / ConfigOverride.xcconfig without touching them.
@@ -806,9 +807,13 @@ def harness_xcconfig(src: Path, target: str, *, dev_warning: bool = False) -> tu
         lines += [f"DEVELOPER_TEAM = {team}",
                   f"BUNDLE_IDENTIFIER = org.nightscout.{team}.trio",
                   f"TRIO_APP_GROUP_ID = group.org.nightscout.{team}.trio.trio-app-group"]
-    if not dev_warning:
-        lines.append("SWIFT_ACTIVE_COMPILATION_CONDITIONS = $(inherited) DEV_BRANCH_WARNING_DISABLED")
-    out = CONFIG.build_dir / f"override-{target}.xcconfig"
+    active = (*(() if dev_warning else ("DEV_BRANCH_WARNING_DISABLED",)), *conditions)
+    if active:
+        lines.append(f"SWIFT_ACTIVE_COMPILATION_CONDITIONS = $(inherited) {' '.join(active)}")
+    lines += [f"{k} = {v}" for k, v in (settings or {}).items()]
+    # one file per variant, so a stress build (extra conditions) never rewrites the plain build's settings
+    suffix = "".join(f"-{c.lower()}" for c in conditions) + ("-sanitized" if settings else "")
+    out = CONFIG.build_dir / f"override-{target}{suffix}.xcconfig"
     out.write_text("\n".join(lines) + "\n")
     return out, team
 
@@ -857,15 +862,37 @@ def resolve_packages(src: Path, scheme: str) -> str | None:
     return PACKAGES_RERESOLVED
 
 
+# `path:line:col: error: …`, `xcodebuild: error: …`, `error: …`; not a quoted source line such as `var error: Error?`.
+DIAGNOSTIC_ERROR = re.compile(r"(?:^|: )error: ")
+
+
+class BuildTimeout(HarnessError):
+    """xcodebuild was stopped at its deadline; DerivedData keeps what it compiled, so the next build resumes."""
+
+
+# Build settings rather than xcodebuild's -enableThreadSanitizer: Trio's scheme embeds a watchOS app, and the sanitizers do
+# not support watchOS, so they are switched on for the iOS simulator SDK only.
+SANITIZER_SETTINGS = {"thread": {"ENABLE_THREAD_SANITIZER[sdk=iphonesimulator*]": "YES"},
+                      "address": {"ENABLE_ADDRESS_SANITIZER[sdk=iphonesimulator*]": "YES"}}
+
+
 def build(src: Path, target: str, *, configuration: str = "Debug", clean: bool = False,
-          git_info: dict | None = None, log_path: Path | None = None, trollstore: bool = False) -> BuildInfo:
+          git_info: dict | None = None, log_path: Path | None = None, trollstore: bool = False,
+          conditions: tuple[str, ...] = (), sanitizer: str | None = None, save: bool = True,
+          timeout: float | None = None) -> BuildInfo:
+    """`conditions` are extra Swift compilation conditions (e.g. TANDEMKIT_VIRTUAL_PUMP), `sanitizer` is thread or
+    address, `save=False` leaves build/last-build.json (what `th install` installs) alone, and `timeout` (seconds)
+    stops xcodebuild with BuildTimeout instead of letting a CI job's limit kill it without a report."""
     scheme = CONFIG.get("TH_TRIO_SCHEME")
     workspace = CONFIG.get("TH_TRIO_WORKSPACE")
     dd = Path(CONFIG.get("TH_DERIVED_DATA")).expanduser()
     env = {**xcode.developer_env(), "CI": "true"}  # CI=true skips SwiftFormat + Crashlytics phases
     if clean and dd.exists():
         shutil.rmtree(dd)
-    xcconfig, team = harness_xcconfig(src, "device" if (target == "device" and not trollstore) else "sim")
+    if sanitizer and sanitizer not in SANITIZER_SETTINGS:
+        raise HarnessError(f"unknown sanitizer {sanitizer!r}; use {', '.join(SANITIZER_SETTINGS)}")
+    xcconfig, team = harness_xcconfig(src, "device" if (target == "device" and not trollstore) else "sim",
+                                      conditions=conditions, settings=SANITIZER_SETTINGS.get(sanitizer or ""))
     if not (dd / "SourcePackages").exists():
         note = resolve_packages(src, scheme)
         if note:
@@ -887,13 +914,30 @@ def build(src: Path, target: str, *, configuration: str = "Debug", clean: bool =
                        "-allowProvisioningUpdates", "-allowProvisioningDeviceRegistration"]
     cmd = ["xcodebuild", "build", "-workspace", workspace, "-scheme", scheme, "-configuration", configuration,
            "-destination", dest, "-derivedDataPath", str(dd), "-xcconfig", str(xcconfig), *COMMON_FLAGS, *signing]
-    log(f"xcodebuild ({target}, {configuration}) -> {dd}")
+    log(f"xcodebuild ({target}, {configuration}"
+        + "".join(f", {x}" for x in (*conditions, *([f"{sanitizer} sanitizer"] if sanitizer else []))) + f") -> {dd}")
     log_path = log_path or (REPO_ROOT / "build" / f"xcodebuild-{target}.log")
     log_path.parent.mkdir(parents=True, exist_ok=True)
+    timed_out = False
     with open(log_path, "w") as fh:
         import subprocess
+        import threading
         p = subprocess.Popen(cmd, cwd=src, env={**os.environ, **env}, stdout=subprocess.PIPE,
-                             stderr=subprocess.STDOUT, text=True)
+                             stderr=subprocess.STDOUT, text=True, start_new_session=timeout is not None)
+        timer = None
+        if timeout is not None:
+            def stop():
+                nonlocal timed_out
+                if p.poll() is not None:
+                    return
+                timed_out = True
+                log(f"xcodebuild still running after {timeout / 60:.0f} min; stopping it (DerivedData keeps its progress)")
+                try:
+                    os.killpg(p.pid, 15)
+                except ProcessLookupError:
+                    pass
+            timer = threading.Timer(max(timeout, 1), stop)
+            timer.start()
         tail: list[str] = []
         stream = CONFIG.bool("TH_BUILD_LOG_STDOUT")   # `th webui` streams the whole build into its job log
         for line in p.stdout:  # type: ignore[union-attr]
@@ -901,11 +945,15 @@ def build(src: Path, target: str, *, configuration: str = "Debug", clean: bool =
             tail.append(line)
             if len(tail) > 60:
                 tail.pop(0)
-            if stream or re.search(r"error:|BUILD SUCCEEDED|BUILD FAILED|\*\* ", line):
+            if stream or DIAGNOSTIC_ERROR.search(line) or re.search(r"BUILD SUCCEEDED|BUILD FAILED|\*\* ", line):
                 print(line.rstrip(), flush=True)
         p.wait()
+        if timer:
+            timer.cancel()
+    if timed_out:
+        raise BuildTimeout(f"xcodebuild stopped after {timeout / 60:.0f} min; full log: {log_path}")
     if p.returncode != 0:
-        errs = [l for l in Path(log_path).read_text().splitlines() if "error:" in l]
+        errs = [l for l in Path(log_path).read_text().splitlines() if DIAGNOSTIC_ERROR.search(l)]
         raise HarnessError("xcodebuild failed. Errors:\n" + "\n".join(errs[-20:]) + f"\nfull log: {log_path}")
     app = dd / "Build" / "Products" / products / "Trio.app"
     if not app.exists():
@@ -918,7 +966,8 @@ def build(src: Path, target: str, *, configuration: str = "Debug", clean: bool =
                    source_dir=str(src), app_path=str(app), bundle_id=_bundle_id_from_app(app),
                    ipa_path=str(ipa) if ipa else None, git=git_info or {},
                    xcode=xcode.xcode_version(xcode.find_xcode()), scheme=scheme)
-    bi.save()
+    if save:
+        bi.save()
     log(f"built {bi.bundle_id} at {app}")
     return bi
 
