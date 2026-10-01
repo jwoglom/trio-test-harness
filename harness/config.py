@@ -50,13 +50,6 @@ DEFAULTS = {
     "TH_BUILD_DIR": str(REPO_ROOT / "build"),
     "TH_TRIO_SCHEME": "Trio",
     "TH_TRIO_WORKSPACE": "Trio.xcworkspace",
-    # faketandem for `th stress` (harness/faketandem.py): a prebuilt binary + cliparser jar, an existing checkout,
-    # or else build/faketandem-src fetched from TH_FAKETANDEM_REPO at TH_FAKETANDEM_REF
-    "TH_FAKETANDEM_BIN": "",
-    "TH_FAKETANDEM_JAR": "",
-    "TH_FAKETANDEM_DIR": "",
-    "TH_FAKETANDEM_REPO": "jwoglom/faketandem",
-    "TH_FAKETANDEM_REF": "main",
 }
 
 

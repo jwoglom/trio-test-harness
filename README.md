@@ -74,6 +74,13 @@ blob hash (`stabilize_mtimes` in `harness/build.py`): identical content always c
 real changes reach the compiler, and a changed file (a different blob) still gets a different mtime. Files with
 uncommitted changes keep their real mtime. `TH_STABLE_MTIMES=0` turns it off; `--clean` still wipes DerivedData.
 
+Used as a library: [jwoglom/tandemkit-stress](https://github.com/jwoglom/tandemkit-stress) (the TandemKit stress lane)
+carries this repository as a submodule and calls `harness.build.prepare_source` / `build`, `harness.sim`, `harness.wda`
+and `harness.flows.trio` directly. `build()`'s `conditions` (extra Swift compilation conditions such as
+`TANDEMKIT_VIRTUAL_PUMP`), `sanitizer` (thread/address, set for the iOS simulator SDK only since Trio embeds a watchOS
+app), `timeout` (raises `BuildTimeout`) and `save=False` (leaves `build/last-build.json` alone) exist for it; keep them
+working when changing the build.
+
 ## Setup
 
 ```
@@ -114,7 +121,7 @@ See `docs/HANDOFF.md` for the current state and `docs/phone-setup.md` for the iP
 `doctor` · `build` · `install` · `launch` · `sim {list,runtimes,install-runtime,boot,shutdown,erase,container,defaults,openurl}` ·
 `device {list,vnc-check,serve-ipa,wake,ssh,diag,vnc-restart,kill,apps}` · `daemon {start,stop,status,restart}` · `wda {build,start,stop,status}` · `shot` · `tap` · `swipe` · `drag` · `scroll` · `type` · `key` · `home` · `tap-text` · `find` ·
 `tree` · `wait-text` · `ocr` · `logs [trio|tandem|watch|all]` · `run {new,current,use,note,finish,list,steps}` · `report {html,pr,markdown}` ·
-`flow {onboarding-walk,add-cgm-sim,add-pump-sim,back-home,dismiss,at-home}` · `test smoke` · `stress {run,file-issues,scan,faketandem}`
+`flow {onboarding-walk,add-cgm-sim,add-pump-sim,back-home,dismiss,at-home}` · `test smoke`
 
 Runs live in `runs/<timestamp>-<name>/` (`screenshots/`, `steps.jsonl`, `run.json`, `report.html`).
 
@@ -136,16 +143,6 @@ before this command existed). Logs from the phone may hold real device data: kee
 `./trio-test-harness report pr <PR> [--artifact-url <link>] [--max-shots N]` posts a comment whose screenshots are uploaded
 *into* the comment with `gh pr comment --attach` (gh ≥ 2.99; up to 50 files, evenly thinned when a run has more). No extra
 repo or hosting. `--mode description` maintains a `<!-- trio-test-harness -->` section in the PR body instead.
-
-## TandemKit stress lane (`th stress`)
-`th stress run` builds Trio (nightscout/Trio `feat/tandem-closed-beta`) with its TandemKit submodule at TandemKit `dev`, the
-virtual pump (`TANDEMKIT_VIRTUAL_PUMP`) and ThreadSanitizer, runs it on the simulator against faketandem (the Tandem pump
-emulator) with a paired pump, closed loop and the Glucose Simulator seeded into the container, and spends the rest of its
-time budget on seeded chaos: pump-side events, link faults, app kills, UI noise, each round ending in a check that the
-driver recovered. Findings (sanitizer reports, crashes, hangs, no recovery, build breaks) go to `findings.json` and, in
-CI, to one issue per fingerprint in this repository (`th stress file-issues`). `.github/workflows/stress-sim.yml` runs it
-nightly on the self-hosted workers within a 60-minute job. Details, what is verified and what is not: `docs/stress.md`;
-skill `trio-stress`.
 
 ## CI (GitHub Actions)
 `.github/workflows/e2e.yml` runs `trio-test-e2e --mode simulator` on the self-hosted macOS workers

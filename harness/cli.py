@@ -145,19 +145,6 @@ def cmd_doctor(args):
         item("TH_DEVELOPER_TEAM / ConfigOverride team (signed builds)", CONFIG.get("TH_DEVELOPER_TEAM") or (CONFIG.trio_repo / "ConfigOverride.xcconfig").exists(),
              "set" if CONFIG.get("TH_DEVELOPER_TEAM") else "needed only for iphone-usb installs (devicectl)", warn=True)
 
-    if want in (None, "sim"):
-        print("stress lane (th stress: TandemKit against faketandem)")
-        if CONFIG.get("TH_FAKETANDEM_BIN"):
-            item("faketandem binary", Path(CONFIG.get("TH_FAKETANDEM_BIN")).exists(), CONFIG.get("TH_FAKETANDEM_BIN"), warn=True)
-        else:
-            item("go (builds faketandem)", which("go"), which("go") or "brew install go, or set TH_FAKETANDEM_BIN", warn=True)
-        item("java 17+ (pumpX2 cliparser)", which("java"), which("java") or "brew install openjdk@17", warn=True)
-        try:
-            import websocket  # noqa: F401
-            item("websocket-client", True)
-        except ImportError:
-            item("websocket-client", False, "pip install -r requirements.txt", warn=True)
-
     print("\nsummary:", "ready" if ok else "some required items missing (see MISSING above)")
     return 0 if ok else 1
 
@@ -662,52 +649,6 @@ def cmd_flow(args):
     return 0
 
 
-def cmd_stress(args):
-    """TandemKit stress lane: Trio on the simulator against faketandem, with chaos (harness/stress/)."""
-    if args.sub == "run":
-        from .stress.lane import cmd_run
-        return cmd_run(args)
-    if args.sub == "file-issues":
-        from .stress.issues import cmd_file_issues
-        return cmd_file_issues(args)
-    if args.sub == "scan":
-        from .stress.detect import crash_finding, parse_ips, sample_finding, scan_stderr
-        found = []
-        for name in args.files:
-            p = Path(name)
-            crash = parse_ips(p) if p.suffix == ".ips" else None
-            text = p.read_text(errors="replace")
-            found += [crash_finding(crash)] if crash else (
-                [sample_finding(text, what=p.name)] if "Call graph:" in text else scan_stderr(text))
-        seen: dict[str, list] = {}
-        for f in found:
-            seen.setdefault(f.fp, [f, 0])[1] += 1
-        for f, n in seen.values():
-            print(f"{f.fp}  {n:>3}x  {f.kind:<11} {f.component:<9} {f.title}")
-            if args.verbose:
-                print("    " + "\n    ".join(f.signature))
-        return 1 if found else 0
-    if args.sub == "faketandem":
-        import os as _os
-        import time as _time
-        from .faketandem import DEFAULT_PAIRING_CODE, Faketandem
-        fk = Faketandem.prepare(args.ref)
-        with fk.start(Path(args.log)) as pump:
-            print(f"faketandem GATT {pump.gatt_addr}  API {pump.api_url}  (log {args.log})")
-            if args.paired:
-                key = _os.urandom(32)
-                hello = pump.stage_paired_pump(key, DEFAULT_PAIRING_CODE)
-                print(f"paired: peripheral {hello['peripheral_id'].upper()}  long-term key {key.hex()}")
-            print(f"TANDEMKIT_VIRTUAL_PUMP={pump.gatt_addr}   (Ctrl-C stops it)")
-            try:
-                while pump.alive():
-                    _time.sleep(1)
-            except KeyboardInterrupt:
-                pass
-        return 0
-    raise HarnessError(f"unknown stress command {args.sub}")
-
-
 def cmd_test(args):
     """Smoke test: launch Trio, get to the home screen, add fake CGM + pump, screenshot everything."""
     from .flows import trio as F
@@ -907,21 +848,6 @@ def build_parser() -> argparse.ArgumentParser:
     for name in ("onboarding-walk", "add-cgm-sim", "add-pump-sim", "back-home", "dismiss", "settle", "at-home"):
         x = fls.add_parser(name); x.add_argument("--run")
     fl.set_defaults(fn=cmd_flow)
-
-    sr = sp.add_parser("stress", help="TandemKit stress lane: Trio on the simulator against faketandem, with chaos")
-    srs = sr.add_subparsers(dest="sub", required=True)
-    from .stress.lane import add_run_arguments
-    add_run_arguments(srs.add_parser("run", help="checkout + build + chaos rounds + recovery checks until a deadline"))
-    fi = srs.add_parser("file-issues", help="one GitHub issue per distinct finding of a run (deduplicated)")
-    fi.add_argument("run_dir"); fi.add_argument("--repo", help="owner/repo (default $GITHUB_REPOSITORY)")
-    fi.add_argument("--kinds", help="only these finding kinds, comma-separated")
-    fi.add_argument("--dry-run", action="store_true", help="print the issues instead of filing them")
-    sc = srs.add_parser("scan", help="findings in sanitizer output, crash reports (.ips) or `sample` output files")
-    sc.add_argument("files", nargs="+"); sc.add_argument("-v", "--verbose", action="store_true")
-    fkp = srs.add_parser("faketandem", help="run faketandem in the foreground (manual testing with the virtual pump)")
-    fkp.add_argument("--ref"); fkp.add_argument("--paired", action="store_true", help="stage a random long-term key")
-    fkp.add_argument("--log", default=str(CONFIG.build_dir / "faketandem.log"))
-    sr.set_defaults(fn=cmd_stress)
 
     te = sp.add_parser("test", help="end-to-end smoke test on the installed build")
     te.add_argument("kind", choices=["smoke"]); te.add_argument("--name"); te.add_argument("--no-preseed", dest="preseed", action="store_false")
