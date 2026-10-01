@@ -74,13 +74,6 @@ blob hash (`stabilize_mtimes` in `harness/build.py`): identical content always c
 real changes reach the compiler, and a changed file (a different blob) still gets a different mtime. Files with
 uncommitted changes keep their real mtime. `TH_STABLE_MTIMES=0` turns it off; `--clean` still wipes DerivedData.
 
-Used as a library: [jwoglom/tandemkit-stress](https://github.com/jwoglom/tandemkit-stress) (the TandemKit stress lane)
-carries this repository as a submodule and calls `harness.build.prepare_source` / `build`, `harness.sim`, `harness.wda`
-and `harness.flows.trio` directly. `build()`'s `conditions` (extra Swift compilation conditions such as
-`TANDEMKIT_VIRTUAL_PUMP`), `sanitizer` (thread/address, set for the iOS simulator SDK only since Trio embeds a watchOS
-app), `timeout` (raises `BuildTimeout`) and `save=False` (leaves `build/last-build.json` alone) exist for it; keep them
-working when changing the build.
-
 ## Setup
 
 ```
