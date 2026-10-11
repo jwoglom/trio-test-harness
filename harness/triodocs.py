@@ -1,4 +1,5 @@
-"""`th docs`: search and read the Trio documentation at https://triodocs.org (a MkDocs site), as plain text.
+"""`th docs`: search and read the app's documentation, as plain text: Trio's at https://triodocs.org, or with
+--app loop LoopDocs at https://loopkit.github.io/loopdocs/ (both MkDocs sites).
 
     th docs search "maximum bolus"          # best-matching sections: title, page, link, snippet
     th docs toc                             # every page, as a tree by URL
@@ -6,9 +7,10 @@
     th docs page https://triodocs.org/configuration/new-user-setup/#onboarding-wizard   # one section
 
 No browser: the site's own search index (search/search_index.json: every section's title and text), its sitemap
-(sitemap.xml) and each page's HTML article, fetched over HTTPS and cached for a day under runs/.tmp/triodocs/.
-Use it to find where a setting or option lives in Trio (which screen, what it is called, what it does) before
-looking for it in the app.
+(sitemap.xml) and each page's HTML article, fetched over HTTPS and cached for a day under runs/.tmp/<site>/.
+Use it to find where a setting or option lives in the app (which screen, what it is called, what it does) before
+looking for it there. Paths are relative to the site (LoopDocs' operation/features/ is
+https://loopkit.github.io/loopdocs/operation/features/).
 """
 from __future__ import annotations
 
@@ -29,13 +31,32 @@ CACHE = REPO_ROOT / "runs" / ".tmp" / "triodocs"
 TTL = 24 * 3600
 
 
+def _base() -> str:
+    """The current app's docs site (harness/apps.py), ending in /."""
+    from . import apps
+    return apps.current().docs_url
+
+
+def _cache() -> Path:
+    base = _base()
+    return CACHE if base == BASE else CACHE.parent / (urlparse(base).path.strip("/") or urlparse(base).netloc)
+
+
+def _rel(url_path: str) -> str:
+    """A URL path on the docs site, relative to the site (LoopDocs lives under /loopdocs/)."""
+    prefix = urlparse(_base()).path
+    return url_path[len(prefix):] if url_path.startswith(prefix) else url_path.lstrip("/")
+
+
 def _get(path: str, *, ttl: int = TTL) -> str:
-    """GET BASE+path (or an absolute triodocs.org URL), cached; a stale cache is used if the site is unreachable."""
-    url = urljoin(BASE, path)
-    if urlparse(url).netloc != urlparse(BASE).netloc:
-        raise HarnessError(f"{url}: only {BASE} pages")
-    key = re.sub(r"[^\w.-]+", "_", urlparse(url).path.strip("/") or "index") + ".cache"
-    f = CACHE / key
+    """GET the site's path (or an absolute URL on the site), cached; a stale cache is used if the site is unreachable."""
+    base = _base()
+    url = urljoin(base, path)
+    if urlparse(url).netloc != urlparse(base).netloc:
+        raise HarnessError(f"{url}: only {base} pages")
+    key = re.sub(r"[^\w.-]+", "_", _rel(urlparse(url).path).strip("/") or "index") + ".cache"
+    cache = _cache()
+    f = cache / key
     if f.exists() and time.time() - f.stat().st_mtime < ttl:
         return f.read_text()
     try:
@@ -48,7 +69,7 @@ def _get(path: str, *, ttl: int = TTL) -> str:
         code = getattr(e, "code", None)
         raise HarnessError(f"{url}: " + (f"HTTP {code}" if code else str(e))
                            + (" (no such page; see `th docs toc`)" if code == 404 else "")) from None
-    CACHE.mkdir(parents=True, exist_ok=True)
+    cache.mkdir(parents=True, exist_ok=True)
     f.write_text(text)
     return text
 
@@ -108,7 +129,7 @@ def search(query: str, limit: int = 10) -> list[dict]:
         start = max(0, at - 80)
         snippet = ("…" if start else "") + text[start:start + 240] + ("…" if start + 240 < len(text) else "")
         page = d["location"].partition("#")[0]
-        out.append({"title": d["title"], "page": titles.get(page, page or "Home"), "url": urljoin(BASE, d["location"]),
+        out.append({"title": d["title"], "page": titles.get(page, page or "Home"), "url": urljoin(_base(), d["location"]),
                     "snippet": snippet, "score": score})
     return out
 
@@ -120,7 +141,7 @@ def toc() -> list[tuple[int, str, str]]:
     titles = _page_titles(index())
     rows = []
     for u in locs:
-        path = urlparse(u).path.lstrip("/")
+        path = _rel(urlparse(u).path)
         depth = path.rstrip("/").count("/") + (1 if path else 0)
         rows.append((depth, titles.get(path, path.rstrip("/").rsplit("/", 1)[-1] or "Home"), path))
     rows.sort(key=lambda r: [p for p in r[2].rstrip("/").split("/")])
@@ -251,18 +272,19 @@ class _Text(HTMLParser):
 
 
 def page(ref: str) -> str:
-    """A page (path or triodocs.org URL; a #anchor keeps only that section) as text, with its URL on top."""
+    """A page (path or a URL on the docs site; a #anchor keeps only that section) as text, with its URL on top."""
     ref = ref.strip()
+    base = _base()
     if ref.startswith("http"):
         u = urlparse(ref)
-        if u.netloc != urlparse(BASE).netloc:
-            raise HarnessError(f"{ref}: only {BASE} pages")
-        path, anchor = u.path.lstrip("/"), u.fragment
+        if u.netloc != urlparse(base).netloc:
+            raise HarnessError(f"{ref}: only {base} pages")
+        path, anchor = _rel(u.path), u.fragment
     else:
         path, _, anchor = ref.lstrip("/").partition("#")
     if path and not path.endswith("/") and not path.endswith(".html"):
         path += "/"
-    url = urljoin(BASE, path)
+    url = urljoin(base, path)
     p = _Text(url)
     p.feed(_get(path))
     text = p.text()

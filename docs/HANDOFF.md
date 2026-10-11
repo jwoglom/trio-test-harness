@@ -76,6 +76,30 @@ macOS iPhone Mirroring using phone-harness; driver written and window capture ve
 - Onboarding walk fully unattended on the phone: the iOS alert "Allow" and the "Next" under a dimmed alert are now handled
   (isolated-word OCR, banded passes, alerts checked before Next) but that exact combination has not been re-run end to end.
 
+## Loop (`--app loop`, added 2026-10-11): nothing has run on a Mac yet
+Written from Loop's source (LoopKit/Loop dev, LoopOnboarding, LoopKit's MockKit) and checked offline only: argument
+parsing, the generated `build/override-loop-*.xcconfig`, `prepare_source` on a LoopWorkspace clone, PR resolution (a
+TandemKit or LoopKit/Loop PR finds LoopKit/LoopWorkspace `feat/tandem-closed-beta`, also from a fork's checkout), `th docs`
+against LoopDocs, and `ci/inputs.py`. To verify, in order, on the simulator first (`./trio-test-e2e --app loop --mode
+simulator --branch feat/tandem-closed-beta`):
+- The build: `LoopWorkspace` scheme with `-xcconfig build/override-loop-sim.xcconfig` and ad hoc signing; that the app is
+  `com.TRIOSIMTST.loopkit.Loop` with the app group `group.com.TRIOSIMTST.loopkit.LoopGroup` (`th sim container`), and that
+  Loop's watch app and plugins build under the harness's Xcode (LoopWorkspace's own CI uses a newer one).
+- Pre-seeding: that after `reset_after_install` and `preseed_simulator` Loop opens past onboarding with the mock therapy
+  settings (Settings ▸ Therapy Settings), i.e. that restarting the simulator's `cfprefsd` (children of its `launchd_sim`)
+  makes Loop read the plist written into the app group.
+- The prompts after onboarding (notifications, Apple Health's "Turn On All" + "Allow", Bluetooth): whether WebDriverAgent's
+  tree shows them, and whether `at_home`'s blocker check sees them over the home screen.
+- `walk_onboarding` from a fresh install (`--onboarding walk`): the logo's position between the title and the text, and
+  that a 3 s press skips onboarding.
+- Adding the CGM Simulator and Pump Simulator from the HUD (and through Settings on a retry), and `give_cgm_glucose`
+  (the sine-curve model written into `Documents/CGMManagerState.plist`, then a relaunch).
+- The phone (`--mode rooted-vnc`): fake-signing with Loop's entitlements (`$(APP_GROUP_IDENTIFIER)`, HealthKit, Siri,
+  NFC, time-sensitive notifications) under AppSync, the OCR-only home detection (chart titles; the toolbar is icons) and
+  the HUD's "Add CGM" / "Add Pump" found by OCR.
+- CI (`./trio-test-ci --app loop`): a LoopWorkspace clone and its submodules on the workers (no LoopWorkspace mirror is
+  assumed), and the agent with `ci/agent-prompt-loop.md`.
+
 ## Earlier checklist (kept for reference; most items are now done)
 0. **Install both simulator runtimes**: `th sim install-runtime` (iOS) **and** `th sim install-runtime --platform watchOS`.
    Verified on 2026-09-19: with the harness flags, `xcodebuild -resolvePackageDependencies` for Trio succeeds, and the build

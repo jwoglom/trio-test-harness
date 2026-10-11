@@ -122,6 +122,29 @@ class SimulatorDriver(Driver):
     def app_data_container(self, bundle_id: str) -> Path:
         return xcode.app_container(self.udid, bundle_id, "data")
 
+    def app_group_containers(self, bundle_id: str) -> dict[str, Path]:
+        """App group id -> its container. The simulator keeps these across reinstalls of the app."""
+        cp = self._simctl(["get_app_container", self.udid, bundle_id, "groups"], check=False, quiet=True)
+        return {parts[0]: Path(parts[1].strip()) for line in cp.stdout.splitlines()
+                if len(parts := line.split(None, 1)) == 2}
+
+    def drop_preferences_cache(self) -> list[str]:
+        """Restart the simulator's cfprefsd so UserDefaults written as plist files behind its back are read: it answers
+        from memory. The device's launchd_sim starts them again on demand. Returns the pids stopped."""
+        import os
+        import signal
+        killed = []
+        for parent in run(["pgrep", "-f", f"launchd_sim.*{self.udid}"], check=False, quiet=True).stdout.split():
+            for pid in run(["pgrep", "-P", parent, "cfprefsd"], check=False, quiet=True).stdout.split():
+                try:
+                    os.kill(int(pid), signal.SIGKILL)
+                    killed.append(pid)
+                except (ProcessLookupError, ValueError):
+                    pass
+        if not killed:
+            log(f"found no cfprefsd under launchd_sim for {self.udid}: preferences written as files may not be read")
+        return killed
+
     def defaults_write(self, bundle_id: str, key: str, value: str, vtype: str = "-string") -> None:
         self._simctl(["spawn", self.udid, "defaults", "write", bundle_id, key, vtype, value])
 

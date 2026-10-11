@@ -1,12 +1,13 @@
 """Turn the e2e workflow's inputs into trio-test-e2e arguments.
 
-    IN_TRIO="<Trio PR or branch>" IN_SUBMODULES="<PR links or NAME@branch ...>" IN_CHERRY_PICK="<PRs, shas, A..B, branches>" \
-        python ci/inputs.py ARGS_FILE
+    IN_APP=trio|loop IN_TRIO="<PR or branch of the app's repo>" IN_SUBMODULES="<PR links or NAME@branch ...>" \
+        IN_CHERRY_PICK="<PRs, shas, A..B, branches>" python ci/inputs.py ARGS_FILE
 
 Writes one argument per line to ARGS_FILE and prints `pr=` / `pr_owner=` lines for $GITHUB_OUTPUT.
-The PR that trio-test-e2e is pointed at (and that a comment would go to) is the Trio PR if one was
-given, else the first submodule PR (else the first cherry-picked PR, for the comment only); a Trio branch next to a submodule PR becomes --trio-branch. Each cherry-pick item
-becomes --cherry-pick (applied in order onto the Trio that is checked out; see harness/build.py cherry_pick).
+IN_TRIO names the app's own repo: nightscout/Trio, or LoopKit/LoopWorkspace with IN_APP=loop (`--app loop`).
+The PR that trio-test-e2e is pointed at (and that a comment would go to) is that repo's PR if one was
+given, else the first submodule PR (else the first cherry-picked PR, for the comment only); a branch next to a submodule PR becomes --trio-branch. Each cherry-pick item
+becomes --cherry-pick (applied in order onto the commit that is checked out; see harness/build.py cherry_pick).
 """
 from __future__ import annotations
 
@@ -28,10 +29,14 @@ class InputError(ValueError):
     pass
 
 
-def pr_owner(ref: str) -> str | None:
-    """Owner of a PR reference, or None if it is not one. A bare number means nightscout/Trio."""
+APP_OWNERS = {"trio": "nightscout", "loop": "LoopKit"}
+
+
+def pr_owner(ref: str, app: str = "trio") -> str | None:
+    """Owner of a PR reference, or None if it is not one. A bare number is a PR on the app's repo (nightscout/Trio,
+    LoopKit/LoopWorkspace)."""
     if ref.isdigit():
-        return "nightscout"
+        return APP_OWNERS[app]
     m = PR_URL.match(ref) or PR_SHORT.match(ref)
     return m.group(1) if m else None
 
@@ -45,12 +50,17 @@ def _as_sub(token: str) -> str:
     return f"{m.group(1)}@{m.group(2)}" if m else token
 
 
-def plan(trio: str, submodules: str, cherry_pick: str = "", submodule_cherry_pick: str = "") -> tuple[list[str], str | None]:
+def plan(trio: str, submodules: str, cherry_pick: str = "", submodule_cherry_pick: str = "",
+         app: str = "trio") -> tuple[list[str], str | None]:
+    app = (app or "trio").strip().lower()
+    if app not in APP_OWNERS:
+        raise InputError(f"app {app!r}: use {' or '.join(APP_OWNERS)}")
+    name = "Trio" if app == "trio" else "LoopWorkspace"
     trio = trio.strip()
     picks = [t for t in re.split(r"[\s,]+", cherry_pick.strip()) if t]
     for t in picks:
         if not (t.isdigit() or pr_owner(t) or PICK_RANGE.match(t) or BRANCH.match(t) or GH_LINK.match(t)):
-            raise InputError(f"cherry-pick {t!r}: use a Trio PR (link, owner/repo#N, number), a commit sha, A..B, "
+            raise InputError(f"cherry-pick {t!r}: use a {name} PR (link, owner/repo#N, number), a commit sha, A..B, "
                              "or a branch")
     sub_picks = [_as_sub(t) for t in re.split(r"[\s,]+", submodule_cherry_pick.strip()) if t]
     for t in sub_picks:
@@ -69,15 +79,15 @@ def plan(trio: str, submodules: str, cherry_pick: str = "", submodule_cherry_pic
         else:
             raise InputError(f"submodule {t!r}: use a PR link, owner/repo#N, NAME@branch or owner/repo@branch")
 
-    args: list[str] = []
+    args: list[str] = [] if app == "trio" else ["--app", app]
     primary = None
-    if trio and pr_owner(trio):
+    if trio and pr_owner(trio, app):
         primary = trio
         args += ["--pr", trio]
         rest = sub_prs
     elif trio:
         if not (BRANCH.match(trio) or GH_LINK.match(trio)):
-            raise InputError(f"Trio {trio!r}: not a PR reference or a branch name")
+            raise InputError(f"{name} {trio!r}: not a PR reference or a branch name")
         if sub_prs:
             primary, rest = sub_prs[0], sub_prs[1:]
             args += ["--pr", primary, "--trio-branch", trio]
@@ -96,13 +106,16 @@ def plan(trio: str, submodules: str, cherry_pick: str = "", submodule_cherry_pic
         args += ["--submodule-cherry-pick", t]
     # a branch with a cherry-picked PR on top is a test of that PR: it gets the comment
     primary = primary or next((t for t in picks + sub_picks if pr_owner(t)), None)
+    if primary and primary.isdigit() and app != "trio":
+        primary = f"{APP_OWNERS[app]}/{name}#{primary}"
     return args, primary
 
 
 def main() -> int:
     try:
         args, primary = plan(os.environ.get("IN_TRIO", ""), os.environ.get("IN_SUBMODULES", ""),
-                             os.environ.get("IN_CHERRY_PICK", ""), os.environ.get("IN_SUBMODULE_CHERRY_PICK", ""))
+                             os.environ.get("IN_CHERRY_PICK", ""), os.environ.get("IN_SUBMODULE_CHERRY_PICK", ""),
+                             os.environ.get("IN_APP", "") or "trio")
     except InputError as e:
         print(f"::error::{e}")
         return 1

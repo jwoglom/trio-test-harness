@@ -1,5 +1,6 @@
-"""Check out a Trio branch / PR (optionally with submodule overrides), and build it
-for the iOS Simulator or a physical iPhone.
+"""Check out a branch / PR of the app under test (Trio, or Loop's LoopWorkspace; harness/apps.py), optionally with
+submodule overrides, and build it for the iOS Simulator or a physical iPhone. `app=` (a key or an apps.App) picks the
+app; the default is apps.current().
 
 Simulator builds need no Apple credentials (ad-hoc signing, same as Trio CI).
 Device builds either:
@@ -21,25 +22,32 @@ from pathlib import Path
 
 from .config import CONFIG, REPO_ROOT
 from .util import HarnessError, log, run, write_json, read_json
-from . import xcode
+from . import apps, xcode
 
-DEFAULT_GH_REPO = "nightscout/Trio"
-LAST_BUILD = REPO_ROOT / "build" / "last-build.json"
-
-
-def checkout_dir() -> Path:
-    """The Trio checkout the harness builds from: $TRIO_REPO, default <harness>/Trio (gitignored)."""
-    return Path(CONFIG.get("TRIO_REPO")).expanduser().resolve()
+DEFAULT_GH_REPO = apps.TRIO.default_repo
+LAST_BUILD = apps.TRIO.last_build
 
 
-def ensure_checkout(dest: Path | None = None) -> Path:
-    """Clone Trio into the checkout dir if it is missing (fast local reference clone when TH_TRIO_REFERENCE exists)."""
-    dest = dest or checkout_dir()
+def _app(app: "str | apps.App | None") -> apps.App:
+    return app if isinstance(app, apps.App) else apps.get(app) if app else apps.current()
+
+
+def checkout_dir(app: "str | apps.App | None" = None) -> Path:
+    """The checkout the harness builds from: $TRIO_REPO (default <harness>/Trio) or $LOOP_REPO (<harness>/LoopWorkspace),
+    both gitignored."""
+    return _app(app).checkout
+
+
+def ensure_checkout(dest: Path | None = None, app: "str | apps.App | None" = None) -> Path:
+    """Clone the app's repo into the checkout dir if it is missing (fast local reference clone when its reference
+    clone, TH_TRIO_REFERENCE / TH_LOOP_REFERENCE, exists)."""
+    a = _app(app)
+    dest = dest or a.checkout
     if (dest / ".git").exists():
         return dest
-    ref = Path(CONFIG.get("TH_TRIO_REFERENCE")).expanduser()
-    origin = CONFIG.get("TH_TRIO_ORIGIN")
-    url = _gh_repo_url(origin or DEFAULT_GH_REPO)
+    ref = Path(CONFIG.get(a.reference_key)).expanduser()
+    origin = CONFIG.get(a.origin_key)
+    url = _gh_repo_url(origin or a.default_repo)
     cmd = ["clone", "--no-checkout"]
     # A working clone or a bare mirror (CI workers keep one of nightscout/Trio) both work as a reference.
     if (ref / ".git").exists() or (ref / "HEAD").exists() and (ref / "objects").is_dir():
@@ -52,11 +60,11 @@ def ensure_checkout(dest: Path | None = None) -> Path:
         if not (ref / ".git").exists():
             cmd.append("--dissociate")  # a shared mirror: do not depend on it after the clone
     dest.parent.mkdir(parents=True, exist_ok=True)
-    log(f"cloning Trio into {dest} (origin {url})")
+    log(f"cloning {a.name} into {dest} (origin {url})")
     _git([*cmd, url, str(dest)], REPO_ROOT, timeout=1800)
     remotes = _git(["remote"], dest, quiet=True).stdout.split()
-    if "upstream" not in remotes and url != _gh_repo_url(DEFAULT_GH_REPO):
-        _git(["remote", "add", "upstream", _gh_repo_url(DEFAULT_GH_REPO)], dest, check=False)
+    if "upstream" not in remotes and url != _gh_repo_url(a.default_repo):
+        _git(["remote", "add", "upstream", _gh_repo_url(a.default_repo)], dest, check=False)
     return dest
 
 
@@ -89,14 +97,17 @@ class BuildInfo:
     git: dict = field(default_factory=dict)
     xcode: str = ""
     scheme: str = ""
+    app: str = "trio"
 
     def save(self) -> None:
-        LAST_BUILD.parent.mkdir(parents=True, exist_ok=True)
-        write_json(LAST_BUILD, asdict(self))
+        path = apps.get(self.app).last_build
+        path.parent.mkdir(parents=True, exist_ok=True)
+        write_json(path, asdict(self))
 
     @classmethod
-    def load(cls) -> "BuildInfo | None":
-        d = read_json(LAST_BUILD)
+    def load(cls, app: "str | apps.App | None" = None) -> "BuildInfo | None":
+        """The last build of `app` (default: the current app)."""
+        d = read_json(_app(app).last_build)
         return cls(**d) if d else None
 
 
@@ -178,9 +189,9 @@ def link_as_spec(spec: str) -> str:
 
 
 def split_branch_spec(spec: str, src: Path) -> tuple[str, str]:
-    """A Trio branch spec -> (remote name or fetch URL, branch).
+    """A branch spec -> (remote name or fetch URL, branch).
 
-      feat/x                                  origin (falls back to nightscout/Trio if origin lacks it)
+      feat/x                                  origin (falls back to the app's upstream repo if origin lacks it)
       upstream:feat/x   upstream@feat/x       a remote of the checkout (origin, upstream, ...)
       owner/repo:feat/x owner/repo@feat/x     that GitHub repo
       <git URL>#feat/x                        any repo
@@ -206,12 +217,13 @@ def split_branch_spec(spec: str, src: Path) -> tuple[str, str]:
     return "origin", spec
 
 
-def _fetch_trio_branch(src: Path, br: str, ref: str) -> str:
-    """Fetch Trio branch spec `br` (see split_branch_spec) into `ref`. Returns the remote/URL it came from.
+def _fetch_trio_branch(src: Path, br: str, ref: str, app: "str | apps.App | None" = None) -> str:
+    """Fetch branch spec `br` (see split_branch_spec) of the app's repo into `ref`. Returns the remote/URL it came from.
 
-    A bare name comes from origin, else from upstream / nightscout/Trio: origin is often a fork (jwoglom/Trio) that
-    does not carry every upstream branch (e.g. feat/tandem-closed-beta).
+    A bare name comes from origin, else from upstream / the app's repo (nightscout/Trio, LoopKit/LoopWorkspace): origin
+    is often a fork (jwoglom/Trio) that does not carry every upstream branch (e.g. feat/tandem-closed-beta).
     """
+    upstream_repo = _app(app).default_repo
     url, name = split_branch_spec(br, src)
     if (url, name) != ("origin", br):
         _git(["fetch", "--force", url, f"+{name}:{ref}"], src, timeout=900)
@@ -221,16 +233,16 @@ def _fetch_trio_branch(src: Path, br: str, ref: str) -> str:
         return "origin"
     out = (cp.stderr or "") + (cp.stdout or "")
     origin = _origin_url(src)
-    if "couldn't find remote ref" not in out or _gh_slug(origin) == DEFAULT_GH_REPO.lower():
+    if "couldn't find remote ref" not in out or _gh_slug(origin) == upstream_repo.lower():
         raise HarnessError(f"git fetch origin {br} failed:\n{out[-2000:]}")
-    upstream = "upstream" if "upstream" in _git(["remote"], src, quiet=True).stdout.split() else _gh_repo_url(DEFAULT_GH_REPO)
-    log(f"branch {br} is not on origin ({_gh_slug(origin)}); fetching it from {DEFAULT_GH_REPO}")
+    upstream = "upstream" if "upstream" in _git(["remote"], src, quiet=True).stdout.split() else _gh_repo_url(upstream_repo)
+    log(f"branch {br} is not on origin ({_gh_slug(origin)}); fetching it from {upstream_repo}")
     _git(["fetch", "--force", upstream, f"+{br}:{ref}"], src, timeout=900)
-    return DEFAULT_GH_REPO
+    return upstream_repo
 
 
-def resolve_pr(pr: str) -> tuple[str, int]:
-    """'123' | 'owner/repo#123' | GitHub PR URL -> (owner/repo, number)."""
+def resolve_pr(pr: str, app: "str | apps.App | None" = None) -> tuple[str, int]:
+    """'123' | 'owner/repo#123' | GitHub PR URL -> (owner/repo, number). A bare number is a PR on the app's repo."""
     m = re.match(r"https://github\.com/([^/]+/[^/]+)/pull/(\d+)", pr)
     if m:
         return m.group(1), int(m.group(2))
@@ -238,7 +250,8 @@ def resolve_pr(pr: str) -> tuple[str, int]:
     if m:
         return m.group(1), int(m.group(2))
     if pr.isdigit():
-        return CONFIG.get("TH_DEFAULT_GH_REPO", DEFAULT_GH_REPO), int(pr)
+        a = _app(app)
+        return (CONFIG.get("TH_DEFAULT_GH_REPO") if a.key == "trio" else "") or a.default_repo, int(pr)
     raise HarnessError(f"cannot parse PR reference {pr!r}")
 
 
@@ -258,7 +271,7 @@ def submodule_override(spec: str, src: Path) -> SubmoduleOverride:
             # owner/repo@ref names the repo: a fork's branch or commit is fetched from that fork
             same = _gh_slug(m.get("url", "")) == _gh_slug(_gh_repo_url(slug))
             return SubmoduleOverride(name, ref, None if pr or same else _gh_repo_url(slug))
-    raise HarnessError(f"{slug} is not a submodule of this Trio checkout ({', '.join(sorted(mods)) or 'none'})")
+    raise HarnessError(f"{slug} is not a submodule of the checkout at {src} ({', '.join(sorted(mods)) or 'none'})")
 
 
 def _parse_gitmodules(text: str) -> dict[str, dict]:
@@ -312,15 +325,19 @@ def _repo_name(url_or_slug: str) -> str:
     return re.sub(r"\.git$", "", url_or_slug.rstrip("/").rsplit("/", 1)[-1]).lower()
 
 
-def resolve_pr_target(pr: str, src: Path, trio_branch: str | None = None) -> dict:
-    """Classify a PR: Trio itself, or one of Trio's submodules (found via .gitmodules on candidate Trio branches).
+def resolve_pr_target(pr: str, src: Path, trio_branch: str | None = None, app: "str | apps.App | None" = None) -> dict:
+    """Classify a PR: the app's own repo (Trio, LoopWorkspace), or one of its submodules (found via .gitmodules on
+    candidate branches of the app's repo; `trio_branch` is --trio-branch, whichever app). Loop itself is a submodule
+    of LoopWorkspace.
 
-    Returns {"kind": "trio"|"submodule", "slug", "number", "submodule"?: name, "trio_branch"?: branch}.
+    Returns {"kind": "trio"|"submodule", "slug", "number", "submodule"?: name, "trio_branch"?: branch}; "trio" means
+    the app's own repo.
     """
-    slug, num = resolve_pr(pr)
-    if _repo_name(slug) == "trio":
+    a = _app(app)
+    slug, num = resolve_pr(pr, a)
+    if _repo_name(slug) == a.repo_name:
         return {"kind": "trio", "slug": slug, "number": num}
-    candidates = [b for b in [trio_branch, CONFIG.get("TH_TRIO_BASE_BRANCH"), "dev", "feat/tandem", "main"] if b]
+    candidates = [b for b in [trio_branch, a.base_branch, *a.submodule_branches] if b]
     _git(["fetch", "--quiet", "origin"], src, timeout=900, check=False)
     seen = []
     for br in candidates:
@@ -328,10 +345,10 @@ def resolve_pr_target(pr: str, src: Path, trio_branch: str | None = None) -> dic
             continue
         seen.append(br)
         cp = _git(["show", f"origin/{br}:.gitmodules"], src, check=False, quiet=True)
-        if cp.returncode != 0 and br == trio_branch:
-            # asked for by name: it may be an upstream-only branch (origin is a fork)
+        if cp.returncode != 0 and br in (trio_branch, a.base_branch):
+            # asked for by name, or the base branch: it may be an upstream-only branch (origin is a fork)
             try:
-                _fetch_trio_branch(src, br, "refs/th/trio-branch")
+                _fetch_trio_branch(src, br, "refs/th/trio-branch", a)
                 cp = _git(["show", "refs/th/trio-branch:.gitmodules"], src, check=False, quiet=True)
             except HarnessError:
                 pass
@@ -340,7 +357,7 @@ def resolve_pr_target(pr: str, src: Path, trio_branch: str | None = None) -> dic
         for name, m in _parse_gitmodules(cp.stdout).items():
             if _repo_name(m.get("url", "")) == _repo_name(slug):
                 return {"kind": "submodule", "slug": slug, "number": num, "submodule": name, "trio_branch": br}
-    raise HarnessError(f"{slug} is not Trio and no submodule with that repo was found on branches {seen}; "
+    raise HarnessError(f"{slug} is not {a.default_repo} and no submodule with that repo was found on branches {seen}; "
                        "pass --trio-branch <branch that contains the submodule>")
 
 
@@ -349,9 +366,9 @@ PICK_ENV = {"GIT_COMMITTER_NAME": "trio-test-harness", "GIT_COMMITTER_EMAIL": "t
 
 
 
-CHERRY_PICK_HELP = ("commits to cherry-pick onto the Trio checkout, in order (repeatable): a Trio PR (link, owner/repo#N, "
-                    "number) = its own commits; a commit sha; a range A..B; or a branch (feat/x, remote:feat/x, "
-                    "owner/repo:feat/x) = its commits that are on neither the checkout nor the base branch")
+CHERRY_PICK_HELP = ("commits to cherry-pick onto the app's checkout (Trio, LoopWorkspace), in order (repeatable): a PR on "
+                    "it (link, owner/repo#N, number) = its own commits; a commit sha; a range A..B; or a branch (feat/x, "
+                    "remote:feat/x, owner/repo:feat/x) = its commits that are on neither the checkout nor the base branch")
 
 
 _PR_META: dict[str, dict] = {}
@@ -369,13 +386,14 @@ def _pr_own_commits(repo: Path, slug: str, num: str, ref: str) -> list[str]:
     return cp.stdout.split()
 
 
-def _pick_commits(src: Path, spec: str, n: int) -> tuple[list[str], str]:
+def _pick_commits(src: Path, spec: str, n: int, app: "str | apps.App | None" = None) -> tuple[list[str], str]:
     """One --cherry-pick spec -> (commits to apply, oldest first; a description)."""
+    a = _app(app)
     spec = spec.strip()
     ref = f"refs/th/pick-{n}"
     pr = re.match(r"^(?:https://github\.com/([\w.-]+/[\w.-]+)/pull/(\d+)/?|([\w.-]+/[\w.-]+)#(\d+)|(\d{1,6}))$", spec)
     if pr:
-        slug = pr.group(1) or pr.group(3) or CONFIG.get("TH_DEFAULT_GH_REPO", DEFAULT_GH_REPO)
+        slug = pr.group(1) or pr.group(3) or resolve_pr(pr.group(5), a)[0]
         num = pr.group(2) or pr.group(4) or pr.group(5)
         try:
             meta = json.loads(run(["gh", "pr", "view", num, "--repo", slug, "--json", "title,url,body"],
@@ -402,11 +420,11 @@ def _pick_commits(src: Path, spec: str, n: int) -> tuple[list[str], str]:
         sha = _git(["rev-parse", f"{spec}^{{commit}}"], src, quiet=True).stdout.strip()
         return [sha], f"commit {spec}"
     # a branch: its own commits, i.e. those neither on the checkout nor on the base branch it grew from
-    _fetch_trio_branch(src, spec, ref)
-    base = CONFIG.get("TH_TRIO_BASE_BRANCH") or "dev"
+    _fetch_trio_branch(src, spec, ref, a)
+    base = a.base_branch
     excl = ["^HEAD"]
     try:
-        _fetch_trio_branch(src, base, f"{ref}-base")
+        _fetch_trio_branch(src, base, f"{ref}-base", a)
         excl.append(f"^{ref}-base")
     except HarnessError:
         pass
@@ -454,13 +472,13 @@ def _apply_picks(repo: Path, commits: list[str], spec: str, what: str, start: st
             "dropped": len(commits) - applied, **({"pr": _PR_META[spec]} if spec in _PR_META else {})}
 
 
-def cherry_pick(src: Path, specs: list[str]) -> list[dict]:
-    """Apply each --cherry-pick spec onto the Trio checkout's HEAD, in order. Commits already there are dropped; a
+def cherry_pick(src: Path, specs: list[str], app: "str | apps.App | None" = None) -> list[dict]:
+    """Apply each --cherry-pick spec onto the checkout's HEAD, in order. Commits already there are dropped; a
     conflict stops the build with the commit and files named, and leaves the checkout at the commit it started from."""
     start = _git(["rev-parse", "HEAD"], src, quiet=True).stdout.strip()
     out = []
     for n, spec in enumerate(specs, 1):
-        commits, what = _pick_commits(src, spec, n)
+        commits, what = _pick_commits(src, spec, n, app)
         out.append(_apply_picks(src, commits, spec, what, start))
     return out
 
@@ -479,7 +497,7 @@ def _find_submodule(src: Path, key: str) -> str:
     for name, m in mods.items():
         if name.lower() == k or m.get("path", "").lower() == k or _repo_name(m.get("url", "")) == _repo_name(k):
             return m.get("path") or name
-    raise HarnessError(f"{key} is not a submodule of this Trio checkout ({', '.join(sorted(mods)) or 'none'})")
+    raise HarnessError(f"{key} is not a submodule of the checkout at {src} ({', '.join(sorted(mods)) or 'none'})")
 
 
 def _remote_default_branch(repo: Path, url: str) -> str | None:
@@ -668,31 +686,34 @@ def prepare_source(*, branch: str | None = None, pr: str | None = None, repo: st
                    in_place: Path | None = None, submodules: list[str] | None = None,
                    fetch: bool = True, trio_branch: str | None = None,
                    cherry_picks: list[str] | None = None,
-                   submodule_cherry_picks: list[str] | None = None) -> tuple[Path, dict]:
-    """Return (source_dir, git_info).
+                   submodule_cherry_picks: list[str] | None = None,
+                   app: "str | apps.App | None" = None) -> tuple[Path, dict]:
+    """Return (source_dir, git_info) for the app's checkout (Trio, or LoopWorkspace for Loop).
 
     * no branch/pr: build the checkout as-is (cloned first if missing)
-    * --branch / --pr for Trio: fetched and checked out (detached) in the checkout dir
-    * --pr for a submodule repo (e.g. TandemKit): Trio is checked out at the branch that pins that submodule
-      (--trio-branch, else TH_TRIO_BASE_BRANCH, dev, feat/tandem, main) and the submodule is switched to the PR head
+    * --branch / --pr for the app's repo: fetched and checked out (detached) in the checkout dir
+    * --pr for a submodule repo (e.g. TandemKit, or Loop in LoopWorkspace): the app's repo is checked out at the branch
+      that pins that submodule (--trio-branch, else the base branch, then the app's submodule_branches: dev,
+      feat/tandem / feat/tandem-closed-beta, main) and the submodule is switched to the PR head
     * submodule_cherry_picks (--submodule-cherry-pick): applied onto submodules after the overrides
-    * cherry_picks (--cherry-pick): applied in order onto whichever Trio was checked out (see cherry_pick);
-      with no branch/PR they need one, so TH_TRIO_BASE_BRANCH is checked out first
+    * cherry_picks (--cherry-pick): applied in order onto whichever commit was checked out (see cherry_pick);
+      with no branch/PR they need one, so the base branch (TH_TRIO_BASE_BRANCH / TH_LOOP_BASE_BRANCH) is checked out first
     """
-    info: dict = {}
+    a = _app(app)
+    info: dict = {"app": a.key}
     if (cherry_picks or submodule_cherry_picks) and in_place:
         raise HarnessError("cherry-picks need a branch or PR checkout, not --in-place (commit into that folder instead)")
     if cherry_picks and not branch and not pr:
-        branch = CONFIG.get("TH_TRIO_BASE_BRANCH") or "dev"
-    src = Path(in_place).expanduser().resolve() if in_place else ensure_checkout()
+        branch = a.base_branch
+    src = Path(in_place).expanduser().resolve() if in_place else ensure_checkout(app=a)
     repair_submodule_worktrees(src)
     isolate_submodule_worktrees(src)
-    if not (src / "Trio.xcworkspace").exists() and not branch and not pr:
+    if not (src / a.workspace).exists() and not branch and not pr:
         # fresh --no-checkout clone: materialize the default branch
-        _git(["checkout", "--force", CONFIG.get("TH_TRIO_BASE_BRANCH") or "dev"], src, check=False)
+        _git(["checkout", "--force", a.base_branch], src, check=False)
     if in_place or (not branch and not pr):
-        if not (src / "Trio.xcworkspace").exists():
-            raise HarnessError(f"{src} does not look like a Trio checkout")
+        if not (src / a.workspace).exists():
+            raise HarnessError(f"{src} does not look like a {a.name} checkout (no {a.workspace})")
         log(f"building {src} as-is (current checkout, uncommitted changes included)")
         submodules = list(submodules or [])
     else:
@@ -701,7 +722,7 @@ def prepare_source(*, branch: str | None = None, pr: str | None = None, repo: st
             _git(["remote", "set-url", "origin", base_url], src)
         submodules = list(submodules or [])
         if pr:
-            target = resolve_pr_target(pr, src, trio_branch)
+            target = resolve_pr_target(pr, src, trio_branch, a)
             info["pr"] = f"{target['slug']}#{target['number']}"
             try:
                 meta = json.loads(run(["gh", "pr", "view", str(target["number"]), "--repo", target["slug"], "--json",
@@ -716,22 +737,22 @@ def prepare_source(*, branch: str | None = None, pr: str | None = None, repo: st
                 _git(["checkout", "--force", "--detach", f"refs/th/pr-{target['number']}"], src)
             else:
                 br = target["trio_branch"]
-                log(f"{target['slug']}#{target['number']} is a PR on submodule {target['submodule']}; using Trio {br}")
-                _fetch_trio_branch(src, br, "refs/th/trio-branch")
+                log(f"{target['slug']}#{target['number']} is a PR on submodule {target['submodule']}; using {a.default_repo} {br}")
+                _fetch_trio_branch(src, br, "refs/th/trio-branch", a)
                 _git(["checkout", "--force", "--detach", "refs/th/trio-branch"], src)
                 info["trio_branch"] = br
                 info["submodule_pr"] = target
                 submodules.append(f"{target['submodule']}={_gh_repo_url(target['slug'])}#pull/{target['number']}/head")
         else:
             assert branch
-            _fetch_trio_branch(src, branch, "refs/th/branch")
+            _fetch_trio_branch(src, branch, "refs/th/branch", a)
             _git(["checkout", "--force", "--detach", "refs/th/branch"], src)
             info["branch"] = branch
         # remove leftovers from a previous PR/branch (e.g. a submodule dir that does not exist on this branch),
         # but keep ignored files (ConfigOverride.xcconfig, Xcode user data) — the checkout may be the user's own clone
         _git(["clean", "-fd", "-e", "ConfigOverride.xcconfig"], src, quiet=True)
         if cherry_picks:
-            info["cherry_picks"] = cherry_pick(src, cherry_picks)
+            info["cherry_picks"] = cherry_pick(src, cherry_picks, a)
     if fetch:
         log("syncing git submodules (first run downloads LoopKit & friends; several minutes)")
         _git(["submodule", "sync", "--recursive"], src, quiet=True)
@@ -785,35 +806,39 @@ def _user_override_team(src: Path) -> str | None:
 
 
 def harness_xcconfig(src: Path, target: str, *, dev_warning: bool = False,
-                     conditions: tuple[str, ...] = (), settings: dict[str, str] | None = None) -> tuple[Path, str]:
-    """Write the harness's build settings to build/override-<target>.xcconfig (inside the harness, NOT the checkout)
-    and return (path, team). Passed to xcodebuild with -xcconfig, which layers on top of the project's own
-    Config.xcconfig / ConfigOverride.xcconfig without touching them.
+                     conditions: tuple[str, ...] = (), settings: dict[str, str] | None = None,
+                     app: "str | apps.App | None" = None) -> tuple[Path, str]:
+    """Write the harness's build settings to build/override-[loop-]<target>.xcconfig (inside the harness, NOT the
+    checkout) and return (path, team). Passed to xcodebuild with -xcconfig, which layers on top of the project's own
+    Config.xcconfig / ConfigOverride.xcconfig (Trio) or Loop.xcconfig / LoopConfigOverride.xcconfig without touching them.
 
-    Team precedence: the user's ConfigOverride.xcconfig in the checkout > TH_DEVELOPER_TEAM > simulator placeholder.
-    When the user's file provides the team we do not override DEVELOPER_TEAM / bundle ids at all.
+    Team precedence: the user's own override file (Trio: ConfigOverride.xcconfig in the checkout; Loop: the
+    LoopConfigOverride.xcconfig LoopWorkspace includes from two folders up) > TH_DEVELOPER_TEAM > simulator placeholder.
+    When the user's file provides the team, Trio's team and bundle ids are left to it; Loop's main bundle id is still
+    written out (apps.App.team_settings). DEV_BRANCH_WARNING_DISABLED turns off the launch-time development build
+    warning of both apps.
     """
-    user_team = _user_override_team(src)
-    lines = ["// written by trio-test-harness for this build; the Trio checkout is not modified"]
+    a = _app(app)
+    user_team = _user_override_team(src) if a.key == "trio" else a.user_team(src)
+    lines = [f"// written by trio-test-harness for this build; the {a.name} checkout is not modified"]
     if user_team:
         team = user_team
-        log(f"using DEVELOPER_TEAM {team[:3]}… from the checkout's own ConfigOverride.xcconfig")
+        log(f"using team {team[:3]}… from the user's own {a.team_files[0][0]}")
     else:
         team = CONFIG.team_for(target)
         if target == "device" and not team:
-            raise HarnessError("signed device builds (iphone-usb) need a team: DEVELOPER_TEAM in the checkout's "
-                               "ConfigOverride.xcconfig (your normal Trio setup) or TH_DEVELOPER_TEAM in harness.env; "
+            raise HarnessError(f"signed device builds (iphone-usb) need a team: {a.team_files[0][1]} in "
+                               f"{a.team_files[-1][0]} (your normal {a.name} setup) or TH_DEVELOPER_TEAM in harness.env; "
                                "rooted-vnc builds use --trollstore (fake-signed) and need neither")
-        lines += [f"DEVELOPER_TEAM = {team}",
-                  f"BUNDLE_IDENTIFIER = org.nightscout.{team}.trio",
-                  f"TRIO_APP_GROUP_ID = group.org.nightscout.{team}.trio.trio-app-group"]
+    lines += a.team_settings(team, from_user=bool(user_team))
     active = (*(() if dev_warning else ("DEV_BRANCH_WARNING_DISABLED",)), *conditions)
     if active:
         lines.append(f"SWIFT_ACTIVE_COMPILATION_CONDITIONS = $(inherited) {' '.join(active)}")
     lines += [f"{k} = {v}" for k, v in (settings or {}).items()]
-    # one file per variant, so a stress build (extra conditions) never rewrites the plain build's settings
+    # one file per app and variant, so a stress build (extra conditions) never rewrites the plain build's settings
     suffix = "".join(f"-{c.lower()}" for c in conditions) + ("-sanitized" if settings else "")
-    out = CONFIG.build_dir / f"override-{target}{suffix}.xcconfig"
+    prefix = "" if a.key == "trio" else f"{a.key}-"
+    out = CONFIG.build_dir / f"override-{prefix}{target}{suffix}.xcconfig"
     out.write_text("\n".join(lines) + "\n")
     return out, team
 
@@ -842,14 +867,15 @@ PACKAGES_RERESOLVED = ("Package.resolved did not match the checkout's package de
                        "PR that adds a package), so packages were resolved fresh instead of from the lockfile")
 
 
-def resolve_packages(src: Path, scheme: str) -> str | None:
+def resolve_packages(src: Path, scheme: str, app: "str | apps.App | None" = None) -> str | None:
     """Resolve SwiftPM packages from Package.resolved, as Trio CI does.
 
     If the lockfile is only out of date, resolve again without it and return a note saying so;
     any other failure raises.
     """
-    base = ["xcodebuild", "-resolvePackageDependencies", "-workspace", CONFIG.get("TH_TRIO_WORKSPACE"),
-            "-scheme", scheme, "-derivedDataPath", CONFIG.get("TH_DERIVED_DATA")]
+    a = _app(app)
+    base = ["xcodebuild", "-resolvePackageDependencies", "-workspace", a.workspace,
+            "-scheme", scheme, "-derivedDataPath", str(a.derived_data)]
     env = {**xcode.developer_env(), "CI": "true"}
     try:
         run([*base, "-onlyUsePackageVersionsFromResolvedFile"], cwd=src, env=env, timeout=1800)
@@ -870,8 +896,8 @@ class BuildTimeout(HarnessError):
     """xcodebuild was stopped at its deadline; DerivedData keeps what it compiled, so the next build resumes."""
 
 
-# Build settings rather than xcodebuild's -enableThreadSanitizer: Trio's scheme embeds a watchOS app, and the sanitizers do
-# not support watchOS, so they are switched on for the iOS simulator SDK only.
+# Build settings rather than xcodebuild's -enableThreadSanitizer: both apps' schemes embed a watchOS app, and the sanitizers
+# do not support watchOS, so they are switched on for the iOS simulator SDK only.
 SANITIZER_SETTINGS = {"thread": {"ENABLE_THREAD_SANITIZER[sdk=iphonesimulator*]": "YES"},
                       "address": {"ENABLE_ADDRESS_SANITIZER[sdk=iphonesimulator*]": "YES"}}
 
@@ -879,22 +905,24 @@ SANITIZER_SETTINGS = {"thread": {"ENABLE_THREAD_SANITIZER[sdk=iphonesimulator*]"
 def build(src: Path, target: str, *, configuration: str = "Debug", clean: bool = False,
           git_info: dict | None = None, log_path: Path | None = None, trollstore: bool = False,
           conditions: tuple[str, ...] = (), sanitizer: str | None = None, save: bool = True,
-          timeout: float | None = None) -> BuildInfo:
+          timeout: float | None = None, app: "str | apps.App | None" = None) -> BuildInfo:
     """`conditions` are extra Swift compilation conditions (e.g. TANDEMKIT_VIRTUAL_PUMP), `sanitizer` is thread or
-    address, `save=False` leaves build/last-build.json (what `th install` installs) alone, and `timeout` (seconds)
-    stops xcodebuild with BuildTimeout instead of letting a CI job's limit kill it without a report."""
-    scheme = CONFIG.get("TH_TRIO_SCHEME")
-    workspace = CONFIG.get("TH_TRIO_WORKSPACE")
-    dd = Path(CONFIG.get("TH_DERIVED_DATA")).expanduser()
+    address, `save=False` leaves the app's last-build JSON (what `th install` installs) alone, and `timeout` (seconds)
+    stops xcodebuild with BuildTimeout instead of letting a CI job's limit kill it without a report. Each app has its
+    own scheme, workspace and DerivedData (harness/apps.py)."""
+    a = _app(app)
+    scheme = a.scheme
+    workspace = a.workspace
+    dd = a.derived_data
     env = {**xcode.developer_env(), "CI": "true"}  # CI=true skips SwiftFormat + Crashlytics phases
     if clean and dd.exists():
         shutil.rmtree(dd)
     if sanitizer and sanitizer not in SANITIZER_SETTINGS:
         raise HarnessError(f"unknown sanitizer {sanitizer!r}; use {', '.join(SANITIZER_SETTINGS)}")
     xcconfig, team = harness_xcconfig(src, "device" if (target == "device" and not trollstore) else "sim",
-                                      conditions=conditions, settings=SANITIZER_SETTINGS.get(sanitizer or ""))
+                                      conditions=conditions, settings=SANITIZER_SETTINGS.get(sanitizer or ""), app=a)
     if not (dd / "SourcePackages").exists():
-        note = resolve_packages(src, scheme)
+        note = resolve_packages(src, scheme, a)
         if note:
             git_info = {**(git_info or {}), "packages_note": note}
     if target == "sim":
@@ -914,9 +942,9 @@ def build(src: Path, target: str, *, configuration: str = "Debug", clean: bool =
                        "-allowProvisioningUpdates", "-allowProvisioningDeviceRegistration"]
     cmd = ["xcodebuild", "build", "-workspace", workspace, "-scheme", scheme, "-configuration", configuration,
            "-destination", dest, "-derivedDataPath", str(dd), "-xcconfig", str(xcconfig), *COMMON_FLAGS, *signing]
-    log(f"xcodebuild ({target}, {configuration}"
+    log(f"xcodebuild {a.name} ({target}, {configuration}"
         + "".join(f", {x}" for x in (*conditions, *([f"{sanitizer} sanitizer"] if sanitizer else []))) + f") -> {dd}")
-    log_path = log_path or (REPO_ROOT / "build" / f"xcodebuild-{target}.log")
+    log_path = log_path or (REPO_ROOT / "build" / (f"xcodebuild-{target}.log" if a.key == "trio" else f"xcodebuild-{a.key}-{target}.log"))
     log_path.parent.mkdir(parents=True, exist_ok=True)
     timed_out = False
     with open(log_path, "w") as fh:
@@ -955,26 +983,27 @@ def build(src: Path, target: str, *, configuration: str = "Debug", clean: bool =
     if p.returncode != 0:
         errs = [l for l in Path(log_path).read_text().splitlines() if DIAGNOSTIC_ERROR.search(l)]
         raise HarnessError("xcodebuild failed. Errors:\n" + "\n".join(errs[-20:]) + f"\nfull log: {log_path}")
-    app = dd / "Build" / "Products" / products / "Trio.app"
-    if not app.exists():
-        raise HarnessError(f"build succeeded but {app} is missing")
+    app_path = dd / "Build" / "Products" / products / a.product
+    if not app_path.exists():
+        raise HarnessError(f"build succeeded but {app_path} is missing")
     ipa = None
     if target == "device" and trollstore:
-        fakesign_app(app, src, team, _bundle_id_from_app(app))
-        ipa = package_ipa(app, CONFIG.build_dir / "Trio.ipa")
+        fakesign_app(app_path, src, team, _bundle_id_from_app(app_path), profile=a)
+        ipa = package_ipa(app_path, CONFIG.build_dir / f"{a.name}.ipa")
     bi = BuildInfo(target="device-trollstore" if trollstore else target, configuration=configuration,
-                   source_dir=str(src), app_path=str(app), bundle_id=_bundle_id_from_app(app),
+                   source_dir=str(src), app_path=str(app_path), bundle_id=_bundle_id_from_app(app_path),
                    ipa_path=str(ipa) if ipa else None, git=git_info or {},
-                   xcode=xcode.xcode_version(xcode.find_xcode()), scheme=scheme)
+                   xcode=xcode.xcode_version(xcode.find_xcode()), scheme=scheme, app=a.key)
     if save:
         bi.save()
-    log(f"built {bi.bundle_id} at {app}")
+    log(f"built {bi.bundle_id} at {app_path}")
     return bi
 
 
-def _entitlements_for(bundle: Path, src: Path, team: str, app_group: str) -> dict:
-    """Entitlements for a bundle: Trio's own file (with $(APP_GROUP_ID) resolved) for the main app, plus the
+def _entitlements_for(bundle: Path, src: Path, team: str, app_group: str, profile: "apps.App | None" = None) -> dict:
+    """Entitlements for a bundle: the app's own file (with its app group variable resolved) for the main app, plus the
     identifier entitlements Xcode would normally inject. Extensions get just the identifier + app group."""
+    profile = profile or apps.TRIO
     info = plistlib.loads((bundle / "Info.plist").read_bytes())
     bid = info["CFBundleIdentifier"]
     ents: dict = {
@@ -983,12 +1012,14 @@ def _entitlements_for(bundle: Path, src: Path, team: str, app_group: str) -> dic
         "keychain-access-groups": [f"{team}.{bid}"],
         "get-task-allow": True,
     }
-    if bundle.suffix == ".app" and bundle.name == "Trio.app":
-        ents.update(plistlib.loads((src / "Trio/Resources/Trio.entitlements").read_bytes()))
+    if bundle.suffix == ".app" and bundle.name == profile.product:
+        ents.update(plistlib.loads((src / profile.entitlements).read_bytes()))
     ents["com.apple.security.application-groups"] = [app_group]
     def subst(v):
         if isinstance(v, str):
-            return v.replace("$(APP_GROUP_ID)", app_group).replace("$(TRIO_APP_GROUP_ID)", app_group)
+            for var in ("$(APP_GROUP_ID)", "$(TRIO_APP_GROUP_ID)", "$(APP_GROUP_IDENTIFIER)"):
+                v = v.replace(var, app_group)
+            return v
         if isinstance(v, list):
             return [subst(x) for x in v]
         if isinstance(v, dict):
@@ -997,11 +1028,12 @@ def _entitlements_for(bundle: Path, src: Path, team: str, app_group: str) -> dic
     return subst(ents)
 
 
-def fakesign_app(app: Path, src: Path, team: str, bundle_id: str) -> None:
+def fakesign_app(app: Path, src: Path, team: str, bundle_id: str, *, profile: "apps.App | None" = None) -> None:
     """codesign -s - (ad-hoc) every nested bundle, innermost first, then the app itself."""
-    app_group = f"group.{bundle_id}.trio-app-group"
+    profile = profile or apps.TRIO
+    app_group = profile.app_group(bundle_id)
     nested: list[Path] = []
-    # every nested code object, innermost first: dylibs anywhere (incl. Xcode's Trio.debug.dylib at the app root),
+    # every nested code object, innermost first: dylibs anywhere (incl. Xcode's <App>.debug.dylib at the app root),
     # frameworks, app extensions, the watch app
     for pattern in ("**/*.dylib", "Watch/*.app/Frameworks/*.framework", "Watch/*.app/PlugIns/*.appex", "Watch/*.app",
                     "Frameworks/*.framework", "PlugIns/*.appex", "Extensions/*.appex"):
@@ -1012,8 +1044,8 @@ def fakesign_app(app: Path, src: Path, team: str, bundle_id: str) -> None:
     for b in nested + [app]:
         cmd = ["codesign", "--force", "--sign", "-", "--timestamp=none", "--generate-entitlement-der"]
         if b.suffix in (".app", ".appex"):
-            ents = _entitlements_for(b, src, team, app_group)
-            ent_file = b.parent / (b.name + ".entitlements.plist") if b is not app else CONFIG.build_dir / "Trio.entitlements.plist"
+            ents = _entitlements_for(b, src, team, app_group, profile)
+            ent_file = b.parent / (b.name + ".entitlements.plist") if b is not app else CONFIG.build_dir / f"{profile.name}.entitlements.plist"
             ent_file.write_bytes(plistlib.dumps(ents))
             cmd += ["--entitlements", str(ent_file)]
         cmd.append(str(b))
@@ -1024,7 +1056,7 @@ def fakesign_app(app: Path, src: Path, team: str, bundle_id: str) -> None:
 
 
 def package_ipa(app: Path, out: Path) -> Path:
-    """Zip Trio.app into Payload/ -> .ipa (what TrollStore expects)."""
+    """Zip the .app into Payload/ -> .ipa (what TrollStore expects)."""
     out.parent.mkdir(parents=True, exist_ok=True)
     if out.exists():
         out.unlink()

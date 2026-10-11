@@ -1,12 +1,13 @@
 # trio-test-harness
 
-Tooling + Claude Code skills to **build, install, drive and screenshot the Trio iOS app** on either
-the iOS Simulator or a USB-attached iPhone, from any Trio branch / PR / submodule branch, and to
-turn the screenshots into an HTML report (claude.ai Artifact) or a GitHub PR comment.
+Tooling + Claude Code skills to **build, install, drive and screenshot the Trio iOS app** (and **Loop**, with
+`--app loop`: see [Loop](#loop---app-loop)) on either the iOS Simulator or a USB-attached iPhone, from any branch / PR /
+submodule branch, and to turn the screenshots into an HTML report (claude.ai Artifact) or a GitHub PR comment.
 
 ```
 ./trio-test-e2e --mode simulator --pr https://github.com/nightscout/Trio/pull/1234     # Trio PR
 ./trio-test-e2e --mode rooted-vnc --pr https://github.com/jwoglom/TandemKit/pull/395          # submodule PR (Trio @ feat/tandem)
+./trio-test-e2e --app loop --pr https://github.com/jwoglom/TandemKit/pull/395     # the same PR in Loop (LoopWorkspace)
 ./trio-test-e2e                                                                        # prompts for mode and PR/branch
 ```
 `./trio-test-e2e` runs checkout → build → install → launch (onboarding pre-seeded) → home screen → Glucose Simulator +
@@ -23,6 +24,37 @@ th flow add-cgm-sim ; th flow add-pump-sim # trio-fake-devices
 th shot / tap-text / type / find / tree    # trio-ui-drive
 th run finish passed --summary "..." ; th report html ; th report pr <url> --artifact-url <link>   # trio-report
 ```
+
+## Loop (`--app loop`)
+
+Every stage also runs Loop, built from LoopKit/LoopWorkspace: `--app loop` on `trio-test-e2e`, `th` and `trio-test-ci`,
+`app=loop` in the CI workflow, "Loop" in the web UI form, or `TH_APP=loop` in the environment or `harness.env` for a
+machine that tests Loop by default. What differs between the apps is in `harness/apps.py` and `harness/flows/loop.py`:
+
+| | Trio | Loop |
+|---|---|---|
+| Checkout | `TRIO_REPO`: nightscout/Trio, base `dev` | `LOOP_REPO`: LoopKit/LoopWorkspace, base `feat/tandem-closed-beta` (the branch with the TandemKit submodule) |
+| Build | `Trio` scheme, `TH_DERIVED_DATA` | `LoopWorkspace` scheme, `TH_LOOP_DERIVED_DATA` (the workspaces build different forks of the same frameworks) |
+| Bundle id, app group | `org.nightscout.<team>.trio`, `group.<bundle>.trio-app-group` | `com.<team>.loopkit.Loop`, `group.<bundle>Group`; `MAIN_APP_BUNDLE_IDENTIFIER` is written out, since an ad hoc build clears the `DEVELOPMENT_TEAM` Loop derives it from |
+| Skip onboarding, simulator | `Documents/onboardingCompleted.plist` | the app group's preferences: `OnboardingManager.IsComplete` and LoopOnboarding's mock therapy settings, as the legacy keys Loop migrates at launch; then the simulator's `cfprefsd` is restarted |
+| Skip onboarding, phone | flags over SSH | holding the welcome screen's logo for 2 s (LoopOnboarding's own skip, with the same mock settings) |
+| After onboarding | the home screen | prompts for notifications, Apple Health ("Turn On All", "Allow") and Bluetooth, which `walk_onboarding` answers |
+| Fake devices | Glucose Simulator + Pump Simulator, from the home header | CGM Simulator + Pump Simulator, from the HUD's "Add CGM" / "Add Pump" (else Settings); a new CGM Simulator has no glucose model, so on the simulator the smoke stage gives it a sine curve |
+| `th logs` | Trio, TandemKit, watch | TandemKit only: Loop's own device log is an SQLite store |
+| `th docs` | https://triodocs.org | LoopDocs, https://loopkit.github.io/loopdocs/ |
+
+A PR on a LoopWorkspace submodule (TandemKit, or Loop itself, LoopKit/Loop) is found through `.gitmodules` of
+`--trio-branch`, the base branch, then `feat/tandem-closed-beta`, `dev` and `main`, as for Trio:
+
+```
+./trio-test-e2e --app loop --pr https://github.com/jwoglom/TandemKit/pull/395
+./trio-test-e2e --app loop --pr LoopKit/Loop#2500 --trio-branch dev
+./trio-test-ci --app loop -s jwoglom/TandemKit#395
+```
+
+On the simulator a new install also empties Loop's app group container, which the simulator keeps across reinstalls
+and where Loop keeps its store and settings. The Loop flows are written from Loop's source and have not yet run against a
+real Loop on a Mac: `docs/HANDOFF.md` lists what to check.
 
 ## How it works
 

@@ -1,4 +1,5 @@
-"""`th` command line: one entry point for everything the Claude skills call."""
+"""`th` command line: one entry point for everything the Claude skills call. `--app loop` (or TH_APP=loop) points every
+command at Loop instead of Trio (harness/apps.py)."""
 from __future__ import annotations
 
 import argparse
@@ -57,6 +58,11 @@ def _run(args):
     return Run.current(getattr(args, "run", None))
 
 
+def _app():
+    from . import apps
+    return apps.current()
+
+
 # ---------------- doctor -----------------
 
 def cmd_doctor(args):
@@ -83,11 +89,12 @@ def cmd_doctor(args):
         item("python deps", True)
     except ImportError as e:
         item("python deps", False, str(e))
-    item("TRIO_REPO checkout", (CONFIG.trio_repo / "Trio.xcworkspace").exists() or True, str(CONFIG.trio_repo)
-         + ("" if (CONFIG.trio_repo / "Trio.xcworkspace").exists() else " (cloned on first build)"))
+    a = _app()
+    item(f"{a.repo_key} checkout ({a.name})", True, str(a.checkout)
+         + ("" if (a.checkout / a.workspace).exists() else " (cloned on first build)"))
     item("harness.env", ENV_FILE.exists(), str(ENV_FILE) if ENV_FILE.exists() else "cp harness.env.example harness.env")
     free = shutil.disk_usage("/").free // 2**30
-    item("disk free", free >= 12, f"{free} GB (a Trio build needs ~10 GB of derived data)", warn=free >= 8)
+    item("disk free", free >= 12, f"{free} GB (a {a.name} build needs ~10 GB of derived data)", warn=free >= 8)
     from . import daemon as DM
 
     if want in (None, "sim"):
@@ -95,7 +102,7 @@ def cmd_doctor(args):
         if app:
             try:
                 rts = xcode.list_runtimes(); item("iOS runtime", rts, ", ".join(r["name"] for r in rts) or "th sim install-runtime")
-                wrts = xcode.list_runtimes("watchOS"); item("watchOS runtime (Trio embeds a Watch app)", wrts,
+                wrts = xcode.list_runtimes("watchOS"); item(f"watchOS runtime ({a.name} embeds a Watch app)", wrts,
                                                             ", ".join(r["name"] for r in wrts) or "th sim install-runtime --platform watchOS")
                 devs = [d for d in xcode.list_devices() if d["name"] == CONFIG.get("TH_SIM_NAME")]
                 item(f"simulator '{CONFIG.get('TH_SIM_NAME')}' ({CONFIG.get('TH_SIM_DEVICE')})", devs,
@@ -142,7 +149,7 @@ def cmd_doctor(args):
             item("mirroring window", bool(st["window"]), str(st["window"]) if st["window"] else "pair iPhone Mirroring first", warn=True)
         except HarnessError as e:
             item("phone-harness", False, str(e)[:120], warn=True)
-        item("TH_DEVELOPER_TEAM / ConfigOverride team (signed builds)", CONFIG.get("TH_DEVELOPER_TEAM") or (CONFIG.trio_repo / "ConfigOverride.xcconfig").exists(),
+        item("TH_DEVELOPER_TEAM / your own override's team (signed builds)", CONFIG.get("TH_DEVELOPER_TEAM") or a.user_team(a.checkout),
              "set" if CONFIG.get("TH_DEVELOPER_TEAM") else "needed only for iphone-usb installs (devicectl)", warn=True)
 
     print("\nsummary:", "ready" if ok else "some required items missing (see MISSING above)")
@@ -194,7 +201,7 @@ def cmd_install(args):
         ipa = Path(args.ipa) if args.ipa else (Path(bi.ipa_path) if bi and bi.ipa_path else None)
         if not ipa or not ipa.exists():
             from .build import package_ipa
-            ipa = package_ipa(app, CONFIG.build_dir / "Trio.ipa")
+            ipa = package_ipa(app, CONFIG.build_dir / f"{_app().name}.ipa")
         D.appsync_install(ipa, CONFIG.get("TH_DEVICE_UDID") or None)
         log(f"installed {ipa.name} via installd (AppSync Unified)")
         return 0
@@ -202,7 +209,7 @@ def cmd_install(args):
         ipa = Path(args.ipa) if args.ipa else (Path(bi.ipa_path) if bi and bi.ipa_path else None)
         if not ipa or not ipa.exists():
             from .build import package_ipa
-            ipa = package_ipa(app, CONFIG.build_dir / "Trio.ipa")
+            ipa = package_ipa(app, CONFIG.build_dir / f"{_app().name}.ipa")
         url, httpd = D.trollstore_install_url(ipa)
         print(f"\nTrollStore install link (open on the phone):\n  {url}\n")
         if args.open_on_device:
@@ -234,31 +241,33 @@ def cmd_launch(args):
     bi = BuildInfo.load()
     bundle = args.bundle_id or (bi.bundle_id if bi else CONFIG.bundle_id(_target(args)))
     target = _target(args)
+    F = _app().flows
+    app_name = args.app_name or _app().name
     if target == "sim":
         drv = get_driver("sim"); drv.boot()
         if args.preseed_onboarding:
-            from .flows.trio import preseed_onboarding
             if not drv.is_installed(bundle):
                 raise HarnessError(f"{bundle} not installed on the simulator; run `th install` first")
-            paths = preseed_onboarding(drv.app_data_container(bundle))
-            log(f"pre-seeded onboarding flag: {[str(p) for p in paths]}")
+            paths = F.preseed_simulator(drv, bundle)
+            log(f"pre-seeded onboarding: {[str(p) for p in paths]}")
         drv.launch(bundle)
         return 0
     from . import devices as D
     if target == "iphone-usb":
         drv = get_driver("iphone-usb"); drv.boot()
-        drv.open_app_via_spotlight(args.app_name)
+        drv.open_app_via_spotlight(app_name)
         return 0
     if args.preseed_onboarding and D.ssh_ok():
-        c = D.ssh_preseed_flags(bundle, {"onboardingCompleted": True, "hasSeenFatProteinOrderChange": True,
-                                         "crashlyticsSharingEnabled": False, "telemetrySharingEnabled": False})
-        log(f"pre-seeded onboarding/diagnostics flags in {c}/Documents over SSH")
+        if F.preseed_phone(bundle):
+            log("pre-seeded onboarding/diagnostics flags over SSH")
+        else:
+            log(f"{_app().name} cannot be pre-seeded on a phone; walk it with `th flow onboarding-walk`")
     if args.via == "devicectl":
         D.devicectl_launch(D.pick_udid(), bundle)
     elif args.via == "ssh" or (args.via == "auto" and D.ssh_ok()):
         D.ssh_launch(bundle); log(f"launched {bundle} via uiopen over SSH")
     else:
-        drv = get_driver("device"); drv.wake(); drv.open_app_via_spotlight(args.app_name)
+        drv = get_driver("device"); drv.wake(); drv.open_app_via_spotlight(app_name)
     return 0
 
 
@@ -278,7 +287,8 @@ def cmd_busy(args):
 
 
 def cmd_docs(args):
-    """Search / browse https://triodocs.org as text (harness/triodocs.py)."""
+    """Search / browse the app's docs (https://triodocs.org, https://loopkit.github.io/loopdocs) as text
+    (harness/triodocs.py)."""
     from . import triodocs as T
     if args.sub == "search":
         hits = T.search(" ".join(args.query), limit=args.limit)
@@ -319,10 +329,13 @@ def cmd_logs(args):
     bi = BuildInfo.load()
     built_for = "sim" if bi and bi.target == "sim" else "rooted-vnc" if bi and str(bi.target).startswith("device") else None
     bundle = args.bundle_id or (bi.bundle_id if bi and built_for == target else CONFIG.bundle_id(target))
-    names = list(A.FILES) if args.which == "all" else [args.which]
-    rels = [r for n in names for r in A.FILES[n]]
+    app_files = A.files_for(_app().key)
+    if args.which not in ("all", *app_files):
+        raise HarnessError(f"{_app().name} writes no {args.which} log file; it has: {', '.join(app_files)}")
+    names = list(app_files) if args.which == "all" else [args.which]
+    rels = [r for n in names for r in app_files[n]]
     got = A.fetch(target, bundle, rels)
-    texts = {n: {r: got.get(r) for r in A.FILES[n]} for n in names}
+    texts = {n: {r: got.get(r) for r in app_files[n]} for n in names}
     if args.files:
         for n, files in texts.items():
             for r, t in files.items():
@@ -627,8 +640,8 @@ def cmd_webui(args):
 # ---------------- flows / tests -----------------
 
 def cmd_flow(args):
-    from .flows import trio as F
     from .report import Run
+    F = _app().flows
     drv = get_driver(_target(args))
     try:
         r = Run.current(args.run)
@@ -650,32 +663,33 @@ def cmd_flow(args):
 
 
 def cmd_test(args):
-    """Smoke test: launch Trio, get to the home screen, add fake CGM + pump, screenshot everything."""
-    from .flows import trio as F
+    """Smoke test: launch the app, get to the home screen, add fake CGM + pump, screenshot everything."""
     from .report import Run, render_html
     from .build import BuildInfo
+    a = _app()
+    F = a.flows
     target = _target(args)
     bi = BuildInfo.load()
     bundle = bi.bundle_id if bi else CONFIG.bundle_id(target)
-    r = Run.new(args.name or f"smoke-{target}", {"target": target, "build": bi.__dict__ if bi else {},
-                                                  "title": f"Trio smoke test ({target})"})
+    r = Run.new(args.name or (f"smoke-{target}" if a.key == "trio" else f"{a.key}-smoke-{target}"),
+                {"target": target, "app": a.key, "build": bi.__dict__ if bi else {}, "title": f"{a.name} smoke test ({target})"})
     drv = get_driver(target)
     try:
         if target == "sim":
             drv.boot()
             if not drv.is_installed(bundle):
-                raise HarnessError("Trio is not installed on the simulator; run `th build && th install`")
+                raise HarnessError(f"{a.name} is not installed on the simulator; run `th build && th install`")
             if args.preseed:
-                F.preseed_onboarding(drv.app_data_container(bundle))
+                F.preseed_simulator(drv, bundle)
             drv.launch(bundle)
         elif target == "rooted-vnc":
             drv.unlock()
             from . import devices as D
             D.ssh_launch(bundle)
         else:
-            drv.boot(); drv.open_app_via_spotlight("Trio")
+            drv.boot(); drv.open_app_via_spotlight(a.name)
         time.sleep(4)
-        F.step(r, drv, "launch", "Trio launched")
+        F.step(r, drv, "launch", f"{a.name} launched")
         F.dismiss_dialogs(drv, ["OK", "Continue", "Dismiss"])
         if not F.at_home(drv):
             F.walk_onboarding(drv, r)
@@ -683,11 +697,14 @@ def cmd_test(args):
         if args.devices:
             F.add_cgm_simulator(drv, r)
             F.back_to_home(drv)
+            if target == "sim" and F.give_cgm_glucose(drv, bundle):
+                time.sleep(6)
+                F.settle(drv, r)
             F.add_pump_simulator(drv, r)
             F.back_to_home(drv)
             time.sleep(3)
-            F.step(r, drv, "home-with-devices", "Home with Glucose Simulator + Pump Simulator")
-        r.finish("passed", "Trio launched and reached the home screen" + (" with fake CGM and pump configured." if args.devices else "."))
+            F.step(r, drv, "home-with-devices", f"Home with {F.CGM_SIMULATOR} + {F.PUMP_SIMULATOR}")
+        r.finish("passed", f"{a.name} launched and reached the home screen" + (" with fake CGM and pump configured." if args.devices else "."))
     except Exception as e:  # noqa: BLE001
         F.step(r, drv, "failure", str(e)[:200])
         r.finish("failed", f"{type(e).__name__}: {e}")
@@ -701,22 +718,27 @@ def cmd_test(args):
 # ---------------- argparse -----------------
 
 def build_parser() -> argparse.ArgumentParser:
-    p = argparse.ArgumentParser(prog="trio-test-harness", description="Trio test harness toolbox (short alias: th)")
+    from . import apps
+    p = argparse.ArgumentParser(prog="trio-test-harness", description="Trio / Loop test harness toolbox (short alias: th)")
     p.add_argument("--target", help="sim | rooted-vnc | iphone-usb (aliases: device=rooted-vnc, mirror=iphone-usb; default $TH_TARGET or sim)")
+    p.add_argument("--app", choices=sorted(apps.APPS),
+                   help="the app under test: trio or loop (LoopWorkspace); default $TH_APP, else trio")
     sp = p.add_subparsers(dest="cmd", required=True)
 
     sp.add_parser("doctor", help="check the environment").set_defaults(fn=cmd_doctor)
 
-    b = sp.add_parser("build", help="check out + build Trio")
+    b = sp.add_parser("build", help="check out + build the app (Trio, or Loop with --app loop)")
     b.add_argument("--branch", help="branch | owner/repo@branch | URL#branch")
     b.add_argument("--pr", help="PR number | owner/repo#N | PR URL")
-    b.add_argument("--repo", help="GitHub owner/repo to fetch --branch from (default: Trio origin)")
-    b.add_argument("--trio-branch", help="for submodule PRs: the Trio branch that pins that submodule")
+    b.add_argument("--repo", help="GitHub owner/repo to fetch --branch from (default: the checkout's origin)")
+    b.add_argument("--trio-branch", help="for submodule PRs: the branch of the app's repo (Trio, LoopWorkspace) that pins "
+                                         "that submodule")
     from .build import CHERRY_PICK_HELP
     b.add_argument("--cherry-pick", action="append", metavar="SPEC", help=CHERRY_PICK_HELP)
     from .build import SUBMODULE_CHERRY_PICK_HELP
     b.add_argument("--submodule-cherry-pick", action="append", metavar="SPEC", help=SUBMODULE_CHERRY_PICK_HELP)
-    b.add_argument("--in-place", help="build this existing checkout as-is (e.g. ~/repos/Trio with local changes)")
+    b.add_argument("--in-place", help="build this existing checkout as-is (e.g. ~/repos/Trio or ~/repos/LoopWorkspace with "
+                                      "local changes)")
     b.add_argument("--submodule", action="append", default=[], help="NAME@REF | NAME@pr/N | NAME=URL#REF (repeatable)")
     b.add_argument("--configuration", default="Debug")
     b.add_argument("--clean", action="store_true")
@@ -734,24 +756,27 @@ def build_parser() -> argparse.ArgumentParser:
     i.add_argument("--serve-seconds", type=int, default=600)
     i.set_defaults(fn=cmd_install)
 
-    l = sp.add_parser("launch", help="launch Trio")
+    l = sp.add_parser("launch", help="launch the app")
     l.add_argument("--bundle-id"); l.add_argument("--preseed-onboarding", action="store_true")
-    l.add_argument("--via", choices=["auto", "ssh", "vnc", "devicectl"], default="auto"); l.add_argument("--app-name", default="Trio")
+    l.add_argument("--via", choices=["auto", "ssh", "vnc", "devicectl"], default="auto")
+    l.add_argument("--app-name", help="the name Spotlight finds it by (default: Trio / Loop)")
     l.set_defaults(fn=cmd_launch)
 
-    dc = sp.add_parser("docs", help="search / browse the Trio docs (triodocs.org) as text: search, toc, page",
+    dc = sp.add_parser("docs", help="search / browse the app's docs (triodocs.org; with --app loop, LoopDocs) as text: "
+                                    "search, toc, page",
                        description=_docs_doc(), formatter_class=argparse.RawDescriptionHelpFormatter)
     dcs = dc.add_subparsers(dest="sub", required=True)
     d1 = dcs.add_parser("search", help="best-matching sections, with links and snippets")
     d1.add_argument("query", nargs="+"); d1.add_argument("-n", "--limit", type=int, default=8)
     d2 = dcs.add_parser("toc", help="every page as a tree"); d2.add_argument("--depth", type=int, help="only this many levels")
     d3 = dcs.add_parser("page", help="a page (or one #section) as text")
-    d3.add_argument("ref", help="path (settings/…/) or a triodocs.org URL; #anchor for one section")
+    d3.add_argument("ref", help="path (settings/…/) or a URL on the docs site; #anchor for one section")
     dc.set_defaults(fn=cmd_docs)
     bz = sp.add_parser("busy", help="who is driving each target (the device lock; the only thing that counts)",
                        description=_busy_doc(), formatter_class=argparse.RawDescriptionHelpFormatter)
     bz.set_defaults(fn=cmd_busy)
-    lg = sp.add_parser("logs", help="Trio / TandemKit / watch log files from the installed app (filter, tail, save)",
+    lg = sp.add_parser("logs", help="Trio / TandemKit / watch log files from the installed app (filter, tail, save); "
+                                    "Loop: TandemKit's only",
                        description=_applogs_doc(),
                        formatter_class=argparse.RawDescriptionHelpFormatter)
     lg.add_argument("which", nargs="?", default="all", choices=["trio", "tandem", "watch", "all"],
@@ -770,7 +795,7 @@ def build_parser() -> argparse.ArgumentParser:
     for name in ("list", "runtimes", "boot", "shutdown", "erase"):
         ss.add_parser(name)
     ir = ss.add_parser("install-runtime"); ir.add_argument("version", nargs="?")
-    ir.add_argument("--platform", default="iOS", choices=["iOS", "watchOS"], help="Trio needs both: the scheme embeds a Watch app")
+    ir.add_argument("--platform", default="iOS", choices=["iOS", "watchOS"], help="both apps need both: their schemes embed a Watch app")
     c = ss.add_parser("container"); c.add_argument("--bundle-id")
     d = ss.add_parser("defaults"); d.add_argument("key"); d.add_argument("value"); d.add_argument("--type", default="-string"); d.add_argument("--bundle-id")
     ou = ss.add_parser("openurl"); ou.add_argument("url")
@@ -844,7 +869,7 @@ def build_parser() -> argparse.ArgumentParser:
                     help="access token for the page (default: a random one kept in runs/.tmp/webui-token)")
     wu.set_defaults(fn=cmd_webui)
 
-    fl = sp.add_parser("flow", help="Trio UI flows"); fls = fl.add_subparsers(dest="sub", required=True)
+    fl = sp.add_parser("flow", help="the app's UI flows (harness/flows/trio.py, loop.py)"); fls = fl.add_subparsers(dest="sub", required=True)
     for name in ("onboarding-walk", "add-cgm-sim", "add-pump-sim", "back-home", "dismiss", "settle", "at-home"):
         x = fls.add_parser(name); x.add_argument("--run")
     fl.set_defaults(fn=cmd_flow)
@@ -858,6 +883,8 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv=None) -> int:
     args = build_parser().parse_args(argv)
     try:
+        from . import apps
+        apps.select(args.app)
         return args.fn(args) or 0
     except HarnessError as e:
         print(f"th: error: {e}", file=sys.stderr)

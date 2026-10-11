@@ -13,10 +13,15 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 ENV_FILE = REPO_ROOT / "harness.env"
 
 DEFAULTS = {
+    "TH_APP": "trio",                 # the app under test: trio | loop (harness/apps.py); --app on th / trio-test-e2e
     "TRIO_REPO": str(REPO_ROOT / "Trio"),        # Trio checkout the harness builds from (cloned on demand)
     "TH_TRIO_REFERENCE": str(REPO_ROOT.parent / "Trio"),  # existing local clone used to speed up that clone
     "TH_TRIO_ORIGIN": "",                        # owner/repo to clone Trio from; blank = the reference's origin, else nightscout/Trio
     "TH_TRIO_BASE_BRANCH": "dev",
+    "LOOP_REPO": str(REPO_ROOT / "LoopWorkspace"),  # LoopWorkspace checkout for --app loop (cloned on demand)
+    "TH_LOOP_REFERENCE": str(REPO_ROOT.parent / "LoopWorkspace"),
+    "TH_LOOP_ORIGIN": "",                        # blank = the reference's origin, else LoopKit/LoopWorkspace
+    "TH_LOOP_BASE_BRANCH": "feat/tandem-closed-beta",   # LoopKit/LoopWorkspace's branch with the TandemKit submodule
     "TH_GIT_MIRRORS": "",             # dir of <owner>/<repo>.git bare mirrors used as --reference for submodules
     "TH_WDA_PREBUILT": "",            # derivedData of a prebuilt WebDriverAgentRunner (Build/Products/*.xctestrun)                # Trio branch to test submodule PRs against when not derivable
     "TH_GIT_TOKEN": "",               # CI only (env, never a file): HTTPS token for GitHub instead of SSH
@@ -50,6 +55,9 @@ DEFAULTS = {
     "TH_BUILD_DIR": str(REPO_ROOT / "build"),
     "TH_TRIO_SCHEME": "Trio",
     "TH_TRIO_WORKSPACE": "Trio.xcworkspace",
+    "TH_LOOP_DERIVED_DATA": str(Path.home() / "Library/Developer/Xcode/DerivedData/trio-test-harness-loop"),
+    "TH_LOOP_SCHEME": "LoopWorkspace",
+    "TH_LOOP_WORKSPACE": "LoopWorkspace.xcworkspace",
 }
 
 
@@ -118,7 +126,9 @@ class Config:
         return self.values["TH_DEVELOPER_TEAM"] or self.values["TH_SIM_TEAM_PLACEHOLDER"]
 
     def bundle_id(self, target: str) -> str:
-        return f"org.nightscout.{self.team_for(target)}.trio"
+        """The current app's bundle id for a build target (harness/apps.py)."""
+        from . import apps
+        return apps.current().bundle_id(self.team_for(target))
 
 
 CONFIG = Config.load()

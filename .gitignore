@@ -12,3 +12,4 @@ build/
 vendor/WebDriverAgent/
 vendor/phone-harness/
 Trio/
+LoopWorkspace/

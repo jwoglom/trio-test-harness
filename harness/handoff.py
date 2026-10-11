@@ -122,9 +122,16 @@ def _remote_url(repo: Path, remote: str) -> str | None:
     return cp.stdout.strip() or None if cp.returncode == 0 else None
 
 
-def _trio_branch(spec: str, src: Path) -> tuple[str | None, str]:
-    """A Trio branch spec (build.split_branch_spec) -> (https URL, branch), resolving remotes of the checkout;
-    a bare name is origin's if origin has it, else upstream's (as the build fetched it)."""
+def _app(job_or_build: dict):
+    """The app a web UI job (its inputs) or a run's build tested (harness/apps.py); Trio before Loop support."""
+    from . import apps
+    key = (job_or_build.get("inputs") or {}).get("app") or job_or_build.get("app") or "trio"
+    return apps.get(key)
+
+
+def _trio_branch(spec: str, src: Path, upstream: str = "nightscout/Trio") -> tuple[str | None, str]:
+    """A branch spec of the app's repo (build.split_branch_spec) -> (https URL, branch), resolving remotes of the
+    checkout; a bare name is origin's if origin has it, else upstream's (as the build fetched it)."""
     where, name = split_branch_spec(spec, src)
     if "://" in where or where.startswith("git@"):
         return _https(where), name
@@ -133,24 +140,26 @@ def _trio_branch(spec: str, src: Path) -> tuple[str | None, str]:
         if cp.returncode != 0:
             where = "upstream" if _remote_url(src, "upstream") else ""
             if not where:
-                return "https://github.com/nightscout/Trio", name
+                return f"https://github.com/{upstream}", name
     url = _remote_url(src, where)
     return (_https(url) if url else None), name
 
 
 def plan(build: dict) -> tuple[Path, list[Repo], dict[str, str]]:
-    """From run.json's "build": (Trio checkout it was built in, the repos that are on a branch — Trio first, then the
-    overridden submodules —, every submodule path -> the commit built)."""
+    """From run.json's "build": (the app's checkout it was built in (Trio, LoopWorkspace), the repos that are on a
+    branch — that checkout first, then the overridden submodules —, every submodule path -> the commit built)."""
+    app = _app(build)
+    top = app.default_repo.split("/")[-1]
     git = build.get("git") or {}
     src = Path(build.get("source_dir") or "").expanduser()
     if not (src / ".git").exists():
-        raise HarnessError(f"the run's Trio checkout {src} is gone")
+        raise HarnessError(f"the run's {top} checkout {src} is gone")
     subs = dict(git.get("submodules") or {})
-    trio = Repo("Trio", "", git.get("sha") or "")
+    trio = Repo(top, "", git.get("sha") or "")
     pr = git.get("pr") or ""
     subpr = git.get("submodule_pr")
     if subpr and git.get("trio_branch"):
-        trio.url, trio.branch = _trio_branch(git["trio_branch"], src)
+        trio.url, trio.branch = _trio_branch(git["trio_branch"], src, app.default_repo)
     elif pr and not subpr:
         slug, num = pr.split("#")
         head = _pr_head(slug, num)
@@ -158,7 +167,7 @@ def plan(build: dict) -> tuple[Path, list[Repo], dict[str, str]]:
             trio.url, trio.branch = head
             trio.pr = pr
     elif git.get("branch"):
-        trio.url, trio.branch = _trio_branch(git["branch"], src)
+        trio.url, trio.branch = _trio_branch(git["branch"], src, app.default_repo)
     else:
         trio.note = "built as-is (no branch)"
     if git.get("cherry_picks"):
@@ -188,7 +197,7 @@ def plan(build: dict) -> tuple[Path, list[Repo], dict[str, str]]:
     for c in git.get("submodule_cherry_picks") or []:
         r = next((x for x in repos if x.path == c["submodule"]), None)
         if r is None:
-            r = Repo(c["submodule"], c["submodule"], subs.get(c["submodule"], ""), note="at the commit Trio pins")
+            r = Repo(c["submodule"], c["submodule"], subs.get(c["submodule"], ""), note=f"at the commit {top} pins")
             repos.append(r)
         r.picks = (*r.picks, f"{c['what']}: {c['applied']} commit(s) {', '.join(c['commits'])}")
         r.note = ((r.note + "; ") if r.note else "") + ("the tested commit has local cherry-picks on top, so it has no "
@@ -319,7 +328,7 @@ def _repo_lines(root: Path | None, repos: list[Repo], subs: dict[str, str]) -> s
         lines += [f"  - cherry-picked on top: {p}" for p in r.picks]
     others = {p: s for p, s in subs.items() if p not in {r.path for r in repos if r.path}}
     if others:
-        lines.append("- Other submodules, at the commits Trio pins: "
+        lines.append(f"- Other submodules, at the commits {repos[0].name if repos else 'the checkout'} pins: "
                      + ", ".join(f"{p} `{s}`" for p, s in sorted(others.items())))
     return "\n".join(lines)
 
@@ -340,21 +349,25 @@ def findings(job: dict, rd: Path) -> str:
     return "\n".join(head) + ("\n\n### Agent findings\n\n" + summary if summary else "")
 
 
-RULES = """- Screenshots and data from the harness are fake (Glucose Simulator, Pump Simulator). Never put names, emails,
+RULES = """- Screenshots and data from the harness are fake (simulated CGM, Pump Simulator). Never put names, emails,
   device identifiers (UDIDs, serials), Apple IDs, tokens or real CGM/pump data into code, commits, PRs or comments.
-- Trio is automated insulin delivery software: call out anything that changes dosing or safety behaviour, and do not
-  weaken a safety check to make a test pass.
+- Trio and Loop are automated insulin delivery software: call out anything that changes dosing or safety behaviour, and
+  do not weaken a safety check to make a test pass.
 - Push only to the branches listed above; never force-push or rewrite published history unless the person asks.
-- A submodule change is two commits: commit and push in the submodule, then bump its pointer in Trio."""
+- A submodule change is two commits: commit and push in the submodule, then bump its pointer in the superproject
+  (Trio, LoopWorkspace)."""
 
 
 def local_system_prompt(job: dict, rd: Path, workdir: Path, copy: bool, src: Path, repos: list[Repo],
                         subs: dict[str, str], mode: str, resumed: bool = True) -> str:
     target = "rooted-vnc" if job["inputs"]["target"] == "rooted-vnc" else "sim"
-    where = (f"`{workdir}` is a git worktree copy of the harness's Trio checkout, made for you at exactly the commits "
+    app = _app(job)
+    top = app.default_repo.split("/")[-1]
+    flag = "" if app.key == "trio" else f" --app {app.key}"
+    where = (f"`{workdir}` is a git worktree copy of the harness's {top} checkout, made for you at exactly the commits "
              f"the run tested (the shared checkout `{src}` is left alone: another run may use it at any time)."
              if copy else
-             f"`{workdir}` is the harness's own Trio checkout. It is shared: the next test run checks it out again "
+             f"`{workdir}` is the harness's own {top} checkout. It is shared: the next test run checks it out again "
              "(detached, discarding uncommitted changes), so commit and push before one starts.")
     intro = ("""The conversation so far was a sandboxed, non-interactive test run. That run is over: the person who started it pressed
 "Continue conversation" and is now talking to you through Remote Control (claude.ai/code or the Claude app). You can
@@ -382,10 +395,10 @@ and notes land there.
 
 To re-test a change, build that folder with the harness and install/launch it as the run did (trio-build, trio-install,
 trio-launch skills), for example
-`./trio-test-harness --target {target} build --in-place {workdir}{' --trollstore' if target == 'rooted-vnc' else ''}` from `{REPO_ROOT}`.
+`./trio-test-harness{flag} --target {target} build --in-place {workdir}{' --trollstore' if target == 'rooted-vnc' else ''}` from `{REPO_ROOT}`.
 The harness daemon may be stopped; start it with `./trio-test-harness --target {target} daemon start` if a command needs it.
-Look settings and screens up in Trio's docs before navigating: `./trio-test-harness docs search "..."` / `docs page ...`
-(https://triodocs.org as text: where each option lives, defaults, limits).
+Look settings and screens up in {app.name}'s docs before navigating: `./trio-test-harness{flag} docs search "..."` / `docs page ...`
+({app.docs_url} as text: where each option lives, defaults, limits).
 Before driving the device, run `./trio-test-harness busy`: it names whatever holds the device (another test run) or says
 idle, and nothing else counts. Do not infer runs from process lists; idle `claude ./trio-test-e2e ...` sessions are not runs.
 
@@ -406,8 +419,9 @@ FIRST_MESSAGE_NEW = ("(From the web UI) I started this session from a finished t
 
 
 def cloud_prompt(job: dict, rd: Path, primary: Repo, repos: list[Repo], subs: dict[str, str]) -> str:
+    app = _app(job)
     return f"""\
-Follow-up to an automated test of the Trio iOS app (AID software) by trio-test-harness on {job['inputs']['target']}.
+Follow-up to an automated test of the {app.name} iOS app (AID software) by trio-test-harness on {job['inputs']['target']}.
 This session has **{primary.slug}** checked out at branch `{primary.branch}` (the repository under test). It cannot
 build or run iOS apps: changes are re-tested by the person with the harness afterwards, from the pushed branch.
 
@@ -415,9 +429,9 @@ build or run iOS apps: changes are re-tested by the person with the harness afte
 
 {_repo_lines(None, repos, subs)}
 
-Clone other repositories from GitHub if you need them (Trio: `git clone --recurse-submodules`, then check out the
-commits above). Trio's documentation is https://triodocs.org (MkDocs; `search/search_index.json` has every section's
-text): look settings and screens up there.
+Clone other repositories from GitHub if you need them ({app.default_repo}: `git clone --recurse-submodules`, then check
+out the commits above). {app.name}'s documentation is {app.docs_url} (MkDocs; `search/search_index.json` has every
+section's text): look settings and screens up there.
 
 ## Test results
 
@@ -580,8 +594,9 @@ class Continuations:
             (d / "repos.json").write_text(json.dumps([asdict(r) for r in repos], indent=1) + "\n")
             system = local_system_prompt(job, rd, workdir, copy, src, repos, subs, mode, resumed=bool(sid))
             (d / "system-prompt.md").write_text(system)
-            pr = job.get("pr") or job["inputs"].get("trio") or "Trio"
-            name = f"Trio test follow-up: {pr}"[:80]
+            app = _app(job)
+            pr = job.get("pr") or job["inputs"].get("trio") or app.name
+            name = f"{app.name} test follow-up: {pr}"[:80]
             new_sid = None if sid else str(uuid.uuid4())       # a new session gets a known id, to resume it later
             cmd = ["claude", *(["--resume", sid, "--fork-session"] if sid else ["--session-id", new_sid]),
                    "--remote-control", name, "--add-dir", str(workdir),
@@ -594,7 +609,7 @@ class Continuations:
                               for r in repos],
                        terminal=(f"cd {REPO_ROOT} && claude --resume {sid} --fork-session --add-dir {workdir}" if sid else
                                  f"cd {REPO_ROOT} && claude --resume {new_sid} --add-dir {workdir}"))
-            self._spawn(d, meta, cmd, {**env, "TH_RUN": str(rd)}, REPO_ROOT)
+            self._spawn(d, meta, cmd, {**env, "TH_RUN": str(rd), "TH_APP": app.key}, REPO_ROOT)
         except (HarnessError, OSError, subprocess.SubprocessError) as e:
             self._save(d, meta, status="failed", error=str(e)[-2000:], ended=_now())
 
@@ -607,7 +622,7 @@ class Continuations:
         try:
             build = (read_json(rd / "run.json", {}) or {}).get("build") or {}
             _, repos, subs = plan(build)
-            # the repository under test: the PR's head (a submodule PR's repo, else Trio's), else Trio's branch
+            # the repository under test: the PR's head (a submodule PR's repo, else the app's), else the app's branch
             primary = next((r for r in repos if r.pr and r.url and r.branch), None) or \
                 next((r for r in repos if r.url and r.branch), None)
             if not primary:

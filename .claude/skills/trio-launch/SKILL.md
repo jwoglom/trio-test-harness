@@ -20,5 +20,12 @@ seconds, so run the next command right away) and `th --target rooted-vnc daemon 
 
 After launch: `th --target … shot --name launch`, dismiss "Update Available" with `th tap-text OK --exact`, and confirm the
 home screen with `th flow at-home` (looks for two of: History, Adjustments, Settings, Add Treatment).
+
+Loop (`th --app loop ...`): on the simulator `--preseed-onboarding` writes Loop's onboarding flag and LoopOnboarding's
+mock therapy settings into its app group's preferences (replacing the therapy settings of an install that has run).
+Loop then asks for notifications, Apple Health ("Turn On All", then "Allow" at the top right) and Bluetooth, which
+`th --app loop flow onboarding-walk` answers. On a phone nothing is pre-seeded: the walk holds the welcome screen's logo
+for 3 s, LoopOnboarding's own skip. Loop's home is its status screen; `flow at-home` looks for two of Add Meal, Bolus,
+Settings (toolbar icons, accessibility only) and the chart titles Active Insulin, Insulin Delivery, Active Carbohydrates.
 On the phone, skipping onboarding means Trio never asked for Bluetooth: the home shows "Bluetooth Required" until the
 permission exists (it does on the test phone now). Relaunch via SSH: `th device kill Trio` then `th --target rooted-vnc launch`.
