@@ -244,9 +244,10 @@ def dismiss_dialogs(drv: Driver, labels: list[str] | None = None, rounds: int = 
     return settle(drv, rounds=rounds, labels=labels)
 
 
-def walk_onboarding(drv: Driver, run: Run | None = None, *, max_steps: int = 20, settle_s: float = 1.0) -> None:
+def walk_onboarding(drv: Driver, run: Run | None = None, *, max_steps: int = 20, settle_s: float = 1.0) -> bool:
     """Skip Loop's onboarding from its welcome screen (hold the logo), answer the permission prompts that follow, and
-    stop at the home screen. Loop's full onboarding (therapy settings editors) is not walked."""
+    stop at the home screen. Loop's full onboarding (therapy settings editors) is not walked. True when the welcome
+    screen showed: Loop then runs on LoopOnboarding's mock settings, not pre-seeded ones."""
     held = 0
     for i in range(max_steps):
         time.sleep(settle_s)
@@ -256,7 +257,7 @@ def walk_onboarding(drv: Driver, run: Run | None = None, *, max_steps: int = 20,
             if run:
                 run.log_step("home", "Reached the home screen", shot)
             log("step: home")
-            return
+            return held > 0
         if _visible(drv, [WELCOME], shot):
             if held == 3:
                 raise HarnessError("onboarding: holding the welcome screen's logo did not skip onboarding; see the "
