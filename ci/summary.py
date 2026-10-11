@@ -9,10 +9,13 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from pathlib import Path
 
 ICON = {"passed": "✅", "failed": "❌", "partial": "⚠️", "running": "⏳"}
+# run.json's "app" (harness/apps.py); runs from before Loop support are Trio's
+APP = {"trio": ("Trio", "Trio"), "loop": ("Loop", "LoopWorkspace")}
 
 
 def main(argv=None) -> int:
@@ -25,7 +28,8 @@ def main(argv=None) -> int:
     out = []
     run = Path(args.run_dir) if args.run_dir else None
     if not run or not (run / "run.json").exists():
-        out.append("## Trio e2e: no run was created\n\nThe job failed before the harness started a run; see the step logs.")
+        name = APP.get(os.environ.get("IN_APP") or "trio", APP["trio"])[0]
+        out.append(f"## {name} e2e: no run was created\n\nThe job failed before the harness started a run; see the step logs.")
         print("\n".join(out))
         return 0
 
@@ -38,13 +42,14 @@ def main(argv=None) -> int:
         out.append(f"- **PR:** {meta['pr_url']}")
     build = meta.get("build") or {}
     git = build.get("git") or {}
-    built = {"Trio": git.get("trio_branch") or git.get("branch"), "commit": git.get("sha"),
+    _, repo = APP.get(meta.get("app") or build.get("app") or "trio", APP["trio"])
+    built = {repo: git.get("trio_branch") or git.get("branch"), "commit": git.get("sha"),
              "configuration": build.get("configuration"), "Xcode": build.get("xcode")}
     built = {k: v for k, v in built.items() if v}
     if built:
         out.append("- **Built:** " + ", ".join(f"{k} `{v}`" for k, v in built.items()))
     for c in (git.get("cherry_picks") or []) + (git.get("submodule_cherry_picks") or []):
-        out.append(f"- **Cherry-picked onto {c.get('submodule') or 'Trio'}:** {c['what']} ({c['applied']} commit(s))")
+        out.append(f"- **Cherry-picked onto {c.get('submodule') or repo}:** {c['what']} ({c['applied']} commit(s))")
     if git.get("packages_note"):
         out.append(f"- **Packages:** ⚠️ {git['packages_note']}")
     subs = git.get("submodules") or {}

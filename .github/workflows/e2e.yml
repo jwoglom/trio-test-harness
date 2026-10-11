@@ -1,21 +1,28 @@
 # Run trio-test-e2e on the iOS Simulator for a Trio PR or branch, optionally with submodule
 # (e.g. TandemKit) PRs or branches, on the self-hosted macOS workers (home-infra/macos-workers).
+# app=loop does the same for Loop, built from LoopKit/LoopWorkspace (`trio-test-e2e --app loop`).
 # Manual only:
 #   gh workflow run e2e.yml -R jwoglom/trio-test-harness -f submodules=jwoglom/TandemKit#395 -f post_comment=true
+#   gh workflow run e2e.yml -R jwoglom/trio-test-harness -f app=loop -f submodules=jwoglom/TandemKit#395
 name: Trio e2e (simulator)
-run-name: "e2e: ${{ inputs.trio || (!inputs.submodules && 'dev') || '' }}${{ inputs.trio && inputs.submodules && ' + ' || '' }}${{ inputs.submodules }}"
+run-name: "e2e${{ inputs.app == 'loop' && ' (Loop)' || '' }}: ${{ inputs.trio || (!inputs.submodules && 'dev') || '' }}${{ inputs.trio && inputs.submodules && ' + ' || '' }}${{ inputs.submodules }}"
 
 on:
   workflow_dispatch:
     inputs:
+      app:
+        description: "App under test (loop: Loop built from LoopKit/LoopWorkspace)"
+        type: choice
+        options: [trio, loop]
+        default: trio
       trio:
-        description: "Trio PR or branch (PR link, owner/repo#N, nightscout/Trio PR number, or branch; blank: dev, or the branch that has the submodule)"
+        description: "PR or branch of the app's repo (PR link, owner/repo#N, a nightscout/Trio or LoopKit/LoopWorkspace PR number, or branch; blank: dev, or the branch that has the submodule)"
         type: string
       submodules:
         description: "Submodules (PR links or branches: PR link, owner/repo#N, or NAME@branch; space-separated)"
         type: string
       cherry_pick:
-        description: "Cherry-pick onto Trio, in order (Trio PR = its own commits, commit sha, A..B, or branch; space-separated)"
+        description: "Cherry-pick onto the app's repo, in order (its PR = its own commits, commit sha, A..B, or branch; space-separated)"
         type: string
       submodule_cherry_pick:
         description: "Cherry-pick onto submodules, in order (submodule PR, NAME@sha, NAME@A..B, NAME@branch; space-separated)"
@@ -30,7 +37,7 @@ on:
         type: boolean
         default: true
       smoke:
-        description: "Configure the Glucose Simulator + Pump Simulator"
+        description: "Configure the simulated CGM + Pump Simulator"
         type: boolean
         default: true
       claude_model:
@@ -65,7 +72,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: e2e-${{ inputs.trio }}-${{ inputs.submodules }}
+  group: e2e-${{ inputs.app }}-${{ inputs.trio }}-${{ inputs.submodules }}
   cancel-in-progress: false
 
 jobs:
@@ -74,6 +81,9 @@ jobs:
     timeout-minutes: 150
     env:
       # Inputs reach scripts only through env, never interpolated into them.
+      IN_APP: ${{ inputs.app || 'trio' }}
+      # Every harness command in the job, the agent's included, acts on this app (harness/apps.py).
+      TH_APP: ${{ inputs.app || 'trio' }}
       IN_TRIO: ${{ inputs.trio }}
       IN_SUBMODULES: ${{ inputs.submodules }}
       IN_CHERRY_PICK: ${{ inputs.cherry_pick }}
@@ -89,6 +99,8 @@ jobs:
       # bare mirror of nightscout/Trio serves as a reference, so most objects come from local disk.
       TH_TRIO_ORIGIN: jwoglom/Trio
       TH_TRIO_REFERENCE: /Volumes/work/mirrors/nightscout/Trio.git
+      # LoopKit/LoopWorkspace carries feat/tandem-closed-beta (the TandemKit submodule); a mirror is used if a worker has one.
+      TH_LOOP_REFERENCE: /Volumes/work/mirrors/LoopKit/LoopWorkspace.git
       TH_GIT_MIRRORS: /Volumes/work/mirrors
       # Built by home-infra macos-workers (toolchains role), pinned to one WebDriverAgent release.
       TH_WDA_PREBUILT: /Volumes/work/cache/wda/current
@@ -96,7 +108,7 @@ jobs:
       - uses: actions/checkout@v4
 
       # Maps the source fields onto trio-test-e2e flags (rules in ci/inputs.py) and picks the PR
-      # the run is about: the Trio PR, else the first submodule PR.
+      # the run is about: the app's own PR, else the first submodule PR.
       - name: Validate inputs
         id: v
         run: python3 ci/inputs.py "$RUNNER_TEMP/e2e-args" >> "$GITHUB_OUTPUT"
@@ -125,6 +137,7 @@ jobs:
           set -uo pipefail
           # Per-job paths (workerd's task dir), so nothing is shared between runs.
           export TRIO_REPO="$RUNNER_TEMP/Trio" TH_DERIVED_DATA="${DERIVED_DATA:-$RUNNER_TEMP/DerivedData}"
+          export LOOP_REPO="$RUNNER_TEMP/LoopWorkspace" TH_LOOP_DERIVED_DATA="${DERIVED_DATA:-$RUNNER_TEMP/DerivedData}-loop"
           args=(--mode simulator --yes --no-agent --comment never --configuration "$IN_CONFIGURATION"
                 --onboarding "$([ "$IN_SKIP_ONBOARDING" = true ] && echo preseed || echo walk)")
           while IFS= read -r a; do args+=("$a"); done < "$RUNNER_TEMP/e2e-args"
@@ -150,11 +163,13 @@ jobs:
           RUN_DIR: ${{ steps.e2e.outputs.run_dir }}
         run: |
           set -euo pipefail
-          smoke_note=$([ "$IN_SMOKE" = true ] && echo ", with the Glucose Simulator and Pump Simulator configured" || true)
+          if [ "$IN_APP" = loop ]; then cgm="CGM Simulator" prompt_file=ci/agent-prompt-loop.md
+          else cgm="Glucose Simulator" prompt_file=ci/agent-prompt.md; fi
+          smoke_note=$([ "$IN_SMOKE" = true ] && echo ", with the $cgm and Pump Simulator configured" || true)
           extra=$([ -n "$IN_AGENT_INSTRUCTIONS" ] && printf '\nFocus from the person who started this run:\n%s\n' "$IN_AGENT_INSTRUCTIONS" || true)
-          prompt=$(RUN_DIR="$RUN_DIR" SMOKE="$smoke_note" EXTRA="$extra" .venv/bin/python -c '
+          prompt=$(RUN_DIR="$RUN_DIR" SMOKE="$smoke_note" EXTRA="$extra" PROMPT_FILE="$prompt_file" .venv/bin/python -c '
           import os, pathlib
-          t = pathlib.Path("ci/agent-prompt.md").read_text()
+          t = pathlib.Path(os.environ["PROMPT_FILE"]).read_text()
           print(t.format(run_dir=os.environ["RUN_DIR"], smoke_note=os.environ["SMOKE"], extra=os.environ["EXTRA"]))')
           # stream-json + ci/agent-stream.py: live progress in this log (model, each tool call, notes),
           # final answer into agent-summary.md for the job summary.
@@ -257,7 +272,7 @@ jobs:
         if: always() && steps.e2e.outputs.run_dir != ''
         uses: actions/upload-artifact@v7
         with:
-          name: trio-e2e-${{ github.run_id }}
+          name: ${{ inputs.app || 'trio' }}-e2e-${{ github.run_id }}
           path: ${{ steps.e2e.outputs.run_dir }}
           retention-days: 14
 
@@ -275,7 +290,7 @@ jobs:
         if: failure() && steps.e2e.outcome == 'failure'
         uses: actions/upload-artifact@v7
         with:
-          name: trio-e2e-${{ github.run_id }}-build-log
+          name: ${{ inputs.app || 'trio' }}-e2e-${{ github.run_id }}-build-log
           path: build/xcodebuild-*.log
           retention-days: 14
           if-no-files-found: ignore

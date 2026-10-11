@@ -16,7 +16,10 @@ they say where it is in the app and what it does.
    ./trio-test-e2e --mode simulator|rooted-vnc|iphone-usb --pr <Trio or submodule PR URL> [--trio-branch feat/tandem] [--cherry-pick <PR|sha|A..B|branch>] [--onboarding walk] [--yes]
    ./trio-test-e2e --mode simulator --branch dev            # a branch instead of a PR
    ./trio-test-e2e --mode rooted-vnc --skip-build --skip-install   # reuse the last build
+   ./trio-test-e2e --app loop --mode simulator --pr <TandemKit, LoopKit/Loop or LoopWorkspace PR>   # Loop instead of Trio
    ```
+   `--app loop` tests Loop built from LoopKit/LoopWorkspace (`feat/tandem-closed-beta` has TandemKit) through the same
+   stages; the agent hand-off sets `TH_APP=loop`, so every `th` command then acts on Loop and `th docs` reads LoopDocs.
    `rooted-vnc` = the jailbroken iPhone (TrollVNC + SSH), `iphone-usb` = any iPhone through macOS iPhone Mirroring. Inside Claude Code the script never spawns another Claude (it checks
    `CLAUDECODE`); from a plain terminal it hands off to `claude` with this workflow after the smoke test.
    Builds take 30–60 min on this iMac: run it in the background and keep the simulator shut down meanwhile if a

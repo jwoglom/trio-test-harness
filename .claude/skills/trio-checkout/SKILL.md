@@ -22,3 +22,8 @@ shares objects; git URLs to GitHub are rewritten to SSH (private submodules like
 initialised recursively and verified (`submodules not initialized: […]` means a clone failed); the output JSON lists
 `pr`, `pr_title`, `pr_body`, `branch`, `sha`, `submodule_overrides`, `submodule_pr`, and every submodule's commit.
 Never commit or push inside this checkout; it is disposable.
+
+Loop: the same commands with `th --app loop` check out LoopKit/LoopWorkspace into `$LOOP_REPO`. A TandemKit or
+LoopKit/Loop PR is a submodule PR (LoopWorkspace branches tried: `--trio-branch`, `TH_LOOP_BASE_BRANCH`
+(`feat/tandem-closed-beta`), dev, main; the base branch comes from LoopKit/LoopWorkspace when the checkout's origin is a
+fork without it).

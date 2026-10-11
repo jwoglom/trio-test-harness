@@ -41,3 +41,12 @@ Branch/PR builds use the harness's own clone (`$TRIO_REPO`, a reference clone of
 - Errors: `th build` prints `error:` lines; full log at `build/xcodebuild-<target>.log`. A failing build of the change under test is a test result — report it.
 - `--clean` wipes derived data (slow rebuild). `--configuration Release` if the user wants release behaviour.
 - Watch app / widgets are built with the scheme; nothing extra needed.
+
+## Loop (`th --app loop build ...`)
+Builds Loop from `$LOOP_REPO` (a clone of LoopKit/LoopWorkspace, default `~/repos/trio-test-harness/LoopWorkspace`,
+`TH_LOOP_REFERENCE` as its git reference) with the `LoopWorkspace` scheme into its own DerivedData
+(`TH_LOOP_DERIVED_DATA`). The flags are Trio's; a bare PR number is a LoopWorkspace PR, a LoopKit/Loop PR is a submodule
+PR, and with no branch the base is `feat/tandem-closed-beta`. The bundle id is `com.<team>.loopkit.Loop`
+(`MAIN_APP_BUNDLE_IDENTIFIER` in `build/override-loop-<target>.xcconfig`), the user's own team is read from the
+`LoopConfigOverride.xcconfig` two folders above the checkout, `--trollstore` makes `build/Loop.ipa` signed with
+`Loop/Loop/Loop.entitlements`, and the output is `build/last-build-loop.json`.

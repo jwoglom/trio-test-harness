@@ -20,3 +20,9 @@ Manual (what the flows do):
 Danger: the CGM settings sheet ends with a red **Delete CGM**; a stray tap there needs **Cancel**.
 Tuning: Glucose Simulator sheet (tap the glucose bubble) has Center Value, Amplitude, Noise, stale values, scenarios;
 on the sim the same keys are UserDefaults (`th sim defaults GlucoseSimulator_CenterValue 150`).
+
+Loop (`th --app loop flow add-cgm-sim` / `add-pump-sim`): the HUD at the top shows "Add CGM" / "Add Pump"; each opens
+an action sheet of that title, where **CGM Simulator** / **Pump Simulator** are set up at once, with no screens (on a
+retry the flows go through Settings, the toolbar's last icon, and close it with **Done**). A new CGM Simulator has no
+glucose model, so no readings: on the simulator `trio-test-e2e` writes a sine curve (110 ± 20 mg/dL) into its state and
+relaunches Loop; by hand, tap the glucose HUD ▸ Simulator Settings ▸ Model (Constant asks for one value).

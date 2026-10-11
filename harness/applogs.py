@@ -1,4 +1,6 @@
-"""`th logs`: read Trio's and TandemKit's log files from the installed app's data container.
+"""`th logs`: read Trio's and TandemKit's log files from the installed app's data container. Loop writes no text log
+of its own (its device log is the SQLite store Documents/DeviceLog/Storage.sqlite), so with --app loop only
+TandemKit's is there.
 
     th --target rooted-vnc logs tandem --grep bolus           # today's TandemKit log, matching entries
     th logs trio --since 10m                                    # Trio's log, the last 10 minutes
@@ -31,6 +33,14 @@ FILES = {
     "tandem": ["tandem/tandem_log_prev.txt", "tandem/tandem_log.txt"],
     "watch": ["logs/watch_log_prev.txt", "logs/watch_log.txt"],
 }
+APP_FILES = {"trio": ("trio", "tandem", "watch"), "loop": ("tandem",)}
+
+
+def files_for(app: str) -> dict[str, list[str]]:
+    """The log files the app (harness/apps.py key) writes, by name."""
+    return {name: FILES[name] for name in APP_FILES.get(app, tuple(FILES))}
+
+
 # Trio:      2026-09-25T23:09:30-0400 [deviceManager] File.swift - func - 12 - message
 # TandemKit: [2026-09-25T23:09:30-0400 WARNING] File.swift - func#12: message
 ENTRY = re.compile(r"^\[?(\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d[+-]\d{4})(?: (INFO|WARNING|ERROR|DEFAULT|DEBUG)\])?")
@@ -73,13 +83,15 @@ def read_files(target: str, bundle_id: str, relpaths: list[str]) -> dict[str, st
     raise HarnessError(f"th logs: target {target} is not supported (sim or rooted-vnc)")
 
 
-def default_bundle(target: str) -> str:
-    """The last build's bundle id when it was built for this target, else the target's configured one."""
+def default_bundle(target: str, app: str | None = None) -> str:
+    """The app's last build's bundle id when it was built for this target, else the target's configured one."""
+    from . import apps
     from .build import BuildInfo
     from .config import CONFIG
-    bi = BuildInfo.load()
+    a = apps.get(app) if app else apps.current()
+    bi = BuildInfo.load(a)
     built_for = "sim" if bi and bi.target == "sim" else "rooted-vnc" if bi and str(bi.target).startswith("device") else None
-    return bi.bundle_id if bi and built_for == target else CONFIG.bundle_id(target)
+    return bi.bundle_id if bi and built_for == target else a.bundle_id(CONFIG.team_for(target))
 
 
 _CONTAINERS: dict[tuple[str, str], str] = {}

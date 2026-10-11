@@ -29,6 +29,16 @@ from ..driver import Driver
 from ..report import Run
 from ..util import tmp_path, HarnessError, log
 
+# The flows API every app's module has (harness/apps.py picks the module): these names, step, settle, dismiss_dialogs,
+# at_home, walk_onboarding, reset_after_install, preseed_simulator, preseed_phone, offers, devices_configured,
+# add_cgm_simulator, add_pump_simulator, give_cgm_glucose, open_settings, reset_to_home, back_to_home.
+NAME = "Trio"
+CGM_SIMULATOR = "Glucose Simulator"
+PUMP_SIMULATOR = "Pump Simulator"
+ADD_CGM = "Add CGM"
+ADD_PUMP = "Add pump"
+PROMPTS_AFTER_PRESEED = False      # a pre-seeded Trio opens on its home screen
+
 NEXT_LABELS = ["Get Started", "Skip Nightscout Setup", "Next", "Continue", "Done", "OK"]
 PERMISSION_LABELS = ["Allow", "Allow While Using App", "OK", "Don't Allow"]
 HOME_MARKERS = ["Adjustments", "History", "Add Treatment", "Settings"]
@@ -64,6 +74,33 @@ def preseed_onboarding(container: Path) -> list[Path]:
         p.write_bytes(plistlib.dumps(True, fmt=plistlib.FMT_BINARY))
         written.append(p)
     return written
+
+
+def reset_after_install(drv: Driver, bundle_id: str) -> None:
+    """Trio's state is in its data container, which a new install starts empty."""
+
+
+def preseed_simulator(drv: Driver, bundle_id: str) -> list[Path]:
+    return preseed_onboarding(drv.app_data_container(bundle_id))
+
+
+def preseed_phone(bundle_id: str, *, onboarding: bool = True) -> bool:
+    """The same flags (and telemetry off) on the jailbroken phone, over SSH."""
+    from .. import devices as D
+    flags = {"crashlyticsSharingEnabled": False, "telemetrySharingEnabled": False}
+    if onboarding:
+        flags.update({"onboardingCompleted": True, "hasSeenFatProteinOrderChange": True})
+    D.ssh_preseed_flags(bundle_id, flags)
+    return True
+
+
+def give_cgm_glucose(drv: Driver, bundle_id: str) -> bool:
+    """Trio's Glucose Simulator has readings from the start."""
+    return False
+
+
+def offers(drv: Driver, label: str) -> bool:
+    return bool(drv.find(label, exact=True))
 
 
 def _visible(drv: Driver, labels: list[str], shot: Path | None = None) -> str | None:

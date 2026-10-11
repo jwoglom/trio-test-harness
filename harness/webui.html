@@ -92,12 +92,17 @@ button.small{padding:2px 9px;font-size:12px;margin-top:8px;display:block}
 <div class="layout">
   <form id="form" class="card" autocomplete="off">
     <h2>New run</h2>
+    <label>App</label>
+    <div class="seg">
+      <label><input type="radio" name="app" value="trio" checked>Trio</label>
+      <label><input type="radio" name="app" value="loop">Loop</label>
+    </div>
     <label>Target</label>
     <div class="seg">
       <label><input type="radio" name="target" value="rooted-vnc" checked>rooted-vnc (iPhone)</label>
       <label><input type="radio" name="target" value="simulator">simulator</label>
     </div>
-    <label for="trio">Trio PR or branch</label>
+    <label for="trio" id="triolabel">Trio PR or branch</label>
     <input type="text" id="trio" name="trio">
     <ul class="examples"><li><code>branch-name</code></li><li><code>upstream:branch-name</code></li><li><code>jwoglom/Trio@branch-name</code></li><li>GitHub link</li></ul>
     <div class="adds" id="adds-cherry_pick"></div>
@@ -107,7 +112,7 @@ button.small{padding:2px 9px;font-size:12px;margin-top:8px;display:block}
     <div class="adds" id="adds-submodule_cherry_pick"></div>
     <button type="button" class="small" data-add="submodule_cherry_pick" data-label="Submodule cherry-pick">Add submodule cherry-pick</button>
     <label class="check"><input type="checkbox" name="skip_onboarding" checked>Skip onboarding</label>
-    <label class="check"><input type="checkbox" name="cgm_sim" checked>Use Glucose Simulator</label>
+    <label class="check"><input type="checkbox" name="cgm_sim" checked><span id="cgmlabel">Use Glucose Simulator</span></label>
     <label class="check"><input type="checkbox" name="pump_sim" checked>Use Pump Simulator</label>
     <div class="section">
     <label class="check" style="margin-top:0"><input type="checkbox" name="agent" checked>Trigger agent</label>
@@ -144,7 +149,7 @@ button.small{padding:2px 9px;font-size:12px;margin-top:8px;display:block}
   <main id="main" class="stack"></main>
   <aside id="applogs" class="card" hidden>
     <div id="logsgrip" title="Drag to resize; double-click to reset"></div>
-    <div class="phonehead"><h2>Trio logs</h2><span id="logstate" class="hint"></span><span class="spacer" style="flex:1"></span>
+    <div class="phonehead"><h2 id="logstitle">Trio logs</h2><span id="logstate" class="hint"></span><span class="spacer" style="flex:1"></span>
       <input type="text" id="logfilter" placeholder="filter" title="Only lines containing this (case-insensitive)" style="width:160px;padding:3px 7px">
       <label class="check" style="margin:0"><input type="checkbox" id="logfollow" checked>follow</label>
       <button id="logsclose" type="button" title="Hide the log pane">×</button></div>
@@ -164,7 +169,7 @@ button.small{padding:2px 9px;font-size:12px;margin-top:8px;display:block}
       <button type="button" data-act="lock" title="Press the power button">Power / lock</button>
       <button type="button" data-act="unlock" title="Wake, swipe up, enter the passcode from .env">Unlock</button>
       <button type="button" data-act="wake" title="Power + swipe up if the screen is dark">Wake</button>
-      <button type="button" data-act="launch" title="Open Trio over SSH">Launch Trio</button>
+      <button type="button" data-act="launch" id="launchbtn" title="Open the app over SSH">Launch Trio</button>
     </div>
     <div class="typerow"><input type="text" id="typetext" placeholder="Type into the focused field"><button type="button" id="typebtn">Type</button></div>
     <div id="devmsg" class="hint" style="margin-top:6px"></div>
@@ -341,8 +346,9 @@ async function copyLog(id) {
 
 function renderHead(j) {
   const i = j.inputs, st = j.stages || {};
-  const facts = [["Target", i.target], ["Trio", i.trio || "(default)"],
-    ["Trio cherry-picks", i.cherry_pick], ["Submodule overrides", i.submodules], ["Submodule cherry-picks", i.submodule_cherry_pick], ["PR", j.pr],
+  const repo = i.app === "loop" ? "LoopWorkspace" : "Trio";
+  const facts = [["App", i.app === "loop" ? "Loop" : "Trio"], ["Target", i.target], [repo, i.trio || "(default)"],
+    [`${repo} cherry-picks`, i.cherry_pick], ["Submodule overrides", i.submodules], ["Submodule cherry-picks", i.submodule_cherry_pick], ["PR", j.pr],
     ["Agent", i.agent === false ? "not triggered" : `${i.claude_model}, ${i.agent_minutes} min`], ["Configuration", i.configuration],
     ["Focus", i.agent_instructions], ["Run", j.run_name], ["Started", when(j.created)]].filter(f => f[1]);
   $("#jobhead").innerHTML = `
@@ -466,11 +472,22 @@ function renderContinue(j) {
 
 // ---- app logs pane: Trio's log (and TandemKit's, when expanded) streamed from the installed app ----
 const logStreams = {trio: {off: null}, tandem: {off: null}};
-let logTimer = null, logTarget = null;
+let logTimer = null, logTarget = null, logKey = null;
+// the app the form is set to: names, the log pane and Launch follow it
+const appName = () => form.app.value === "loop" ? "Loop" : "Trio";
+function setApp() {
+  const loop = form.app.value === "loop";
+  $("#triolabel").textContent = `${loop ? "LoopWorkspace" : "Trio"} PR or branch`;
+  $("#cgmlabel").textContent = `Use ${loop ? "CGM" : "Glucose"} Simulator`;
+  $("#launchbtn").textContent = `Launch ${appName()}`;
+  $("#logstitle").textContent = `${appName()} logs`;
+  $("#logstoggle").textContent = `${$("#applogs").hidden ? "Show" : "Hide"} ${appName()} logs`;
+}
+for (const r of form.app) r.onchange = () => { setApp(); if (!$("#applogs").hidden) pollLogs(); };
 function setLogs(open) {
   $("#applogs").hidden = !open;
   document.querySelector(".layout").classList.toggle("with-logs", open);
-  $("#logstoggle").textContent = open ? "Hide Trio logs" : "Show Trio logs";
+  $("#logstoggle").textContent = `${open ? "Hide" : "Show"} ${appName()} logs`;
   store.set("applogs", open ? "1" : "0");
   clearTimeout(logTimer);
   if (open) pollLogs();
@@ -527,7 +544,7 @@ function renderLog(which, scroll) {
 $("#logfilter").oninput = () => { for (const k of Object.keys(logStreams)) renderLog(k, $("#logfollow").checked); };
 async function pollOne(which) {
   const s = logStreams[which];
-  const r = await api(`/api/applogs?which=${which}&target=${encodeURIComponent(logTarget)}&off=${s.off ?? ""}`);
+  const r = await api(`/api/applogs?which=${which}&target=${encodeURIComponent(logTarget)}&app=${form.app.value}&off=${s.off ?? ""}`);
   if (r.size === null) { if (!s.raw) { s.raw = "(no log file yet)"; renderLog(which); } return; }
   const first = s.off === null;
   if (first) s.raw = r.offset < r.size || r.size > 64 * 1024 ? "… earlier lines not shown …\n" : "";
@@ -541,14 +558,16 @@ async function pollOne(which) {
 async function pollLogs() {
   clearTimeout(logTimer);
   if ($("#applogs").hidden) return;
-  const t = form.target.value;
-  if (t !== logTarget) {                      // target switched: start both logs over
-    logTarget = t;
+  const t = form.target.value, key = `${t}/${form.app.value}`;
+  if (key !== logKey) {                       // target or app switched: start both logs over
+    logKey = key; logTarget = t;
     for (const [k, s] of Object.entries(logStreams)) { s.off = null; s.raw = ""; $(`#log-${k}`).textContent = ""; }
   }
   let more = false;
   try {
-    more = await pollOne("trio");
+    if (form.app.value === "loop") {          // Loop writes no text log of its own (harness/applogs.py)
+      logStreams.trio.raw = "(Loop writes no app log of its own; TandemKit's is below)"; renderLog("trio");
+    } else more = await pollOne("trio");
     if (tandemOpen()) more = (await pollOne("tandem")) || more;
     $("#logstate").textContent = t === "simulator" ? "simulator" : "iPhone";
   } catch (err) { $("#logstate").textContent = err.message.slice(0, 120); }
@@ -614,7 +633,7 @@ async function device(action, body = {}) {
   $("#devmsg").textContent = `${action}…`;
   try {
     const job = (location.hash.match(/^#\/job\/([\w-]+)/) || [])[1];
-    const res = await api(`/api/device/${action}`, {...body, job});
+    const res = await api(`/api/device/${action}`, {...body, job, app: form.app.value});
     $("#devmsg").textContent = res.message || "done";
     if (res.url) { $("#lastshot").href = res.url; $("#lastshot img").src = res.url; $("#lastshot").hidden = false; }
     if (action === "shot" && job && view?.job === job) { view.reportShown = null; }
@@ -624,6 +643,7 @@ async function device(action, body = {}) {
 for (const b of document.querySelectorAll("#phone .btns button")) b.onclick = () => device(b.dataset.act);
 $("#typebtn").onclick = () => { const t = $("#typetext").value; if (t) device("type", {text: t}).then(() => $("#typetext").value = ""); };
 $("#typetext").onkeydown = e => { if (e.key === "Enter") { e.preventDefault(); $("#typebtn").click(); } };
+setApp();
 if (store.get("phone") === "1" && form.target.value === "rooted-vnc") setPhone(true);
 if (store.get("applogs") === "1") setLogs(true);
 

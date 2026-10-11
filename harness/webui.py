@@ -217,6 +217,7 @@ def _base_env() -> dict:
 
 def _job_env(inp: dict) -> dict:
     env = _base_env()
+    env["TH_APP"] = inp.get("app") or "trio"     # every harness command of the job, the agent's included
     env["TH_BUILD_LOG_STDOUT"] = "1"      # the full xcodebuild output streams into the job log
     if inp.get("xcode"):
         env["TH_XCODE_APP"] = inp["xcode"]
@@ -265,7 +266,8 @@ class Manager:
 
     def submit(self, form: dict) -> Job:
         inp = self.validate(form)
-        e2e_args, pr = _ci("inputs").plan(inp["trio"], inp["submodules"], inp["cherry_pick"], inp["submodule_cherry_pick"])
+        e2e_args, pr = _ci("inputs").plan(inp["trio"], inp["submodules"], inp["cherry_pick"], inp["submodule_cherry_pick"],
+                                          inp["app"])
         jid = dt.datetime.now().strftime("%Y%m%d-%H%M%S")
         while (JOBS_DIR / jid).exists():
             jid += "x"
@@ -288,6 +290,9 @@ class Manager:
         target = text("target") or "rooted-vnc"
         if target not in TARGETS:
             raise ValueError(f"target must be one of {', '.join(TARGETS)}")
+        app = text("app") or "trio"
+        if app not in ("trio", "loop"):
+            raise ValueError("app must be trio or loop")
         conf = text("configuration") or "Debug"
         if conf not in ("Debug", "Release"):
             raise ValueError("configuration must be Debug or Release")
@@ -303,7 +308,7 @@ class Manager:
         xcode = text("xcode")
         if xcode and xcode not in _xcodes():
             raise ValueError(f"xcode: {xcode} is not installed")
-        return {"target": target, "trio": text("trio"), "submodules": text("submodules", 1000),
+        return {"app": app, "target": target, "trio": text("trio"), "submodules": text("submodules", 1000),
                 "cherry_pick": text("cherry_pick", 1000), "submodule_cherry_pick": text("submodule_cherry_pick", 1000),
                 "configuration": conf, "skip_onboarding": bool(f.get("skip_onboarding", True)),
                 "cgm_sim": bool(f.get("cgm_sim", f.get("smoke", True))),
@@ -347,7 +352,8 @@ class Manager:
 def _sims(inp: dict) -> list[str]:
     """The fake devices a job sets up (jobs from before the split have one "smoke" flag)."""
     old = inp.get("smoke", True)
-    return [n for n, k in (("Glucose Simulator", "cgm_sim"), ("Pump Simulator", "pump_sim")) if inp.get(k, old)]
+    cgm = "CGM Simulator" if inp.get("app") == "loop" else "Glucose Simulator"
+    return [n for n, k in ((cgm, "cgm_sim"), ("Pump Simulator", "pump_sim")) if inp.get(k, old)]
 
 
 def run_job(job: Job) -> None:
@@ -366,7 +372,7 @@ def run_job(job: Job) -> None:
     # The fake CGM/pump setup steps are left out of report.html and the comment, as in CI.
     sims = _sims(inp)
     cmd += ["--hide-setup-screenshots"] if sims else ["--no-smoke"]
-    cmd += ["--no-cgm-sim"] if sims and "Glucose Simulator" not in sims else []
+    cmd += ["--no-cgm-sim"] if sims == ["Pump Simulator"] else []
     cmd += ["--no-pump-sim"] if sims and "Pump Simulator" not in sims else []
     rc, out = job.sh(cmd, env)
     # The pipeline prints its run directory at the end ("run: <dir>"); runs/.current may belong to another session.
@@ -386,6 +392,8 @@ def run_job(job: Job) -> None:
         settings.write_text(json.dumps(_ci("claude-sandbox").settings(target), indent=1) + "\n")
         prompt_file, limits_file = (("agent-prompt.md", "agent-limits.md") if target == "sim"
                                     else ("agent-prompt-rooted-vnc.md", "agent-limits-rooted-vnc.md"))
+        if inp.get("app") == "loop":
+            prompt_file = prompt_file.replace(".md", "-loop.md")
         smoke_note = f", with the {' and '.join(sims)} configured" if sims else ""
         prompt = (REPO_ROOT / "ci" / prompt_file).read_text().format(run_dir=rd, smoke_note=smoke_note, extra=extra)
         from . import daemon as D
@@ -602,10 +610,12 @@ class Handler(BaseHTTPRequestHandler):
                 L.act(lambda d: d.type_text(text))
                 return self._json({"message": f"typed {len(text)} characters"})
             if action == "launch":
-                from . import devices as Dv
+                from . import apps, devices as Dv
                 from .build import BuildInfo
-                bi = BuildInfo.load()
-                bundle = bi.bundle_id if bi and str(bi.target).startswith("device") else CONFIG.bundle_id("rooted-vnc")
+                app = apps.get(str(body.get("app") or "trio"))
+                bi = BuildInfo.load(app)
+                bundle = bi.bundle_id if bi and str(bi.target).startswith("device") else \
+                    app.bundle_id(CONFIG.team_for("rooted-vnc"))
                 Dv.ssh_launch(bundle)
                 return self._json({"message": f"launched {bundle}"})
             simple = {"home": ("home", "Home pressed"), "lock": ("power", "power pressed"),
@@ -624,13 +634,14 @@ class Handler(BaseHTTPRequestHandler):
         """New bytes of the installed app's Trio or TandemKit log (the log pane polls this; harness/applogs.py)."""
         from . import applogs as A
         which = (q.get("which") or ["trio"])[0]
+        app = (q.get("app") or ["trio"])[0]
         rel = {"trio": "logs/log.txt", "tandem": "tandem/tandem_log.txt"}.get(which)
         target = TARGETS.get((q.get("target") or ["rooted-vnc"])[0])
-        if not rel or not target:
-            return self._json({"error": "which: trio|tandem, target: rooted-vnc|simulator"}, 400)
+        if not rel or not target or app not in ("trio", "loop") or which not in A.files_for(app):
+            return self._json({"error": "which: trio|tandem (Loop: tandem), target: rooted-vnc|simulator, app: trio|loop"}, 400)
         off = (q.get("off") or [""])[0]
         try:
-            res = A.read_tail(target, A.default_bundle(target), rel, int(off) if off.isdigit() else None)
+            res = A.read_tail(target, A.default_bundle(target, app), rel, int(off) if off.isdigit() else None)
         except (HarnessError, OSError) as e:
             return self._json({"error": str(e)[-600:]}, 502)
         return self._json(res)

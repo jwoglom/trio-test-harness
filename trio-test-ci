@@ -2,6 +2,7 @@
 """Trigger the "Trio e2e (simulator)" GitHub Actions workflow and follow it from the terminal.
 
     ./trio-test-ci -s jwoglom/TandemKit#395 --comment
+    ./trio-test-ci --app loop -s jwoglom/TandemKit#395      # the same PR in Loop (LoopKit/LoopWorkspace)
     ./trio-test-ci 1234 --model opus
     ./trio-test-ci feat/tandem -s TandemKit@my-branch --instructions "check the bolus sheet"
     ./trio-test-ci upstream:feat/tandem-closed-beta -c nightscout/Trio#1580   # a dev PR on the tandem branch
@@ -42,17 +43,18 @@ def parse_args(argv=None) -> argparse.Namespace:
         prog="trio-test-ci", description="Run the Trio e2e workflow on the macOS workers and follow it.",
         formatter_class=argparse.RawDescriptionHelpFormatter, epilog=__doc__.split("\n\n", 1)[1])
     p.add_argument("trio", nargs="?", default="",
-                   help="Trio PR or branch: PR link, owner/repo#N, nightscout/Trio PR number, or branch "
-                        "(blank: dev, or the branch that has the submodule)")
+                   help="PR or branch of the app's repo: PR link, owner/repo#N, a nightscout/Trio (or with --app loop, "
+                        "LoopKit/LoopWorkspace) PR number, or branch (blank: dev, or the branch that has the submodule)")
+    p.add_argument("--app", choices=["trio", "loop"], help="the app under test (default trio)")
     p.add_argument("-s", "--submodule", action="append", default=[], metavar="REF",
                    help="submodule PR (link or owner/repo#N) or NAME@branch; repeatable")
     p.add_argument("--submodule-cherry-pick", action="append", default=[], metavar="REF",
                    help="cherry-pick onto a submodule, in order: a submodule PR, NAME@sha, NAME@A..B or NAME@branch; repeatable")
     p.add_argument("-c", "--cherry-pick", action="append", default=[], metavar="REF",
-                   help="cherry-pick onto Trio, in order: a Trio PR (its own commits), commit sha, A..B or branch; repeatable")
+                   help="cherry-pick onto the app's repo, in order: its PR (its own commits), commit sha, A..B or branch; repeatable")
     p.add_argument("--configuration", choices=["Debug", "Release"])
     p.add_argument("--walk-onboarding", action="store_true", help="tap through onboarding instead of skipping it")
-    p.add_argument("--no-smoke", action="store_true", help="do not configure the Glucose Simulator + Pump Simulator")
+    p.add_argument("--no-smoke", action="store_true", help="do not configure the simulated CGM + Pump Simulator")
     p.add_argument("--model", metavar="MODEL", help="Claude model for the agent (default sonnet)")
     p.add_argument("--instructions", metavar="TEXT", help="extra focus for the agent")
     p.add_argument("--agent-minutes", type=int, metavar="N", help="agent time limit (default 30)")
@@ -72,6 +74,8 @@ def parse_args(argv=None) -> argparse.Namespace:
 def workflow_fields(a: argparse.Namespace) -> dict[str, str]:
     """Only what was given; the workflow's own defaults stay the source of truth."""
     f = {"trio": a.trio}
+    if a.app:
+        f["app"] = a.app
     if a.submodule:
         f["submodules"] = " ".join(a.submodule)
     if a.cherry_pick:
