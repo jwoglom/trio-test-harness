@@ -49,9 +49,12 @@ PERMISSION_LABELS = ["Allow", "Allow While Using App", "OK", TESTER]
 ONBOARDING_COMPLETE = "com.loopkit.Loop.OnboardingManager.IsComplete"
 
 
-def therapy_settings(*, dosing_enabled: bool = False) -> dict:
-    """LoopOnboarding's mock therapy settings (OnboardingUICoordinator.mockTherapySettingsAndSkipOnboarding), as the
-    legacy group-suite keys Loop's SettingsManager migrates at launch (LoopCore NSUserDefaults.swift). Open loop."""
+def therapy_settings(*, dosing_enabled: bool = False, dosing_strategy: int = 0, basal_rate: float = 1.2,
+                     max_basal: float = 6.0, max_bolus: float = 8.0) -> dict:
+    """Therapy settings as the legacy group-suite keys Loop's SettingsManager migrates at launch (LoopCore
+    NSUserDefaults.swift). The defaults are LoopOnboarding's mock settings
+    (OnboardingUICoordinator.mockTherapySettingsAndSkipOnboarding), open loop; `dosing_strategy` is
+    AutomaticDosingStrategy: 0 temp basal only, 1 automatic bolus."""
     import datetime as dt
     offset = int(dt.datetime.now().astimezone().utcoffset().total_seconds())
 
@@ -66,12 +69,12 @@ def therapy_settings(*, dosing_enabled: bool = False) -> dict:
             "dosingEnabled": dosing_enabled,
             "overridePresets": [],
             "glucoseTargetRangeSchedule": schedule([105.0, 110.0], "mg/dL"),
-            "maximumBasalRatePerHour": 6.0,
-            "maximumBolus": 8.0,
+            "maximumBasalRatePerHour": float(max_basal),
+            "maximumBolus": float(max_bolus),
             "minimumBGGuard": {"units": "mg/dL", "value": 75.0},
-            "dosingStrategy": 0,
+            "dosingStrategy": dosing_strategy,
         },
-        "com.loudnate.Naterade.BasalRateSchedule": schedule(1.2),
+        "com.loudnate.Naterade.BasalRateSchedule": schedule(float(basal_rate)),
         "com.loudnate.Naterade.InsulinSensitivitySchedule": schedule(50.0, "mg/dL"),
         "com.loudnate.Naterade.CarbRatioSchedule": schedule(15.0, "g"),
     }
@@ -103,14 +106,14 @@ def reset_after_install(drv, bundle_id: str) -> None:
     drv.drop_preferences_cache()
 
 
-def preseed_simulator(drv, bundle_id: str) -> list[Path]:
-    """Mark onboarding complete with LoopOnboarding's mock therapy settings (simulator only). On an install Loop has
-    run in, its therapy settings are replaced at its next launch."""
+def preseed_simulator(drv, bundle_id: str, *, settings: dict | None = None) -> list[Path]:
+    """Mark onboarding complete with `settings` (therapy_settings(); default LoopOnboarding's mock ones) on the
+    simulator. On an install Loop has run in, its therapy settings are replaced at its next launch."""
     drv.terminate(bundle_id)
     group, root = _app_group(drv, bundle_id)
     path = root / "Library" / "Preferences" / f"{group}.plist"
     values = plistlib.loads(path.read_bytes()) if path.exists() else {}
-    values.update(therapy_settings())
+    values.update(settings or therapy_settings())
     values[ONBOARDING_COMPLETE] = True
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_bytes(plistlib.dumps(values, fmt=plistlib.FMT_BINARY))
@@ -123,21 +126,37 @@ def preseed_phone(bundle_id: str, *, onboarding: bool = True) -> bool:
     return False
 
 
+CGM_STATE_FILE = "Documents/CGMManagerState.plist"
+
+
+def sine_curve_source(*, base: float = 110.0, amplitude: float = 20.0, period_hours: float = 6.0,
+                      frequency: int = 0) -> dict:
+    """A CGM Simulator data source (MockCGMDataSource raw values): glucose in mg/dL, `frequency` MeasurementFrequency
+    (0 a reading every 5 minutes, 1 every minute)."""
+    return {"model": {"kind": "sineCurve", "baseGlucose": float(base), "amplitude": float(amplitude),
+                      "period": period_hours * 3600.0, "referenceDate": time.time()},
+            "effects": {}, "dataPointFrequency": frequency}
+
+
+def write_cgm_simulator(container: Path, data_source: dict) -> Path:
+    """A CGM Simulator Loop restores at launch (its PersistedProperty CGMManagerState), before Loop has run."""
+    path = container / CGM_STATE_FILE
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(plistlib.dumps({"managerIdentifier": "MockCGMManager", "state": {"dataSource": data_source}},
+                                    fmt=plistlib.FMT_BINARY))
+    return path
+
+
 def give_cgm_glucose(drv, bundle_id: str, *, base: float = 110.0, amplitude: float = 20.0) -> bool:
-    """Give an added CGM Simulator a sine-curve glucose model (MockCGMDataSource raw values, mg/dL, one reading every
-    5 minutes) and relaunch Loop to read it (simulator only). False when there is no CGM Simulator to change."""
-    path = drv.app_data_container(bundle_id) / "Documents" / "CGMManagerState.plist"
+    """Give an added CGM Simulator a sine-curve glucose model and relaunch Loop to read it (simulator only). False
+    when there is no CGM Simulator to change."""
+    path = drv.app_data_container(bundle_id) / CGM_STATE_FILE
     drv.terminate(bundle_id)
     raw = plistlib.loads(path.read_bytes()) if path.exists() else None
     if not raw or raw.get("managerIdentifier") != "MockCGMManager":
         drv.launch(bundle_id)
         return False
-    raw.setdefault("state", {})["dataSource"] = {
-        "model": {"kind": "sineCurve", "baseGlucose": base, "amplitude": amplitude, "period": 6 * 3600.0,
-                  "referenceDate": time.time()},
-        "effects": {},
-        "dataPointFrequency": 0,
-    }
+    raw.setdefault("state", {})["dataSource"] = sine_curve_source(base=base, amplitude=amplitude)
     path.write_bytes(plistlib.dumps(raw, fmt=plistlib.FMT_BINARY))
     drv.launch(bundle_id)
     return True
