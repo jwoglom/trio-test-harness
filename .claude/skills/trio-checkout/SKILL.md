@@ -18,7 +18,10 @@ description: Check out the Trio source to test — a Trio PR/branch, or a PR on 
 | Your own working copy as-is | `th build --in-place ~/repos/Trio --checkout-only` |
 
 Facts: the checkout is a `--reference` clone of `TH_TRIO_REFERENCE` (~/repos/Trio) when that exists, so it is fast and
-shares objects; git URLs to GitHub are rewritten to SSH (private submodules like jwoglom/tandemkit need it); submodules are
+shares objects; git URLs to GitHub are rewritten to one transport, `TH_GIT_PROTOCOL` / `th --git-protocol`: `ssh` (default;
+needs a key in ssh-agent) or `https` (authenticates with the `gh` login) — private submodules like jwoglom/tandemkit need
+either. `Permission denied (publickey)` means no usable SSH key: rerun with `th --git-protocol https …` (`th doctor` shows
+which works); submodules are
 initialised recursively and verified (`submodules not initialized: […]` means a clone failed); the output JSON lists
 `pr`, `pr_title`, `pr_body`, `branch`, `sha`, `submodule_overrides`, `submodule_pr`, and every submodule's commit.
 Never commit or push inside this checkout; it is disposable.

@@ -116,6 +116,58 @@ def appsync_install(ipa: Path, udid: str | None = None) -> None:
 
 # ---------------- devicectl path (signed builds) -----------------
 
+def xcode_devices() -> list[dict]:
+    """iPhones CoreDevice (devicectl) knows: paired once in Xcode/Finder; reachable over USB or the network."""
+    out = []
+    for d in xcode.devicectl_devices():
+        hp, cp, dp = d.get("hardwareProperties", {}), d.get("connectionProperties", {}), d.get("deviceProperties", {})
+        if hp.get("platform") != "iOS":
+            continue
+        out.append({
+            "udid": hp.get("udid"),
+            "name": dp.get("name"),
+            "model": hp.get("marketingName") or hp.get("productType"),
+            "ios": dp.get("osVersionNumber"),
+            "transport": cp.get("transportType"),             # wired | localNetwork | None
+            "paired": cp.get("pairingState") == "paired",
+            "available": cp.get("tunnelState") not in (None, "unavailable"),
+            "developer_mode": dp.get("developerModeStatus"),
+        })
+    return out
+
+
+def pick_xcode_device(spec: str | None = None) -> str:
+    """Device for Xcode (devicectl) installs: `spec` (--device), else TH_XCODE_DEVICE, else the only paired iPhone on
+    USB, else the only reachable one. devicectl accepts a UDID, a CoreDevice identifier or the device name."""
+    spec = spec or CONFIG.get("TH_XCODE_DEVICE")
+    if spec:
+        return spec
+    devs = [d for d in xcode_devices() if d["paired"] and d["available"] and d["udid"]]
+    cands = [d for d in devs if d["transport"] == "wired"] or devs
+    if len(cands) == 1:
+        return cands[0]["udid"]
+    if not cands:
+        raise HarnessError("no paired iPhone reachable by Xcode: plug it in over USB, unlock it, trust this Mac and "
+                           "enable Developer Mode (`th device list` shows what devicectl sees)")
+    found = "; ".join(f"{d['model']} iOS {d['ios']} {d['udid']} ({d['transport']})" for d in cands)
+    raise HarnessError(f"several iPhones reachable by Xcode; pass --device or set TH_XCODE_DEVICE. Found: {found}")
+
+
+def xcode_install(app: Path, device: str | None = None) -> str:
+    """Install a team-signed Trio.app the way Xcode does (devicectl): any iPhone with Developer Mode, no jailbreak.
+    Returns the device it went to."""
+    dev = pick_xcode_device(device)
+    try:
+        devicectl_install(dev, app)
+    except HarnessError as e:
+        # devicectl mounts the developer disk image first, and the phone refuses while locked
+        if "DeviceLocked" in str(e) or "device is locked" in str(e):
+            raise HarnessError(f"{dev} is locked; unlock it and retry (Settings ▸ Display & Brightness ▸ Auto-Lock ▸ "
+                               "Never keeps it unlocked while testing)") from e
+        raise
+    return dev
+
+
 def devicectl_install(udid: str, app_or_ipa: Path) -> None:
     xcode.xcrun(["devicectl", "device", "install", "app", "--device", udid, str(app_or_ipa)], timeout=600)
 

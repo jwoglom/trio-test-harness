@@ -128,7 +128,7 @@ def stage_install(args, bi):
         D.appsync_install(Path(bi.ipa_path), CONFIG.get("TH_DEVICE_UDID") or None)
     else:
         from . import devices as D
-        D.devicectl_install(D.pick_udid(), Path(bi.app_path))
+        D.xcode_install(Path(bi.app_path))
 
 
 def stage_launch(args, bi, run):
@@ -328,8 +328,12 @@ def main(argv=None) -> int:
                         "outside Claude Code and `claude` is installed)")
     p.add_argument("--no-agent", dest="agent", action="store_false")
     p.add_argument("--yes", "-y", action="store_true", help="no prompts; defaults everywhere")
+    p.add_argument("--git-protocol", choices=["ssh", "https"],
+                   help="how git reaches GitHub: ssh (key in ssh-agent) or https (gh CLI login); default $TH_GIT_PROTOCOL or ssh")
     args = p.parse_args(argv)
     app = apps.select(args.app)
+    if args.git_protocol:
+        CONFIG.set("TH_GIT_PROTOCOL", args.git_protocol)
 
     if not args.mode:
         args.mode = "simulator" if args.yes else _ask("Target", default="simulator", choices=["simulator", "rooted-vnc", "iphone-usb"])

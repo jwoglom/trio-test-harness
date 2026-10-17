@@ -136,6 +136,8 @@ simulator --branch feat/tandem-closed-beta`):
 - The phone must be on the same network (or USB) as the new Mac. TrollVNC only allows what the RFB client asks for; our
   client requests raw encoding, 32bpp.
 - GitHub: `gh auth login` as jwoglom (repo scope). Trio origin is `git@github.com:jwoglom/Trio`; upstream `nightscout/Trio`.
+  Harness git uses SSH by default; when no key is loaded in ssh-agent (seen 2026-10-06 in Claude Code shells), use
+  `TH_GIT_PROTOCOL=https` / `th --git-protocol https`, which authenticates through that gh login.
 
 ## Known quirks
 - **Load**: the iOS 26 simulator on this Intel iMac is heavy (Metal shader compilers, indexing). Booting it while xcodebuild

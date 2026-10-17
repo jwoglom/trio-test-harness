@@ -24,7 +24,8 @@ DEFAULTS = {
     "TH_LOOP_BASE_BRANCH": "feat/tandem-closed-beta",   # LoopKit/LoopWorkspace's branch with the TandemKit submodule
     "TH_GIT_MIRRORS": "",             # dir of <owner>/<repo>.git bare mirrors used as --reference for submodules
     "TH_WDA_PREBUILT": "",            # derivedData of a prebuilt WebDriverAgentRunner (Build/Products/*.xctestrun)                # Trio branch to test submodule PRs against when not derivable
-    "TH_GIT_TOKEN": "",               # CI only (env, never a file): HTTPS token for GitHub instead of SSH
+    "TH_GIT_PROTOCOL": "ssh",         # GitHub git transport: ssh (key in ssh-agent) | https (auth via the gh CLI login)
+    "TH_GIT_TOKEN": "",               # CI only (env, never a file): HTTPS token for GitHub; overrides TH_GIT_PROTOCOL
     "TH_UPLOAD_TOKEN": "",            # CI only (env): user token that uploads PR-comment screenshots
     "TH_UPLOAD_REPO": "",             # owner/repo those uploads belong to (who can see them)
     "TH_DEVELOPER_TEAM": "",          # Apple Team ID for device builds; blank = simulator-only
@@ -34,6 +35,7 @@ DEFAULTS = {
     "TH_SIM_RUNTIME": "",             # e.g. "iOS 26.3"; blank = newest installed iOS runtime
     "TH_SIM_NAME": "TrioHarness",     # name of the dedicated simulator we create/boot
     "TH_DEVICE_UDID": "",             # physical iPhone UDID; blank = the only connected device
+    "TH_XCODE_DEVICE": "",            # iPhone for Xcode (devicectl) installs: UDID or name; blank = the only paired one on USB
     "TH_VNC_HOST": "localhost",       # TrollVNC host. localhost + TH_VNC_VIA_USB=1 => iproxy over USB
     "TH_VNC_PORT": "5901",
     "TH_VNC_LOCAL_PORT": "5901",      # local port iproxy listens on
@@ -99,6 +101,11 @@ class Config:
 
     def get(self, key: str, default: str = "") -> str:
         return self.values.get(key, default)
+
+    def set(self, key: str, value: str) -> None:
+        """Command-line override, for this process and the commands it starts (they read it from os.environ)."""
+        self.values[key] = value
+        os.environ[key] = value
 
     def bool(self, key: str) -> bool:
         return self.values.get(key, "").lower() in ("1", "true", "yes", "on")

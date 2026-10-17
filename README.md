@@ -62,8 +62,8 @@ Three connection modes (`--mode` / `--target`):
 
 | Piece | `simulator` | `rooted-vnc` (jailbroken iPhone) | `iphone-usb` (any iPhone, no root) |
 |---|---|---|---|
-| Build | `xcodebuild`, ad-hoc signing, same flags as Trio CI | unsigned build fake-signed with `codesign -s -` → `Trio.ipa` | automatic signing (`TH_DEVELOPER_TEAM`, Apple ID in Xcode) |
-| Install / launch | `simctl install/launch` | `pymobiledevice3 apps install` via **AppSync Unified**; `uiopen` over SSH | `xcrun devicectl` install; launch via Spotlight (⌘3) in the mirror |
+| Build | `xcodebuild`, ad-hoc signing, same flags as Trio CI | unsigned build fake-signed with `codesign -s -` → `Trio.ipa` | automatic signing (`TH_DEVELOPER_TEAM`, Apple ID in Xcode) = `th build --xcode` |
+| Install / launch | `simctl install/launch` | `pymobiledevice3 apps install` via **AppSync Unified**; `uiopen` over SSH | `xcrun devicectl` install (`th install --xcode`); launch via Spotlight (⌘3) in the mirror |
 | Screenshots | `simctl io screenshot` | **TrollVNC** framebuffer (native px) over Wi-Fi or USB (`iproxy`) | **iPhone Mirroring** window capture (phone-harness, MIT) |
 | Taps / typing | **WebDriverAgent** | VNC pointer/keyboard (right-click Home, middle Power) | HID-level CGEvents into the mirror window |
 | Find elements | accessibility tree (`th tree`, `th tap-text`) | tesseract OCR | Apple Vision OCR (phone-harness) |
@@ -116,6 +116,10 @@ uncommitted changes keep their real mtime. `TH_STABLE_MTIMES=0` turns it off; `-
 
 `harness.env` (gitignored) holds machine-specific settings — Apple team id, VNC password, simulator model. See `harness.env.example`.
 
+Git transport: every GitHub URL (Trio, forks, private submodules such as TandemKit) is rewritten to one protocol,
+`TH_GIT_PROTOCOL=ssh` (default; needs your key in ssh-agent) or `https` (authenticates through the `gh` login). Override per
+command with `th --git-protocol https …` or `trio-test-e2e --git-protocol https …`; `th doctor` reports whether it works.
+
 ### Simulator input backend
 `th wda build` compiles appium's WebDriverAgent (cloned into `vendor/`) for the simulator; `th wda start` keeps it running
 (`xcodebuild test-without-building`) on port 8100. The simulator driver uses it for taps, typing and the accessibility tree
@@ -134,8 +138,13 @@ See `docs/HANDOFF.md` for the current state and `docs/phone-setup.md` for the iP
 - Jailbroken iPhone with **TrollVNC** enabled (Settings ▸ TrollVNC), port 5901. Put `TH_VNC_HOST`, `TH_VNC_PASSWORD`, `TH_DEVICE_PASSCODE` in `.env`.
 - `th device vnc-check` grabs a frame; `th device list` shows the USB/usbmuxd view.
 - Installing builds: **AppSync Unified** on the phone + `th --target rooted-vnc install --appsync` (pymobiledevice3 over USB);
-  or TrollStore (iOS ≤ 17 only) via `--trollstore`; or signed builds (`TH_DEVELOPER_TEAM`, Apple ID in Xcode, Developer Mode) via devicectl.
+  or TrollStore (iOS ≤ 17 only) via `--trollstore`.
 - Details: `docs/phone-setup.md`.
+
+Any iPhone, no jailbreak (**Xcode install**): `th build --xcode` signs with your team (the checkout's `ConfigOverride.xcconfig`,
+else `TH_DEVELOPER_TEAM`; Apple ID in Xcode), then `th install --xcode [--device <udid|name>]` installs it with
+`xcrun devicectl`, as Xcode's Run does. Default device: `TH_XCODE_DEVICE`, else the only paired iPhone on USB. Needs Developer
+Mode, and the phone unlocked while installing. Install only — driving the phone needs `rooted-vnc` or `iphone-usb`.
 
 `iphone-usb` (macOS iPhone Mirroring, built on [phone-harness](https://github.com/ShawnPana/phone-harness), vendored under `vendor/`):
 - Mac and iPhone on the **same Apple ID**, Bluetooth + Wi-Fi on, iPhone Mirroring paired once (open the app, confirm on the phone), phone **locked** while mirroring.
@@ -212,7 +221,7 @@ who can read it) and the App posts the comment. Elsewhere, or if the upload fail
 link to the run instead.
 Secrets: `TRIO_E2E_APP_ID`, `TRIO_E2E_APP_KEY` (App with Contents: read,
 Pull requests: write) `CLAUDE_CODE_OAUTH_TOKEN`, and `TRIO_TEST_HARNESS_USER_PAT`. In CI the harness authenticates git with `TH_GIT_TOKEN` over
-HTTPS instead of SSH, and uses the workers' git mirrors (`TH_GIT_MIRRORS`) and prebuilt WebDriverAgent
+HTTPS instead of SSH (a token overrides `TH_GIT_PROTOCOL`), and uses the workers' git mirrors (`TH_GIT_MIRRORS`) and prebuilt WebDriverAgent
 (`TH_WDA_PREBUILT`).
 
 ## Web UI (the CI job, on this Mac)

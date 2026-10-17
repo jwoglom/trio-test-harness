@@ -84,6 +84,17 @@ def cmd_doctor(args):
     for t in ("gh", "git", "tesseract"):
         item(t, which(t), which(t) or "")
     cp = run(["gh", "auth", "status"], check=False, quiet=True); item("gh auth", cp.returncode == 0)
+    from . import build as B
+    try:
+        proto = B.git_protocol()
+        # TandemKit is private, so listing it checks the credentials as well as the transport
+        url = "https://github.com/jwoglom/TandemKit.git"
+        cp = run(["git", "ls-remote", url, "HEAD"], check=False, quiet=True, env=B.git_env(), timeout=30)
+        hint = {"ssh": "no usable SSH key: ssh-add it, or TH_GIT_PROTOCOL=https", "https": "gh auth login, or TH_GIT_PROTOCOL=ssh",
+                "token": "TH_GIT_TOKEN cannot read it"}[proto]
+        item(f"GitHub git access ({proto})", cp.returncode == 0, "private TandemKit readable" if cp.returncode == 0 else hint)
+    except HarnessError as e:
+        item("GitHub git access", False, str(e))
     try:
         import pymobiledevice3, requests, PIL  # noqa: F401
         item("python deps", True)
@@ -150,7 +161,7 @@ def cmd_doctor(args):
         except HarnessError as e:
             item("phone-harness", False, str(e)[:120], warn=True)
         item("TH_DEVELOPER_TEAM / your own override's team (signed builds)", CONFIG.get("TH_DEVELOPER_TEAM") or a.user_team(a.checkout),
-             "set" if CONFIG.get("TH_DEVELOPER_TEAM") else "needed only for iphone-usb installs (devicectl)", warn=True)
+             "set" if CONFIG.get("TH_DEVELOPER_TEAM") else "needed only for Xcode installs (th build/install --xcode, iphone-usb)", warn=True)
 
     print("\nsummary:", "ready" if ok else "some required items missing (see MISSING above)")
     return 0 if ok else 1
@@ -167,11 +178,14 @@ def cmd_build(args):
     if args.checkout_only:
         print(json.dumps(info, indent=2)); return 0
     target = _target(args)
+    if args.xcode and args.trollstore:
+        raise HarnessError("--xcode (team-signed) and --trollstore (fake-signed) are different builds; pick one")
     # build() knows sim | device; rooted-vnc / iphone-usb are device builds (the pipeline does the same mapping, and
     # without it the --trollstore fake-sign + .ipa step was silently skipped for `th --target rooted-vnc build`).
-    build_target = "sim" if target == "sim" else "device"
+    # --xcode is always a team-signed device build, whatever the target.
+    build_target = "sim" if target == "sim" and not args.xcode else "device"
     bi = B.build(src, build_target, configuration=args.configuration, clean=args.clean, git_info=info,
-                 trollstore=args.trollstore or target == "rooted-vnc")
+                 trollstore=not args.xcode and (args.trollstore or target == "rooted-vnc"))
     print(json.dumps(bi.__dict__, indent=2))
     return 0
 
@@ -183,6 +197,14 @@ def cmd_install(args):
     if not app or not app.exists():
         raise HarnessError("no built app; run `th build` first or pass --app")
     target = _target(args)
+    from . import devices as D
+    if args.xcode:
+        if bi and not args.app and bi.target != "device":
+            raise HarnessError(f"the last build is a {bi.target} build; Xcode installs need a team-signed device "
+                               "build: `th build --xcode`")
+        dev = D.xcode_install(app, args.device or (CONFIG.get("TH_DEVICE_UDID") if target == "rooted-vnc" else None))
+        log(f"installed {app.name} on {dev} via Xcode (devicectl)")
+        return 0
     if target == "sim":
         drv = get_driver("sim"); drv.boot()
         if args.reinstall and bi:
@@ -191,11 +213,9 @@ def cmd_install(args):
         log(f"installed {app.name} on simulator {drv.udid}")
         return 0
     # physical phones
-    from . import devices as D
     if target == "iphone-usb" and not (args.appsync or args.trollstore):
-        udid = D.pick_udid()
-        D.devicectl_install(udid, app)      # needs a signed build (TH_DEVELOPER_TEAM) and Developer Mode
-        log(f"installed on device {udid} via devicectl")
+        dev = D.xcode_install(app, args.device)      # needs a signed build (TH_DEVELOPER_TEAM) and Developer Mode
+        log(f"installed on device {dev} via Xcode (devicectl)")
         return 0
     if args.appsync:
         ipa = Path(args.ipa) if args.ipa else (Path(bi.ipa_path) if bi and bi.ipa_path else None)
@@ -230,9 +250,8 @@ def cmd_install(args):
             pass
         httpd.shutdown()
         return 0
-    udid = D.pick_udid()
-    D.devicectl_install(udid, app)
-    log(f"installed on device {udid} via devicectl")
+    dev = D.xcode_install(app, args.device or CONFIG.get("TH_DEVICE_UDID") or None)
+    log(f"installed on device {dev} via Xcode (devicectl)")
     return 0
 
 
@@ -396,9 +415,8 @@ def cmd_device(args):
             print(json.dumps(d))
         from . import xcode
         if xcode.find_xcode():
-            for d in xcode.devicectl_devices():
-                print("devicectl:", d.get("deviceProperties", {}).get("name"), d.get("hardwareProperties", {}).get("udid"),
-                      d.get("connectionProperties", {}).get("pairingState"))
+            for d in D.xcode_devices():
+                print("devicectl:", json.dumps(d))
     elif args.sub == "vnc-check":
         drv = get_driver("rooted-vnc")
         w, h = drv.screen_size()
@@ -723,6 +741,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--target", help="sim | rooted-vnc | iphone-usb (aliases: device=rooted-vnc, mirror=iphone-usb; default $TH_TARGET or sim)")
     p.add_argument("--app", choices=sorted(apps.APPS),
                    help="the app under test: trio or loop (LoopWorkspace); default $TH_APP, else trio")
+    p.add_argument("--git-protocol", choices=["ssh", "https"],
+                   help="how git reaches GitHub: ssh (key in ssh-agent) or https (gh CLI login); default $TH_GIT_PROTOCOL or ssh")
     sp = p.add_subparsers(dest="cmd", required=True)
 
     sp.add_parser("doctor", help="check the environment").set_defaults(fn=cmd_doctor)
@@ -743,6 +763,9 @@ def build_parser() -> argparse.ArgumentParser:
     b.add_argument("--configuration", default="Debug")
     b.add_argument("--clean", action="store_true")
     b.add_argument("--trollstore", action="store_true", help="device: ad-hoc sign and package an .ipa for TrollStore")
+    b.add_argument("--xcode", action="store_true",
+                   help="device build signed with your team (ConfigOverride.xcconfig / TH_DEVELOPER_TEAM), like Xcode; "
+                        "for `th install --xcode` on a non-jailbroken iPhone")
     b.add_argument("--no-fetch", action="store_true", help="skip submodule sync")
     b.add_argument("--checkout-only", action="store_true")
     b.set_defaults(fn=cmd_build)
@@ -751,6 +774,11 @@ def build_parser() -> argparse.ArgumentParser:
     i.add_argument("--app"); i.add_argument("--ipa"); i.add_argument("--reinstall", action="store_true")
     i.add_argument("--trollstore", action="store_true"); i.add_argument("--appsync", action="store_true",
                    help="device: install the ad-hoc IPA with pymobiledevice3 (phone has AppSync Unified)")
+    i.add_argument("--xcode", action="store_true",
+                   help="install a `th build --xcode` build with Xcode's devicectl: any iPhone with Developer Mode, "
+                        "unlocked; no jailbreak")
+    i.add_argument("--device", help="Xcode installs: UDID or name of the iPhone (default $TH_XCODE_DEVICE, else the "
+                                    "only paired iPhone on USB)")
     i.add_argument("--open-on-device", action="store_true",
                                                                           help="type the TrollStore link into Safari via VNC")
     i.add_argument("--serve-seconds", type=int, default=600)
@@ -882,6 +910,8 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv=None) -> int:
     args = build_parser().parse_args(argv)
+    if args.git_protocol:
+        CONFIG.set("TH_GIT_PROTOCOL", args.git_protocol)
     try:
         from . import apps
         apps.select(args.app)

@@ -11,7 +11,7 @@ description: Build and install the Trio iOS app from any branch, PR, or submodul
 | Want | Flags |
 |---|---|
 | The harness checkout as-is (`$TRIO_REPO`, default `~/repos/trio-test-harness/Trio`) | *(no flags)* |
-| The user's own working copy with local changes | `--in-place ~/repos/Trio` |
+| The user's own working copy with local changes | `--in-place ~/repos/Trio` (add `--no-fetch` to keep a submodule the user moved off its pinned commit; the sync resets it) |
 | A PR on a submodule (TandemKit, LoopKit…) | `--pr <submodule PR URL>` (Trio switches to the branch pinning it; `--trio-branch` to force) |
 | A branch of Trio's origin (jwoglom/Trio) | `--branch feat/tandem` |
 | A branch of another fork | `--branch nightscout/Trio@dev` or `--branch https://github.com/x/Trio#branch` |
@@ -23,8 +23,11 @@ Branch/PR builds use the harness's own clone (`$TRIO_REPO`, a reference clone of
 ## Targets
 - `--target sim` (default): ad-hoc signed like Trio CI — no Apple credentials. `th install` puts it on the `TrioHarness`
   simulator (created on demand from `TH_SIM_DEVICE`/`TH_SIM_RUNTIME`).
-- `--target rooted-vnc` **signed**: needs `TH_DEVELOPER_TEAM` in `harness.env` and an Apple ID signed into Xcode (or ASC API
-  key). Installs with `xcrun devicectl`. Requires Developer Mode on the phone.
+- `--xcode` (any target): a device build **signed with the user's team**, the same thing Xcode's Run button builds — for a
+  normal, non-jailbroken iPhone. Team: `DEVELOPER_TEAM` from the checkout's `ConfigOverride.xcconfig` (the user's usual Trio
+  setup), else `TH_DEVELOPER_TEAM`; needs that team's Apple ID in Xcode ▸ Settings ▸ Accounts (or an ASC API key). Builds
+  for `generic/platform=iOS`, so the phone need not be connected. Install with `th install --xcode` (see `trio-install`).
+  `iphone-usb` builds are the same signed build.
 - `--target rooted-vnc --trollstore`: unsigned build fake-signed with `codesign -s -` (every dylib incl. Trio.debug.dylib) + Trio's entitlements → `build/Trio.ipa` (no Apple credentials). Install it with
   `th --target rooted-vnc install --appsync` (phone has AppSync Unified; uses pymobiledevice3 over USB — the user's iOS 18
   phone), or `--trollstore --open-on-device` on an iOS ≤ 17 TrollStore phone (serves the IPA over HTTP and types the

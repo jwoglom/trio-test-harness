@@ -114,13 +114,27 @@ class BuildInfo:
 # ---------------- source checkout -----------------
 
 # Process-scoped git config, never prompting for credentials. Private submodules such as TandemKit
-# need auth: by default GitHub URLs are rewritten to SSH (the user's origin already uses SSH); with
-# TH_GIT_TOKEN set (CI, no SSH key) they go over HTTPS with that token instead.
+# need auth. TH_GIT_PROTOCOL picks how: "ssh" (default) rewrites GitHub URLs to SSH (the user's origin
+# already uses SSH; needs a key in ssh-agent); "https" rewrites them to HTTPS and authenticates through
+# the gh CLI's login (`gh auth git-credential`). With TH_GIT_TOKEN set (CI, no SSH key) they go over
+# HTTPS with that token instead, whatever TH_GIT_PROTOCOL says.
+GIT_PROTOCOLS = ("ssh", "https")
 GIT_ENV_SSH = {
     "GIT_TERMINAL_PROMPT": "0",
     "GIT_CONFIG_COUNT": "1",
     "GIT_CONFIG_KEY_0": "url.git@github.com:.insteadOf",
     "GIT_CONFIG_VALUE_0": "https://github.com/",
+}
+# Not hermetic, unlike token mode: the user's git identity (cherry-picks commit) and credential helpers stay.
+GIT_ENV_HTTPS = {
+    "GIT_TERMINAL_PROMPT": "0",
+    "GIT_CONFIG_COUNT": "3",
+    "GIT_CONFIG_KEY_0": "url.https://github.com/.insteadOf",
+    "GIT_CONFIG_VALUE_0": "git@github.com:",
+    "GIT_CONFIG_KEY_1": "url.https://github.com/.insteadOf",
+    "GIT_CONFIG_VALUE_1": "ssh://git@github.com/",
+    "GIT_CONFIG_KEY_2": "credential.https://github.com.helper",
+    "GIT_CONFIG_VALUE_2": "!gh auth git-credential",
 }
 # Token mode is hermetic: global/system git config is ignored, so a user-level SSH rewrite or a
 # credential manager that would prompt cannot interfere. The helper reads the token from the
@@ -137,14 +151,37 @@ GIT_ENV_TOKEN = {
 }
 
 
+def git_protocol() -> str:
+    """"token" when TH_GIT_TOKEN is set, else TH_GIT_PROTOCOL (ssh | https)."""
+    if CONFIG.get("TH_GIT_TOKEN"):
+        return "token"
+    proto = (CONFIG.get("TH_GIT_PROTOCOL") or "ssh").lower()
+    if proto not in GIT_PROTOCOLS:
+        raise HarnessError(f"TH_GIT_PROTOCOL={proto!r}: use ssh or https")
+    return proto
+
+
 def git_env() -> dict[str, str]:
-    token = CONFIG.get("TH_GIT_TOKEN")
-    return {**GIT_ENV_TOKEN, "TH_GIT_TOKEN": token} if token else dict(GIT_ENV_SSH)
+    proto = git_protocol()
+    if proto == "token":
+        return {**GIT_ENV_TOKEN, "TH_GIT_TOKEN": CONFIG.get("TH_GIT_TOKEN")}
+    return dict(GIT_ENV_HTTPS if proto == "https" else GIT_ENV_SSH)
 
 
 def _git(args: list[str], cwd: Path, **kw):
     env = {**git_env(), **(kw.pop("env", None) or {})}
-    return run(["git", *args], cwd=cwd, env=env, **kw)
+    try:
+        return run(["git", *args], cwd=cwd, env=env, **kw)
+    except HarnessError as e:
+        msg = str(e)
+        if "Permission denied (publickey)" in msg:
+            raise HarnessError(f"{msg}\nGitHub over SSH has no usable key: load it (`ssh-add --apple-use-keychain "
+                               "~/.ssh/id_ed25519`) or use HTTPS with your gh login (TH_GIT_PROTOCOL=https, "
+                               "or --git-protocol https)") from e
+        if git_protocol() == "https" and "could not read Username" in msg:
+            raise HarnessError(f"{msg}\nGitHub over HTTPS needs the gh CLI logged in for private repos "
+                               "(`gh auth login`), or use SSH (TH_GIT_PROTOCOL=ssh)") from e
+        raise
 
 
 def _check_submodules(src: Path) -> None:

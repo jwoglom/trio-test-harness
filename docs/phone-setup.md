@@ -23,6 +23,22 @@ Device (as of 2026-09-19): the user's test iPhone, iOS 18.6.1, **rootless jailbr
 - No accessibility tree over VNC. `th tap-text` / `th find` fall back to OCR (`harness/ocr.py`, tesseract, handles
   white-on-colour buttons via an inverted pass). Verified on synthetic iPhone-sized screenshots; validate on real Trio screens.
 
+## Installing on a non-jailbroken iPhone: Xcode (added 2026-10-06)
+For any iPhone with Developer Mode (paired with this Mac once in Xcode or Finder), install the way Xcode's Run does — a build
+signed with your team, installed with `devicectl`:
+```
+th build --in-place ~/repos/Trio --xcode --no-fetch   # signed with DEVELOPER_TEAM from the checkout's ConfigOverride.xcconfig
+th install --xcode                                    # xcrun devicectl device install app → the only paired iPhone on USB
+th install --xcode --device <udid|name>               # pick one when several are reachable (or set TH_XCODE_DEVICE)
+```
+- The build targets `generic/platform=iOS`, so the phone need not be connected or unlocked while building. (Building
+  straight to the device, `-destination id=<udid>`, waits for its developer disk image and times out on a locked phone.)
+- The install mounts the developer disk image first, which fails while the phone is locked
+  (`kAMDMobileImageMounterDeviceLocked`); the harness then says to unlock it. Auto-Lock ▸ Never keeps it unlocked while testing.
+- Verified 2026-10-06 on an iPhone SE (iOS 18.7.8, USB): `th build --xcode` of nightscout/Trio `main` (team from
+  `TH_DEVELOPER_TEAM`), then `th install --xcode` auto-picked the phone and installed in ~17 s.
+- This installs only; these phones have no VNC/SSH, so driving the app needs `iphone-usb` (iPhone Mirroring) or a person.
+
 ## Installing apps: AppSync Unified (installed 2026-09-20)
 TrollStore does **not** exist for iOS 18, so the `--trollstore` install path does not apply to this phone. AppSync Unified
 116.0 (https://github.com/akemin-dayo/AppSync) is now installed, so unsigned/ad-hoc IPAs install through installd:
