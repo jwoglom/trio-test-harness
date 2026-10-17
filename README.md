@@ -154,7 +154,7 @@ Mode, and the phone unlocked while installing. Install only — driving the phon
 ## CLI overview (`./trio-test-harness --help`; `th` = short alias in `bin/`)
 `doctor` · `build` · `install` · `launch` · `sim {list,runtimes,install-runtime,boot,shutdown,erase,container,defaults,openurl}` ·
 `device {list,vnc-check,serve-ipa,wake,ssh,diag,vnc-restart,kill,apps}` · `daemon {start,stop,status,restart}` · `wda {build,start,stop,status}` · `shot` · `tap` · `swipe` · `drag` · `scroll` · `type` · `key` · `home` · `tap-text` · `find` ·
-`tree` · `wait-text` · `ocr` · `logs [trio|tandem|watch|all]` · `db {stores,tables,schema,query,exec}` · `run {new,current,use,note,finish,list,steps}` · `report {html,pr,markdown}` ·
+`tree` · `wait-text` · `ocr` · `logs [trio|tandem|watch|all]` · `db {stores,tables,schema,query,exec}` · `oslog` · `crashes` · `files {ls,cat}` · `perf` · `run {new,current,use,note,finish,list,steps}` · `report {html,pr,markdown}` ·
 `flow {onboarding-walk,add-cgm-sim,add-pump-sim,back-home,dismiss,at-home}` · `test smoke`
 
 Runs live in `runs/<timestamp>-<name>/` (`screenshots/`, `steps.jsonl`, `run.json`, `report.html`).
@@ -180,6 +180,21 @@ picks another, e.g. Loop's `DeviceLog/Storage.sqlite`): `tables`, `schema ZTABLE
 SQL in one transaction, records a run step and relaunches the app. For states the simulators cannot produce (e.g. a bolus
 programmed on the pump). The web UI/CI agent's sandbox may read and write only that app's simulator containers
 (`ci/claude-sandbox.py` looks them up when it writes the settings, after the install).
+
+More debugging (`harness/appdebug.py`; simulator and rooted-vnc, through the daemon so the sandboxed agent can use them):
+- `th oslog [--since 10m] [--grep RE -i] [--level debug] [--subsystem S] [--all] [--save]`: the system log of the app's
+  process, its frameworks included (TandemKit, LoopKit); Apple's own subsystems only with `--all`. Simulator: `log show`
+  over its store (minutes on a small Mac); `--stream 30` records 30 s live with debug messages, and `--enable-debug`
+  makes the store keep the app's and TandemKit's debug messages. Phone: a `.logarchive` collected over USB.
+- `th crashes [--since 1d] [--save]`: the app's crash reports since the run started, summarised (exception, termination
+  reason, crashed thread). `--save` copies them into the run's `crashes/` with Mac/phone identifiers removed, one step each;
+  `trio-test-e2e`, the CI job and the web UI do that after their app sessions. Simulator crashes come from this Mac's
+  `~/Library/Logs/DiagnosticReports`, the phone's from `pymobiledevice3 crash pull`.
+- `th files ls [dir]` / `th files cat <path> [--save]`: the app's `Documents/` (Trio's OpenAPS JSON state such as
+  `monitor/iob.json`, `settings/profile.json`; property lists print as JSON).
+- `th perf [--watch 120 --interval 5] [--save]`: pid, CPU %, resident and physical-footprint memory, threads; `--save`
+  appends to the run's `perf.csv`. `--leaks` (simulator) runs `leaks`, slow, and on builds without get-task-allow it sees
+  only read-only memory, so its count is a lower bound.
 
 ## PR reporting
 `./trio-test-harness report pr <PR> [--artifact-url <link>] [--max-shots N]` posts a comment whose screenshots are uploaded

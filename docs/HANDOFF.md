@@ -69,6 +69,16 @@ macOS iPhone Mirroring using phone-harness; driver written and window capture ve
   on Trio PR 1580); with them it works, and another app's container (Safari) stays unreadable.
   `blockReadsOutsideWorkingDirectories` also removes sandboxed commands' reads of /Users, so the containers need
   `allowRead` as well as `allowWrite`. Loop's store (`Model.sqlite` in the app group) is not verified yet.
+- **`th oslog` / `crashes` / `files` / `perf`, 2026-10-17 (Trio on the simulator, directly and from the agent's
+  sandbox through the daemon)**: `oslog --since` (`log show`, ~20 s here, minutes while the Mac is busy) shows Trio's
+  debug lines once `--enable-debug` set the subsystem to persist debug; `--stream N` records them live (log's own
+  `--timeout` ends it: killing xcrun left the in-simulator `log stream` running). `crashes` found a report of a
+  SIGSEGV/SIGABRT sent to the app (macOS wrote it a couple of minutes later, and an external SIGABRT alone wrote none),
+  `--save` stored it without the simulator's UUID or home paths and logged a step, which report.html shows; the pipeline's
+  `collect_crashes` did the same. `files ls|cat` (plists as JSON, `..` refused); `perf` and `--watch --save` (perf.csv).
+  `perf --leaks`: the simulator build is "not debuggable" (no get-task-allow), so leaks sees only read-only memory and
+  takes minutes on this Mac. **Unverified: every phone (rooted-vnc) path** — the phone was not reachable (not on USB,
+  SSH unreachable): `syslog collect` + `log show` on the archive, `crash pull`, `files` over SSH, `ps` over SSH.
 
 ## Still unverified
 - `th report pr` against a real PR (gh --attach inline uploads; ask before posting).

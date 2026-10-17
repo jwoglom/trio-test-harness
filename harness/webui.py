@@ -424,6 +424,8 @@ def run_job(job: Job) -> None:
                              '--allowedTools "Bash(./trio-test-harness:*)" "Bash(./bin/th:*)" "Bash(sleep:*)" Read Glob Grep '
                              '| "$PY" ci/agent-stream.py "$OUT"'], agent_env, timeout=inp["agent_minutes"] * 60)
         finally:
+            # crash reports from the agent's session (the e2e step saved those before it)
+            job.sh(["./trio-test-harness", "--target", target, "crashes", "--save", "--run", str(rd)], env)
             lock.__exit__(None, None, None)
             if started:
                 D.stop(target)

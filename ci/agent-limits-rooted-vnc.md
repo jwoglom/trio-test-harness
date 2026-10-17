@@ -16,6 +16,13 @@ try to work around them.
   what the app did behind a screen (a bolus recorded, a pump error, a history entry). Quote only the lines that
   matter, and leave out anything identifying (pump or sensor serial numbers, device names, IDs, tokens) from notes,
   the summary and screenshots' notes.
+- More debugging, also through the daemon (`<cmd> --help`): `oslog [--since 10m] [--grep RE -i] [--level debug]`
+  is the system log of the app's process, the app's own frameworks included (TandemKit, LoopKit);
+  `crashes` shows the app's crash reports since the run started (exception, reason, crashed thread) and
+  `crashes --save` puts them into the run: run it whenever the app vanished or restarted, and report a crash as a
+  finding. `files ls [dir]` / `files cat <path>` read the files in the app's Documents/ (Trio's OpenAPS state: e.g.
+  `monitor/iob.json`, `settings/profile.json`). `perf` shows the app's CPU and memory; `perf --watch 60 --save`
+  samples it into the run, for checking a change that could cost CPU or memory.
 - Docs: `./trio-test-harness docs search "<words>"`, `docs toc`, `docs page <path or URL>[#section]` read the app's
   official documentation as text: https://triodocs.org for Trio, LoopDocs (https://loopkit.github.io/loopdocs/) for
   Loop. **Always look a setting or option up there first** to learn which screen it is on, what it is called and

@@ -24,6 +24,8 @@ phone over TrollVNC (tesseract OCR), or any iPhone through iPhone Mirroring (Vis
 (the app's own log files, to confirm what happened behind a screen; see `th logs --help`).
 `db tables` · `db schema ZTABLE` · `db query "SELECT …"` · `db exec "UPDATE …"` (sim: the app's Core Data store; exec
 terminates the app, backs the store up into the run and relaunches; change rows, do not insert; see `th db --help`).
+`oslog [--since 10m] [--grep RE] [--level debug]` (the app process's system log) · `crashes [--save]` (crash reports
+since the run started) · `files ls|cat` (the app's Documents/) · `perf [--watch N --save] [--leaks]` (CPU/memory).
 Simulator extras: `th sim defaults <key> <value> [--type -bool]` (UserDefaults of the app), `th sim container` (data path),
 `th sim openurl <url>`, `th sim erase` (factory reset the harness simulator),
 `th lock` / `th unlock` / `th locked` (lock the simulator through WebDriverAgent; `shot` then captures the real Lock Screen).

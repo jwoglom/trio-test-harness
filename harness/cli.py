@@ -374,6 +374,148 @@ def cmd_logs(args):
     return 0
 
 
+def _appdebug_doc():
+    from . import appdebug
+    return appdebug.__doc__
+
+
+def _debug_bundle(args, target: str) -> str:
+    """--bundle-id, else the app as installed on the simulator / the last build's for the phone."""
+    from . import appdb, applogs
+    if args.bundle_id:
+        return args.bundle_id
+    return appdb.installed_bundle(get_driver("sim"), _app()) if target == "sim" else applogs.default_bundle(target)
+
+
+def cmd_oslog(args):
+    """The system log of the app's process (harness/appdebug.py)."""
+    import re
+    from . import appdebug as A, applogs
+    target, app = _target(args), _app()
+    bundle = _debug_bundle(args, target)
+    if args.enable_debug or args.disable_debug:
+        subs = [args.subsystem] if args.subsystem else [s.format(bundle=bundle) for s in A.DEBUG_SUBSYSTEMS[app.key]]
+        mode = A.call(target, "oslog_config", subs, bool(args.enable_debug))
+        print(f"{', '.join(subs)}: {mode}")
+        return 0
+    if args.stream:
+        log(f"recording {app.name}'s log for {args.stream:g} s")
+        entries = A.call(target, "oslog_stream", app.name, args.stream, args.level or "debug", args.subsystem, args.all)
+    else:
+        start = applogs.parse_since(args.since).astimezone().strftime("%Y-%m-%d %H:%M:%S")
+        entries = A.call(target, "oslog_entries", app.name, start, args.level or "info", args.subsystem, args.all)
+    if args.grep:
+        rx = re.compile(args.grep, re.I if args.ignore_case else 0)
+        entries = [e for e in entries if rx.search(e["msg"]) or rx.search(e["category"])]
+    lines = [A.format_entry(e) for e in entries]
+    if args.save:
+        dest = _run(args).path / "logs" / f"oslog-{time.strftime('%Y%m%d-%H%M%S')}.txt"
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        dest.write_text("\n".join(lines) + "\n")
+        print(f"{dest} ({len(lines)} entries)")
+        return 0
+    print("\n".join(lines[-args.lines:] if args.lines else lines) or "(no matching entries)")
+    return 0
+
+
+def cmd_crashes(args):
+    """The app's crash reports (harness/appdebug.py)."""
+    from . import appdebug as A, applogs
+    target, app = _target(args), _app()
+    bundle = _debug_bundle(args, target)
+    run_ = None
+    try:
+        run_ = _run(args)
+    except HarnessError:
+        pass
+    since = (applogs.parse_since(args.since).timestamp() if args.since
+             else (A.run_started(run_) if run_ else None) or time.time() - 86400)
+    if args.save:
+        if not run_:
+            raise HarnessError("--save needs a run (`th run new <name>` or --run DIR)")
+        new = A.save_crashes(run_, target, app.name, bundle, since)
+        for r in new:
+            print(f"== crashes/{r['name']}\n{A.summarize_crash(r['text'], args.frames)}")
+        print(f"{len(new)} new crash reports saved into {run_.path / 'crashes'}")
+        return 0
+    reports = A.call(target, "crash_reports", app.name, bundle, since)
+    for r in reports:
+        print(f"== {r['name']}\n{A.summarize_crash(r['text'], args.frames)}")
+    if not reports:
+        print(f"(no crash reports of {bundle} since {time.strftime('%Y-%m-%d %H:%M', time.localtime(since))})")
+    return 0
+
+
+def cmd_files(args):
+    """Files in the app's Documents/ (harness/appdebug.py)."""
+    from . import appdebug as A
+    target = _target(args)
+    bundle = _debug_bundle(args, target)
+    if args.sub == "ls":
+        files = A.call(target, "list_files", bundle, args.path or "")
+        for f in files:
+            when = time.strftime("%Y-%m-%d %H:%M", time.localtime(f["mtime"])) if f.get("mtime") else ""
+            print(f"{f['size']:>10}  {when:16}  {f['path']}")
+        if not files:
+            print(f"(no files under Documents/{args.path or ''})")
+        return 0
+    text = A.decode_file(args.path, A.call(target, "read_file", bundle, args.path))
+    if args.save:
+        dest = _run(args).path / "files" / args.path.lstrip("/")
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        dest.write_text(text)
+        print(dest)
+        return 0
+    print(text)
+    return 0
+
+
+def cmd_perf(args):
+    """CPU and memory of the running app (harness/appdebug.py)."""
+    import csv
+    from . import appdebug as A
+    target, app = _target(args), _app()
+    bundle = _debug_bundle(args, target)
+    run_ = None
+    if args.save:
+        run_ = _run(args)
+    if args.leaks:
+        log("running leaks on the app (minutes on a small Mac)")
+        r = A.call(target, "leaks", bundle)
+        print(r["summary"])
+        if r.get("restricted"):
+            print("note: the build is not debuggable (no get-task-allow), so leaks saw only read-only memory: the "
+                  "count is a lower bound")
+        for count, size, name in r["types"]:
+            print(f"{count:>6} {size:>10} B  {name}")
+        if run_:
+            run_.log_step("perf", r["summary"])
+        return 0
+    fields = ["time", "pid", "cpu", "rss_mb", "footprint_mb", "threads", "cpu_time"]
+    rows = []
+    start = time.time()
+    for k in range(int((args.watch or 0) // args.interval) + 1):       # samples at 0, interval, ... watch seconds
+        time.sleep(max(0.0, start + k * args.interval - time.time()))
+        s = A.call(target, "perf_sample", app.name, bundle)
+        s["time"] = time.strftime("%H:%M:%S", time.localtime(s.pop("t")))
+        rows.append(s)
+        print("  ".join(f"{k}={s.get(k)}" for k in fields))
+    if run_:
+        out = run_.path / "perf.csv"
+        new = not out.exists()
+        with open(out, "a", newline="") as fh:
+            w = csv.DictWriter(fh, fieldnames=fields, extrasaction="ignore")
+            if new:
+                w.writeheader()
+            w.writerows(rows)
+        fp = [r["footprint_mb"] for r in rows if r.get("footprint_mb") is not None]
+        note = (f"{len(rows)} samples: cpu avg {sum(r['cpu'] for r in rows) / len(rows):.1f}% max "
+                f"{max(r['cpu'] for r in rows):.1f}%" + (f", footprint {min(fp)}-{max(fp)} MB" if fp else ""))
+        run_.log_step("perf", note, file="perf.csv")
+        print(f"{out}: {note}")
+    return 0
+
+
 def _appdb_doc():
     from . import appdb
     return appdb.__doc__
@@ -879,6 +1021,43 @@ def build_parser() -> argparse.ArgumentParser:
     lg.add_argument("--run", help="run dir for --save (default: $TH_RUN / the current run)")
     lg.add_argument("--bundle-id", help="default: the last build's, else the target's")
     lg.set_defaults(fn=cmd_logs)
+    def _debug_parser(name, **kw):
+        q = sp.add_parser(name, description=_appdebug_doc(), formatter_class=argparse.RawDescriptionHelpFormatter, **kw)
+        q.add_argument("--bundle-id", help="default: the app as installed (simulator) / the last build's (phone)")
+        q.add_argument("--run", help="run dir for --save (default: $TH_RUN / the current run)")
+        return q
+    ol = _debug_parser("oslog", help="the system log of the app's process (all its frameworks): show, record, enable debug")
+    ol.add_argument("--since", default="10m", help="30s, 10m, 2h, 1d or an ISO time (default 10m)")
+    ol.add_argument("--level", choices=["default", "info", "debug"], help="include info / debug messages (default info; "
+                    "--stream: debug)")
+    ol.add_argument("--subsystem", help="only this subsystem (prefix), e.g. com.jwoglom.TandemKit")
+    ol.add_argument("--all", action="store_true", help="include Apple's frameworks (com.apple.*: UIKit, CoreData, ...)")
+    ol.add_argument("-g", "--grep", metavar="REGEX", help="only messages (or categories) matching"); ol.add_argument("-i", "--ignore-case", action="store_true")
+    ol.add_argument("-n", "--lines", type=int, default=200, help="last N entries (default 200; 0 = all)")
+    ol.add_argument("--stream", type=float, metavar="SECONDS", help="simulator: record the live log this long instead")
+    ol.add_argument("--enable-debug", action="store_true", help="simulator: keep the app's and TandemKit's (or "
+                    "--subsystem's) debug messages from now on")
+    ol.add_argument("--disable-debug", action="store_true", help="simulator: back to the default")
+    ol.add_argument("--save", action="store_true", help="write every matching entry into the run's logs/")
+    ol.set_defaults(fn=cmd_oslog)
+    cr = _debug_parser("crashes", help="the app's crash reports: exception, reason, crashed thread; --save into the run")
+    cr.add_argument("--since", help="default: the run's start, else 1d")
+    cr.add_argument("--frames", type=int, default=12, help="crashed thread frames to show (default 12)")
+    cr.add_argument("--save", action="store_true", help="copy new ones (identifiers removed) into the run's crashes/, "
+                    "one run step each")
+    cr.set_defaults(fn=cmd_crashes)
+    fs = _debug_parser("files", help="files in the app's Documents/ (Trio: OpenAPS JSON state): ls, cat")
+    fss = fs.add_subparsers(dest="sub", required=True)
+    fss.add_parser("ls", help="list (recursive)").add_argument("path", nargs="?", default="")
+    fc = fss.add_parser("cat", help="print one; property lists as JSON"); fc.add_argument("path")
+    fc.add_argument("--save", action="store_true", help="write it into the run's files/ instead")
+    fs.set_defaults(fn=cmd_files, save=False)
+    pf = _debug_parser("perf", help="CPU and memory of the running app; --watch to sample, --leaks (simulator)")
+    pf.add_argument("--watch", type=float, metavar="SECONDS", help="keep sampling this long")
+    pf.add_argument("--interval", type=float, default=5, help="seconds between samples (default 5)")
+    pf.add_argument("--leaks", action="store_true", help="simulator: leaked allocations (`leaks`), by type")
+    pf.add_argument("--save", action="store_true", help="append the samples to the run's perf.csv and note them as a step")
+    pf.set_defaults(fn=cmd_perf)
     db = sp.add_parser("db", help="the app's local database (Core Data SQLite store) on the simulator: query or change it",
                        description=_appdb_doc(), formatter_class=argparse.RawDescriptionHelpFormatter)
     dbs = db.add_subparsers(dest="sub", required=True)

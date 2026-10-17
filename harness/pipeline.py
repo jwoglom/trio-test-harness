@@ -209,7 +209,31 @@ def stage_smoke(args, drv, run, bi=None):
 def stage_report(args, run) -> Path:
     from .report import render_html
     log("== stage: report")
+    collect_crashes(args, run)
     return render_html(run)
+
+
+def collect_crashes(args, run) -> None:
+    """The app's crash reports since the run started go into the run's crashes/, one step each (best effort)."""
+    from . import appdebug, apps
+    from .build import BuildInfo
+    from .cli import norm_target
+    target = norm_target(args.mode)
+    if target not in ("sim", "rooted-vnc"):
+        return
+    app = apps.current()
+    try:
+        if target == "sim":
+            from . import appdb
+            from .cli import get_driver
+            bundle = appdb.installed_bundle(get_driver("sim"), app)
+        else:
+            bi = BuildInfo.load(app)
+            bundle = bi.bundle_id if bi else app.bundle_id(CONFIG.team_for("device"))
+        for r in appdebug.save_crashes(run, target, app.name, bundle):
+            log(f"{app.name} crashed during the run: {run.path / 'crashes' / r['name']}")
+    except Exception as e:  # noqa: BLE001 - the report must still render
+        log(f"crash reports not collected: {e}")
 
 
 def stage_comment(args, run, pr_url: str | None) -> None:

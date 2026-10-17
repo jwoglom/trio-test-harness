@@ -186,6 +186,8 @@ jobs:
             --append-system-prompt "$(cat ci/agent-limits.md)" \
             --allowedTools "Bash(./trio-test-harness:*)" "Bash(./bin/th:*)" "Bash(sleep:*)" Read Glob Grep \
             | python3 ci/agent-stream.py "$RUN_DIR/agent-summary.md"
+          # crash reports from the agent's session into the run (trio-test-e2e saved those before it)
+          ./trio-test-harness --target sim crashes --save --run "$RUN_DIR" || true
           ./trio-test-harness report html --run "$RUN_DIR" >/dev/null
 
       # A separate Claude pass, with no memory of the test session, reads the whole run (PR, steps, notes, the
