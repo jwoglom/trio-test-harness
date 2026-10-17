@@ -175,9 +175,10 @@ jobs:
           # final answer into agent-summary.md for the job summary.
           # Locked down (ci/claude-sandbox.py, ci/agent-limits.md): Bash may only run the harness and sleep,
           # everything else is denied (dontAsk), and the harness commands run in macOS's sandbox with no network,
-          # writes only under runs/ and build/, and one Unix socket: the harness daemon, started here outside the
-          # sandbox because it holds the simulator and WebDriverAgent connections.
-          python3 ci/claude-sandbox.py "$RUNNER_TEMP/claude-settings.json"
+          # writes only under runs/ and build/ and the installed app's own simulator containers (`th db`), and one Unix
+          # socket: the harness daemon, started here outside the sandbox because it holds the simulator and
+          # WebDriverAgent connections. The venv's Python: the container lookup imports the harness.
+          .venv/bin/python ci/claude-sandbox.py "$RUNNER_TEMP/claude-settings.json" sim "$IN_APP"
           ./trio-test-harness --target sim daemon start
           trap './trio-test-harness --target sim daemon stop >/dev/null 2>&1 || true' EXIT
           claude -p "$prompt" --model "$CLAUDE_MODEL" --output-format stream-json --verbose \

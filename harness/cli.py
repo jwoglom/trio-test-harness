@@ -193,13 +193,13 @@ def cmd_build(args):
 def cmd_install(args):
     from .build import BuildInfo
     bi = BuildInfo.load()
-    app = Path(args.app) if args.app else (Path(bi.app_path) if bi else None)
+    app = Path(args.app_path) if args.app_path else (Path(bi.app_path) if bi else None)
     if not app or not app.exists():
-        raise HarnessError("no built app; run `th build` first or pass --app")
+        raise HarnessError("no built app; run `th build` first or pass --app-path")
     target = _target(args)
     from . import devices as D
     if args.xcode:
-        if bi and not args.app and bi.target != "device":
+        if bi and not args.app_path and bi.target != "device":
             raise HarnessError(f"the last build is a {bi.target} build; Xcode installs need a team-signed device "
                                "build: `th build --xcode`")
         dev = D.xcode_install(app, args.device or (CONFIG.get("TH_DEVICE_UDID") if target == "rooted-vnc" else None))
@@ -371,6 +371,65 @@ def cmd_logs(args):
                    since=A.parse_since(args.since) if args.since else None, level=args.level,
                    lines=args.lines or None)
     print("\n".join(rows) if rows else "(no matching entries)")
+    return 0
+
+
+def _appdb_doc():
+    from . import appdb
+    return appdb.__doc__
+
+
+def cmd_db(args):
+    """The app's Core Data store on the simulator (harness/appdb.py)."""
+    from . import appdb as A
+    if _target(args) != "sim":
+        raise HarnessError("th db works on the simulator only (--target sim)")
+    drv = get_driver("sim")
+    bundle = args.bundle_id or A.installed_bundle(drv, _app())
+    roots = A.containers(drv, bundle)
+    if args.sub == "stores":
+        default = A.STORES[_app().key]
+        found = A.stores(roots)
+        for p in found:
+            print(("* " if p.name == default else "  ") + str(p))
+        if not found:
+            print(f"(no SQLite files readable in {bundle}'s containers)")
+        return 0
+    store = A.pick_store(roots, _app().key, args.store)
+    if args.sub == "tables":
+        for name, n in A.tables(store):
+            print(f"{name:40} {n}")
+    elif args.sub == "schema":
+        for name, kind in A.schema(store, args.table):
+            print(f"{name:40} {kind}")
+    elif args.sub == "query":
+        cols, rows = A.query(store, args.sql)
+        if args.json:
+            print(json.dumps([dict(zip(cols, r)) for r in rows], indent=1, default=str))
+        else:
+            print("\t".join(cols))
+            for r in rows:
+                print("\t".join("NULL" if v is None else str(v) for v in r))
+        print(f"({len(rows)} rows)", file=sys.stderr)
+    elif args.sub == "exec":
+        run_ = None
+        try:
+            run_ = _run(args)
+        except HarnessError:
+            pass
+        A.wait_closed(drv, bundle, store)
+        saved = A.backup(store, run_.path / "db") if run_ else None
+        if saved:
+            log(f"saved {store.name} as it was before this run's first change: {saved}")
+        try:
+            n = A.execute(store, args.sql)
+            print(f"{n} rows changed in {store.name}")
+            if run_:
+                run_.log_step("db", f"{n} rows changed in {store.name}: {args.sql}")
+        finally:                    # a failed change leaves the store as it was; bring the app back either way
+            if args.relaunch:
+                drv.launch(bundle)
+                log(f"relaunched {bundle}")
     return 0
 
 
@@ -771,7 +830,8 @@ def build_parser() -> argparse.ArgumentParser:
     b.set_defaults(fn=cmd_build)
 
     i = sp.add_parser("install", help="install the last build")
-    i.add_argument("--app"); i.add_argument("--ipa"); i.add_argument("--reinstall", action="store_true")
+    # not --app: that is th's own option (trio | loop), and a subcommand option of the same name would override it
+    i.add_argument("--app-path", help="the .app to install (default: the last build's)"); i.add_argument("--ipa"); i.add_argument("--reinstall", action="store_true")
     i.add_argument("--trollstore", action="store_true"); i.add_argument("--appsync", action="store_true",
                    help="device: install the ad-hoc IPA with pymobiledevice3 (phone has AppSync Unified)")
     i.add_argument("--xcode", action="store_true",
@@ -819,6 +879,22 @@ def build_parser() -> argparse.ArgumentParser:
     lg.add_argument("--run", help="run dir for --save (default: $TH_RUN / the current run)")
     lg.add_argument("--bundle-id", help="default: the last build's, else the target's")
     lg.set_defaults(fn=cmd_logs)
+    db = sp.add_parser("db", help="the app's local database (Core Data SQLite store) on the simulator: query or change it",
+                       description=_appdb_doc(), formatter_class=argparse.RawDescriptionHelpFormatter)
+    dbs = db.add_subparsers(dest="sub", required=True)
+    dbs.add_parser("stores", help="the SQLite files in the app's containers (* = the app's store)")
+    dbs.add_parser("tables", help="tables and row counts")
+    dbs.add_parser("schema", help="a table's columns").add_argument("table")
+    dq = dbs.add_parser("query", help="run a read-only SELECT"); dq.add_argument("sql")
+    dq.add_argument("--json", action="store_true", help="rows as JSON objects")
+    de = dbs.add_parser("exec", help="change the store: terminates the app, backs the store up into the run, runs the "
+                                     "SQL in one transaction, relaunches")
+    de.add_argument("sql"); de.add_argument("--no-relaunch", dest="relaunch", action="store_false")
+    de.add_argument("--run", help="run dir for the backup and the step (default: $TH_RUN / the current run)")
+    for sub in dbs.choices.values():
+        sub.add_argument("--store", help="another store: file name or path ending (`th db stores`)")
+        sub.add_argument("--bundle-id", help="default: the last simulator build's, else the app's")
+    db.set_defaults(fn=cmd_db)
     s = sp.add_parser("sim", help="simulator management"); ss = s.add_subparsers(dest="sub", required=True)
     for name in ("list", "runtimes", "boot", "shutdown", "erase"):
         ss.add_parser(name)

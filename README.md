@@ -154,7 +154,7 @@ Mode, and the phone unlocked while installing. Install only — driving the phon
 ## CLI overview (`./trio-test-harness --help`; `th` = short alias in `bin/`)
 `doctor` · `build` · `install` · `launch` · `sim {list,runtimes,install-runtime,boot,shutdown,erase,container,defaults,openurl}` ·
 `device {list,vnc-check,serve-ipa,wake,ssh,diag,vnc-restart,kill,apps}` · `daemon {start,stop,status,restart}` · `wda {build,start,stop,status}` · `shot` · `tap` · `swipe` · `drag` · `scroll` · `type` · `key` · `home` · `tap-text` · `find` ·
-`tree` · `wait-text` · `ocr` · `logs [trio|tandem|watch|all]` · `run {new,current,use,note,finish,list,steps}` · `report {html,pr,markdown}` ·
+`tree` · `wait-text` · `ocr` · `logs [trio|tandem|watch|all]` · `db {stores,tables,schema,query,exec}` · `run {new,current,use,note,finish,list,steps}` · `report {html,pr,markdown}` ·
 `flow {onboarding-walk,add-cgm-sim,add-pump-sim,back-home,dismiss,at-home}` · `test smoke`
 
 Runs live in `runs/<timestamp>-<name>/` (`screenshots/`, `steps.jsonl`, `run.json`, `report.html`).
@@ -172,6 +172,14 @@ file for the previous day. It filters with `--grep REGEX [-i]`, `--since 10m|2h|
 with `--files`, and copies the files into the run's `logs/` with `--save`. It reads from the simctl container or over SSH,
 or through the target's daemon when one runs, so the sandboxed web UI/CI agent can use it (restart a daemon started
 before this command existed). Logs from the phone may hold real device data: keep them out of reports and PRs.
+
+`th db` reads and changes the app's local database, its Core Data SQLite store on the simulator (Trio's
+`Library/Application Support/TrioCoreDataPersistentContainer.sqlite`, Loop's `Model.sqlite` in its app group; `--store`
+picks another, e.g. Loop's `DeviceLog/Storage.sqlite`): `tables`, `schema ZTABLE`, `query "SELECT …"` (read-only) and
+`exec "UPDATE …"`, which terminates the app, copies the store into the run's `db/` before the run's first change, runs the
+SQL in one transaction, records a run step and relaunches the app. For states the simulators cannot produce (e.g. a bolus
+programmed on the pump). The web UI/CI agent's sandbox may read and write only that app's simulator containers
+(`ci/claude-sandbox.py` looks them up when it writes the settings, after the install).
 
 ## PR reporting
 `./trio-test-harness report pr <PR> [--artifact-url <link>] [--max-shots N]` posts a comment whose screenshots are uploaded

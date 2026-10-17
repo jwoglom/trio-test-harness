@@ -389,7 +389,7 @@ def run_job(job: Job) -> None:
     elif rc == 0 and rd:
         job.stage("agent", "running")
         settings = job.dir / "claude-settings.json"
-        settings.write_text(json.dumps(_ci("claude-sandbox").settings(target), indent=1) + "\n")
+        settings.write_text(json.dumps(_ci("claude-sandbox").settings(target, inp.get("app") or "trio"), indent=1) + "\n")
         prompt_file, limits_file = (("agent-prompt.md", "agent-limits.md") if target == "sim"
                                     else ("agent-prompt-rooted-vnc.md", "agent-limits-rooted-vnc.md"))
         if inp.get("app") == "loop":

@@ -28,6 +28,7 @@ from .util import HarnessError, log
 SOCK_DIR = REPO_ROOT / "runs" / ".tmp"
 ALLOWED_PRIVATE = {"unlock", "is_dark", "status", "spotlight", "open_app_via_spotlight", "long_press", "power", "paste_text", "wake", "boot", "launch",
                    "terminate", "install", "uninstall", "is_installed", "open_url", "app_data_container",
+                   "app_group_containers",
                    "defaults_write", "ensure_wda", "describe_point"}
 
 

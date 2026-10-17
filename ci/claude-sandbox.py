@@ -1,11 +1,13 @@
 """Write the Claude Code settings the CI agent runs under (sandbox + permissions), with this job's paths.
 
-    python ci/claude-sandbox.py OUT.json [TARGET]     # TARGET: sim (default) or rooted-vnc (`th webui`)
+    python ci/claude-sandbox.py OUT.json [TARGET] [APP]   # TARGET: sim (default) or rooted-vnc (`th webui`)
+                                                          # APP (trio | loop): the app the agent may change the data of
 
 The agent may only run the harness CLI (plus sleep) through Bash; `--permission-mode dontAsk` and
 `--permission-prompts none` deny everything else, and the file tools cannot read outside the working
 directories. On top of that, macOS's sandbox (Seatbelt) confines those commands: no network at all,
-writes only into the run folders, and a single Unix socket, the harness daemon's. The daemon is started
+writes only into the run folders (and, with APP on the simulator, that installed app's own data and app group
+containers, for `th db`: harness/appdb.py), and a single Unix socket, the harness daemon's. The daemon is started
 outside the sandbox before the agent (it holds the simulator and WebDriverAgent connections, which a
 sandboxed process cannot reach), so the agent can do exactly what the daemon's driver exposes.
 See https://code.claude.com/docs/en/sandboxing.
@@ -19,16 +21,23 @@ from pathlib import Path
 HARNESS = Path(__file__).resolve().parent.parent
 
 
-def settings(target: str = "sim") -> dict:
+def settings(target: str = "sim", app: str | None = None) -> dict:
+    """`app`: let the harness write that app's simulator containers (its database), looked up now, so the app must
+    already be installed. Leave it out for passes that only read the run (highlights)."""
     network = {
         # the apps' documentation only (`th docs`: Trio's, LoopDocs), so the agent can look up where settings live
         "allowedDomains": ["triodocs.org", "loopkit.github.io"],
         "strictAllowlist": True,
         "allowUnixSockets": [str(HARNESS / "runs" / ".tmp" / f"daemon-{target}.sock")],
     }
+    app_dirs: list[str] = []
     if target == "sim":
         # read-only simctl queries (`th sim list`); managing the simulator needs writes it does not get
         network["allowMachLookup"] = ["com.apple.coresimulator.*", "com.apple.CoreSimulator.*"]
+        if app:
+            sys.path.insert(0, str(HARNESS))
+            from harness import appdb
+            app_dirs = appdb.sandbox_paths(app)
     return {
         # Read, Glob and Grep refuse paths outside the working directories in every mode (Claude Code >= 2.1.257);
         # without it, `-p` runs read outside them unasked.
@@ -40,7 +49,10 @@ def settings(target: str = "sim") -> dict:
             "autoAllowBashIfSandboxed": False,  # --allowedTools stays the gate for what may run
             "excludedCommands": [],
             "filesystem": {
-                "allowWrite": [str(HARNESS / "runs"), str(HARNESS / "build")],
+                "allowWrite": [str(HARNESS / "runs"), str(HARNESS / "build"), *app_dirs],
+                # blockReadsOutsideWorkingDirectories also takes reads of /Users away from sandboxed commands, and
+                # allowWrite does not give them back; the file tools still cannot read these
+                "allowRead": app_dirs,
             },
             "network": network,
         },
@@ -48,4 +60,5 @@ def settings(target: str = "sim") -> dict:
 
 
 if __name__ == "__main__":
-    Path(sys.argv[1]).write_text(json.dumps(settings(sys.argv[2] if len(sys.argv) > 2 else "sim"), indent=1) + "\n")
+    Path(sys.argv[1]).write_text(json.dumps(settings(sys.argv[2] if len(sys.argv) > 2 else "sim",
+                                                     sys.argv[3] if len(sys.argv) > 3 else None), indent=1) + "\n")

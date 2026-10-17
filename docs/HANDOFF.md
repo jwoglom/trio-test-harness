@@ -62,6 +62,13 @@ macOS iPhone Mirroring using phone-harness; driver written and window capture ve
   drag up from the palette to add — all worked over TrollVNC), tap-to-add, trash buttons, persistence across re-entry, and
   the real Lock Screen Live Activity (`th device lock` twice = lock, then wake to the Lock Screen; `th device unlock` after).
   Report artifact with 35 screenshots published.
+- **`th db`, 2026-10-17 (Trio on the simulator)**: `stores`/`tables`/`schema`/`query` (read-only: an UPDATE through
+  `query` is refused) and `exec` (terminate → backup into the run's `db/` → transaction → run step → relaunch; a failing
+  statement changes nothing and still relaunches). Under the agent's sandbox (`claude -p` with `ci/claude-sandbox.py`'s
+  settings): without the app's containers `th db` sees no store (the CI agent's "outside the readable/writable paths"
+  on Trio PR 1580); with them it works, and another app's container (Safari) stays unreadable.
+  `blockReadsOutsideWorkingDirectories` also removes sandboxed commands' reads of /Users, so the containers need
+  `allowRead` as well as `allowWrite`. Loop's store (`Model.sqlite` in the app group) is not verified yet.
 
 ## Still unverified
 - `th report pr` against a real PR (gh --attach inline uploads; ask before posting).
