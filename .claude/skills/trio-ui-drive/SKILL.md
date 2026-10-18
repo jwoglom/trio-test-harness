@@ -5,7 +5,7 @@ description: Drive and screenshot the Trio app (or any iOS UI) on the iOS Simula
 
 # trio-ui-drive
 
-`cd ~/repos/trio-test-harness`; `th` = `./trio-test-harness` (short alias `bin/th`). Pick the target with `--target sim|rooted-vnc|iphone-usb` (or `export TH_TARGET=…`): simulator (WDA tree), jailbroken
+`cd ~/repos/trio-test-harness`; `th` = `./trio-test-harness` (short alias `bin/th`). Pick the target with `--target sim|rooted-vnc|iphone-usb|watch` (or `export TH_TARGET=…`): simulator (WDA tree), jailbroken
 phone over TrollVNC (tesseract OCR), or any iPhone through iPhone Mirroring (Vision OCR, `th home` = ⌘1, Spotlight = ⌘3).
 **All coordinates are screenshot pixels** (same for both targets). Look at every screenshot before acting.
 **Is the device free?** `th busy` (the device lock) is the only answer: it names the run holding it, or says idle. Never judge from process lists; an idle `claude ./trio-test-e2e ...` session is not a run.
@@ -56,6 +56,29 @@ The phone driver cannot kill or launch by bundle id: use the App Switcher / Spot
   keys `GlucoseSimulator_CenterValue`, `GlucoseSimulator_Amplitude`, `GlucoseSimulator.simulatedScenario` (sim: `th sim defaults`).
 - Settings root lists Devices, Therapy, Algorithm, Features, Notifications, Services and shows the branch/version at the bottom.
 - Only one `accessibilityIdentifier` exists in Trio (device picker rows); everything else is matched by visible label.
+
+## Apple Watch (`--target watch`, simulator only)
+A watchOS simulator (`TrioHarnessWatch`) paired with the iPhone simulator runs Trio's Watch app; `trio-test-e2e --watch`
+sets it all up. By hand: `th watch pair` → `th --target watch install` (the last build's embedded Watch app) →
+`th watch agent start` → `th --target watch launch` → then `th launch` (the phone app **after** the Watch app: Trio's
+phone session checks for the watch when it starts, and logs `📱 Phone isReachable after activation: true` when it found it).
+`th watch status` shows the pair, the agent and the app in front.
+- Same primitives with `--target watch`: `shot`, `tap`, `tap-text`, `find`, `tree`, `swipe`, `home` (pixels: the 46 mm
+  watch is 416×496, 2× points). Plus **`th --target watch crown <turns>`**: 1.0 is one full turn of the Digital Crown,
+  negative turns back; `--velocity` in turns per second. Input and the tree come from the watch agent
+  (`harness/watchagent`, an XCUITest runner like WebDriverAgent); `th watch agent status|stop|build`.
+- **Facts (Trio Watch app, verified 2026-10-18 on watchOS 26.2)**: main screen = glucose bubble, IOB (syringe) top left,
+  COB (fork) top right, bottom bar: overrides (clock), **Add** (+), temp targets (target). "STALE DATA" and `--` until
+  the phone has pushed its state (it does on each loop; a few seconds after returning from a treatment too).
+  Add → "Pick Treatment": **Meal**, **Bolus**, and Meal + Bolus (labelled "Food, syringe.fill"). A row only takes a tap
+  on its icon or text, not the gap between them: `tap-text "Bolus" --exact` aims at the text. Bolus input: amount
+  (`find " U"`), `Remove`/`Add` steppers, crown dials it (a quarter turn went 0 → 1.40 U), **Enact Bolus**. Confirm
+  screen: "To confirm, dial crown." — about half a turn fills it (0.05 steps; Settings ▸ Devices ▸ Smart Watch "Confirm
+  Bolus Faster" makes it 0.5) and sends the bolus; **Cancel** returns to the main screen.
+- What the phone did: `th logs trio --grep "WatchManager"` (`📱 Received bolus request from watch`, `Enacted bolus via
+  APS Manager`). The Watch app's own log reaches the phone's `th logs watch` only when the watch flushes it (every 3 min
+  or 100 entries).
+- Everything on the watch is a simulator and the bolus goes to the Pump Simulator; no real pump is ever involved.
 
 ## Tips
 - Simulator taps/tree need an input backend: run `th wda start` once per simulator boot (WebDriverAgent, built on first use

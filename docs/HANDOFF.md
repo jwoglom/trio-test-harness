@@ -80,6 +80,24 @@ macOS iPhone Mirroring using phone-harness; driver written and window capture ve
   takes minutes on this Mac. **Unverified: every phone (rooted-vnc) path** — the phone was not reachable (not on USB,
   SSH unreachable): `syslog collect` + `log show` on the archive, `crash pull`, `files` over SSH, `ps` over SSH.
 
+- **Apple Watch (`--target watch`), 2026-10-18 (Trio dev + nightscout/Trio#1648 on this 4-core Intel MacBook, Xcode
+  26.3, iOS 26.3 + watchOS 26.2 simulators)**: `TrioHarnessWatch` (Series 11 46 mm) paired with `TrioHarness`; the
+  build's embedded Watch app installed straight onto the watch (installing the phone app does not install it there); the
+  watch agent (`harness/watchagent`, a watchOS XCUITest runner) built in ~20 s and ran beside WebDriverAgent, each on its
+  own simulator. Real WatchConnectivity between the two: the phone's glucose and IOB reached the watch, and a Watch bolus
+  reached the phone. Through the agent: `tree` (full SwiftUI tree with labels), `tap`/`tap-text`, `crown` (0.05 turn =
+  one 5% step of the confirmation bar; a quarter turn dialled the bolus input to 1.40 U), `home`, all also through
+  `th --target watch daemon`. PR #1648's override ran end to end with max IOB 0 U: bolus 0.10 U, crown confirm, the
+  phone's "Bolus blocked: … would exceed max IOB" shown on the Watch, crown again, phone log `User confirmed bolus from
+  watch past safety checks: ["max_iob"]` and `Enacted bolus via APS Manager: 0.1U`.
+  `trio-test-e2e --mode simulator --in-place ~/repos/Trio --skip-build --watch` ran clean from a fresh install: Watch
+  app installed, launched before the phone app, `watch-home` and `watch-with-data` steps (glucose and IOB on the watch).
+  Learned: launch the Watch app before the phone app (the phone session logged isReachable false until Trio was
+  relaunched); a List row's button takes taps only on its icon or text, so `WatchDriver.tap_text` aims at those; the
+  Watch app's own log file is not on the watch's disk until it flushes, and reaches the phone's `th logs watch` then.
+  **Unverified**: the CI workflow's `watch` input and the agent using the watch from inside the sandbox (the socket is
+  allowed and the daemon path works unsandboxed); the web UI has no watch option yet.
+
 ## Still unverified
 - `th report pr` against a real PR (gh --attach inline uploads; ask before posting).
 - `th webui` with a real job: only tested with the stages stubbed (auth, validation, stage order, sandbox settings per

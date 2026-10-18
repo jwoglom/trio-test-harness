@@ -79,13 +79,14 @@ def list_devices() -> list[dict]:
     return out
 
 
-def pick_runtime(name: str = "") -> dict:
-    rts = list_runtimes()
+def pick_runtime(name: str = "", platform: str = "iOS") -> dict:
+    rts = list_runtimes(platform)
     if not rts:
-        raise HarnessError("No iOS simulator runtime installed. Run: th sim install-runtime")
+        flag = "" if platform == "iOS" else f" --platform {platform}"
+        raise HarnessError(f"No {platform} simulator runtime installed. Run: th sim install-runtime{flag}")
     if name:
         for r in rts:
-            if r["name"] == name or r["version"] == name.replace("iOS", "").strip():
+            if r["name"] == name or r["version"] == name.replace(platform, "").strip():
                 return r
         raise HarnessError(f"runtime {name!r} not found; have {[r['name'] for r in rts]}")
     return sorted(rts, key=lambda r: tuple(int(x) for x in r["version"].split(".")))[-1]
@@ -111,6 +112,40 @@ def ensure_simulator() -> dict:
         if d["udid"] == udid:
             return d
     raise HarnessError("simulator creation failed")
+
+
+def ensure_watch_simulator() -> dict:
+    """Find or create the harness's watch simulator; return its simctl record."""
+    name = CONFIG.get("TH_WATCH_SIM_NAME")
+    rt = pick_runtime(CONFIG.get("TH_WATCH_SIM_RUNTIME"), "watchOS")
+    for d in list_devices():
+        if d["name"] == name and d["runtimeIdentifier"] == rt["identifier"] and d.get("isAvailable", True):
+            return d
+    dt = pick_devicetype(CONFIG.get("TH_WATCH_SIM_DEVICE"))
+    udid = xcrun(["simctl", "create", name, dt["identifier"], rt["identifier"]]).stdout.strip()
+    for d in list_devices():
+        if d["udid"] == udid:
+            return d
+    raise HarnessError("watch simulator creation failed")
+
+
+def list_pairs() -> dict:
+    """pair id -> {"watch": {...}, "phone": {...}, "state": "(active, connected)"}"""
+    return simctl_json(["list", "pairs"]).get("pairs", {})
+
+
+def ensure_pair(watch_udid: str, phone_udid: str) -> str:
+    """Pair the watch simulator with the phone simulator (once) and make that pair the phone's active one."""
+    for pid, p in list_pairs().items():
+        if p["watch"]["udid"] == watch_udid and p["phone"]["udid"] == phone_udid:
+            if "active" not in p.get("state", "") or "inactive" in p.get("state", ""):
+                xcrun(["simctl", "pair_activate", pid])
+            return pid
+        if p["watch"]["udid"] == watch_udid:     # a watch pairs with one phone only
+            xcrun(["simctl", "unpair", pid])
+    pid = xcrun(["simctl", "pair", watch_udid, phone_udid]).stdout.strip()
+    xcrun(["simctl", "pair_activate", pid], check=False)
+    return pid
 
 
 def boot_simulator(udid: str) -> None:

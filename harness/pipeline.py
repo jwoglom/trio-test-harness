@@ -123,6 +123,10 @@ def stage_install(args, bi):
         drv.uninstall(bi.bundle_id) if args.reinstall else None
         drv.install(Path(bi.app_path))
         _app().flows.reset_after_install(drv, bi.bundle_id) if args.reinstall else None
+        if args.watch:
+            w = get_driver("watch"); w.boot()
+            w.uninstall(bi.bundle_id) if args.reinstall else None
+            w.install(Path(bi.app_path))
     elif args.target == "rooted-vnc":
         from . import devices as D
         D.appsync_install(Path(bi.ipa_path), CONFIG.get("TH_DEVICE_UDID") or None)
@@ -142,6 +146,12 @@ def stage_launch(args, bi, run):
         drv.boot()
         if args.onboarding == "preseed":
             F.preseed_simulator(drv, bi.bundle_id)
+        if args.watch:
+            # The Watch app goes first: Trio's phone session checks for it once, when the phone app starts.
+            from . import watch as WT
+            WT.pair()
+            WT.start(WT.watch_udid())
+            get_driver("watch").launch(bi.bundle_id)
         drv.launch(bi.bundle_id)
         from . import wda as W
         if not W.is_running():
@@ -170,6 +180,8 @@ def stage_launch(args, bi, run):
         F.step(run, drv, "not-home", "Home screen not detected after launch")
         raise HarnessError(f"{app.name} did not reach the home screen; see the run screenshots")
     F.step(run, drv, "home", "Home screen")
+    if getattr(args, "watch", False):
+        F.step(run, get_driver("watch"), "watch-home", "Watch app on the paired watch simulator")
     return drv
 
 
@@ -204,6 +216,15 @@ def stage_smoke(args, drv, run, bi=None):
     time.sleep(4)
     F.settle(drv, run)
     F.step(run, drv, "home-with-devices", f"Home with {' + '.join(want)}")
+    if getattr(args, "watch", False):
+        from .cli import get_driver
+        w = get_driver("watch")
+        # the phone pushes its state to the watch on its next loop; "STALE DATA" until then
+        for _ in range(12):
+            if not w.find("STALE DATA"):
+                break
+            time.sleep(5)
+        F.step(run, w, "watch-with-data", "Watch app after the phone's fake CGM and pump are set up")
 
 
 def stage_report(args, run) -> Path:
@@ -247,7 +268,7 @@ def stage_comment(args, run, pr_url: str | None) -> None:
     print(post_to_pr(run, pr_url, mode="comment", artifact_url=args.artifact_url))
 
 
-def hand_off_to_agent(run, pr_url: str | None, mode: str) -> None:
+def hand_off_to_agent(run, pr_url: str | None, mode: str, *, watch: bool = False) -> None:
     claude = shutil.which("claude")
     if not claude:
         raise HarnessError("claude CLI not found on PATH")
@@ -257,7 +278,10 @@ def hand_off_to_agent(run, pr_url: str | None, mode: str) -> None:
               f"(mode {mode}{', PR ' + pr_url if pr_url else ''}). The app is installed, launched, on the home screen with "
               f"fake CGM/pump configured. Read {run.path}/pr.md, exercise what the PR description says with `./trio-test-harness` commands, "
               f"screenshot each step into this run, finish the run, publish report.html as an Artifact, and ask me whether "
-              f"to post the PR comment (./trio-test-harness report pr --artifact-url ...).")
+              f"to post the PR comment (./trio-test-harness report pr --artifact-url ...)."
+              + (" A paired watch simulator runs the Watch app with the input agent up: drive it with "
+                 "`./trio-test-harness --target watch shot|tap-text|find|tree|crown` (trio-ui-drive skill, Watch section)."
+                 if watch else ""))
     os.execv(claude, [claude, prompt])
 
 
@@ -281,7 +305,7 @@ def run_stages(args):
     app = _app()
     if app.key != "trio":
         name = f"{app.key}-{name}"
-    run = Run.new(f"{name}-{args.target}", {"target": args.target, "mode": args.mode, "app": app.key,
+    run = Run.new(f"{name}-{args.target}", {"target": args.target, "mode": args.mode, "app": app.key, "watch": args.watch,
                                              "title": f"{app.name} test: {info.get('pr_title') or info.get('branch') or 'in-place'} ({args.mode})",
                                              "pr_url": pr_url})
     notes = write_pr_notes(run, info)
@@ -336,6 +360,9 @@ def main(argv=None) -> int:
     p.add_argument("--clean", action="store_true"); p.add_argument("--no-fetch", action="store_true")
     p.add_argument("--reinstall", action="store_true", default=True)
     p.add_argument("--onboarding", choices=["preseed", "walk"], default="preseed")
+    p.add_argument("--watch", action="store_true",
+                   help="simulator: also pair a watch simulator, install and launch the app's Watch app and start the "
+                        "watch input agent, for `th --target watch ...` (Trio only)")
     p.add_argument("--skip-build", action="store_true", help="reuse build/last-build.json")
     p.add_argument("--skip-install", action="store_true")
     p.add_argument("--no-smoke", action="store_true", help="stop after reaching the home screen")
@@ -362,6 +389,9 @@ def main(argv=None) -> int:
     if not args.mode:
         args.mode = "simulator" if args.yes else _ask("Target", default="simulator", choices=["simulator", "rooted-vnc", "iphone-usb"])
     args.target = MODES[args.mode]
+    if args.watch and (args.target != "sim" or app.key != "trio"):
+        raise HarnessError("--watch needs --mode simulator and Trio: the watch is a simulator paired with the iPhone "
+                           "simulator, and the Watch flows are Trio's")
     if not args.pr and not args.branch and not args.in_place and not args.yes:
         ans = _ask(f"PR URL ({app.name} or submodule), branch name, or blank for the current checkout", default="")
         if ans.startswith("http") or "#" in ans:
@@ -384,7 +414,7 @@ def main(argv=None) -> int:
         args.agent = (not inside_claude) and _tty() and shutil.which("claude") is not None
     if args.agent and not inside_claude:
         stage_comment(args, run, pr_url) if args.comment == "auto" else None
-        hand_off_to_agent(run, pr_url, args.mode)   # execs claude; the PR-comment question is asked there
+        hand_off_to_agent(run, pr_url, args.mode, watch=args.watch)   # execs claude; the PR-comment question is asked there
     stage_comment(args, run, pr_url)
     print("\nNext (Claude / trio-test-e2e skill): read pr.md, exercise the described changes with ./trio-test-harness, then publish "
           "report.html as an Artifact and `./trio-test-harness report pr <PR> --artifact-url <link>` if the user agrees.")

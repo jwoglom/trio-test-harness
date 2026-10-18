@@ -16,14 +16,15 @@ from .util import tmp_path, HarnessError, log, run, which, port_open
 
 TARGET_ALIASES = {"sim": "sim", "simulator": "sim",
                   "device": "rooted-vnc", "rooted-vnc": "rooted-vnc", "vnc": "rooted-vnc", "phone": "rooted-vnc",
-                  "iphone-usb": "iphone-usb", "mirror": "iphone-usb", "mirroring": "iphone-usb"}
-TARGETS = ("sim", "rooted-vnc", "iphone-usb")
+                  "iphone-usb": "iphone-usb", "mirror": "iphone-usb", "mirroring": "iphone-usb",
+                  "watch": "watch", "watch-sim": "watch"}
+TARGETS = ("sim", "rooted-vnc", "iphone-usb", "watch")
 
 
 def norm_target(t: str | None) -> str:
     t = (t or os.environ.get("TH_TARGET") or "sim").lower()
     if t not in TARGET_ALIASES:
-        raise HarnessError(f"unknown target {t!r} (sim | rooted-vnc | iphone-usb)")
+        raise HarnessError(f"unknown target {t!r} (sim | rooted-vnc | iphone-usb | watch)")
     return TARGET_ALIASES[t]
 
 
@@ -33,6 +34,7 @@ def get_driver(target: str, *, local: bool = False):
     sim        — iOS Simulator (simctl + WebDriverAgent)
     rooted-vnc — jailbroken iPhone over TrollVNC (+ SSH), screenshots/taps at native resolution
     iphone-usb — any iPhone through macOS iPhone Mirroring (phone-harness), no root
+    watch      — the Watch app on a watchOS simulator paired with the sim (harness/watch.py)
     """
     target = norm_target(target)
     if not local and not os.environ.get("TH_NO_DAEMON"):
@@ -42,6 +44,9 @@ def get_driver(target: str, *, local: bool = False):
     if target == "sim":
         from .sim import SimulatorDriver
         return SimulatorDriver()
+    if target == "watch":
+        from .watch import WatchDriver
+        return WatchDriver()
     if target == "rooted-vnc":
         from .vnc import VNCDriver
         return VNCDriver()
@@ -125,6 +130,19 @@ def cmd_doctor(args):
         item("WebDriverAgent running", W.is_running(), "port 8100" if W.is_running() else "th wda start (after th sim boot)", warn=True)
         item("sim daemon", DM.is_running("sim"), "" if DM.is_running("sim") else "th --target sim daemon start", warn=True)
         item("idb (optional fallback)", which("idb_companion"), which("idb_companion") or "not needed with WDA", warn=True)
+
+    if want in (None, "sim", "watch"):
+        print("watch (paired with the simulator; --watch / --target watch)")
+        from . import watch as WT
+        try:
+            wdevs = [d for d in xcode.list_devices() if d["name"] == CONFIG.get("TH_WATCH_SIM_NAME")]
+            pairs = [p for p in xcode.list_pairs().values() if wdevs and p["watch"]["udid"] == wdevs[0]["udid"]]
+            item(f"watch simulator '{CONFIG.get('TH_WATCH_SIM_NAME')}' paired", pairs,
+                 pairs[0]["state"] if pairs else "th watch pair", warn=True)
+        except HarnessError as e:
+            item("simctl pairs", False, str(e)[:160], warn=True)
+        xr = WT.xctestrun(); item("watch agent built", xr, xr.name if xr else "th watch agent build (or start)", warn=True)
+        item("watch agent running", WT.is_running(), "" if WT.is_running() else "th watch agent start", warn=True)
 
     if want in (None, "rooted-vnc"):
         print("rooted-vnc (jailbroken iPhone)")
@@ -212,6 +230,13 @@ def cmd_install(args):
         drv.install(app)
         log(f"installed {app.name} on simulator {drv.udid}")
         return 0
+    if target == "watch":
+        drv = get_driver("watch"); drv.boot()
+        if args.reinstall and bi:
+            drv.uninstall(bi.bundle_id)
+        drv.install(app)
+        log(f"installed {app.name}'s Watch app on watch simulator {drv.udid}")
+        return 0
     # physical phones
     if target == "iphone-usb" and not (args.appsync or args.trollstore):
         dev = D.xcode_install(app, args.device)      # needs a signed build (TH_DEVELOPER_TEAM) and Developer Mode
@@ -270,6 +295,11 @@ def cmd_launch(args):
             paths = F.preseed_simulator(drv, bundle)
             log(f"pre-seeded onboarding: {[str(p) for p in paths]}")
         drv.launch(bundle)
+        return 0
+    if target == "watch":
+        drv = get_driver("watch"); drv.boot()
+        drv.launch(bundle)
+        log("Watch app launched; launch the phone app after it (`th launch`), or its WCSession may not see the watch")
         return 0
     from . import devices as D
     if target == "iphone-usb":
@@ -737,6 +767,37 @@ def cmd_home(args):
     get_driver(_target(args)).home(); return 0
 
 
+def cmd_crown(args):
+    target = _target(args)
+    if target != "watch":
+        print("the Digital Crown is on the watch: `th --target watch crown 0.5`", file=sys.stderr); return 2
+    get_driver(target).crown(args.delta, velocity=args.velocity); return 0
+
+
+def cmd_watch(args):
+    from . import watch as W
+    from . import xcode
+    if args.sub == "pair":
+        w, p = W.pair(); print(f"watch {w} paired with phone {p}; both booted")
+    elif args.sub == "status":
+        pairs = [p for p in xcode.list_pairs().values() if p["watch"]["udid"] == W.watch_udid()]
+        print(f"pair: {pairs[0]['state'] if pairs else 'not paired (th watch pair)'}")
+        print(f"agent: {'running' if W.is_running() else 'not running (th watch agent start)'}")
+        if W.is_running():
+            print(f"front app: {W.call('state')}")
+    elif args.sub == "agent":
+        udid = W.watch_udid()
+        if args.action == "build":
+            print(W.build(udid))
+        elif args.action == "start":
+            W.pair(); W.start(udid); print("watch agent ready")
+        elif args.action == "stop":
+            W.stop(); print("stopped")
+        elif args.action == "status":
+            print("running" if W.is_running() else "not running"); return 0 if W.is_running() else 1
+    return 0
+
+
 def cmd_lock(args):
     target = norm_target(_target(args))
     if target != "sim":
@@ -939,7 +1000,7 @@ def cmd_test(args):
 def build_parser() -> argparse.ArgumentParser:
     from . import apps
     p = argparse.ArgumentParser(prog="trio-test-harness", description="Trio / Loop test harness toolbox (short alias: th)")
-    p.add_argument("--target", help="sim | rooted-vnc | iphone-usb (aliases: device=rooted-vnc, mirror=iphone-usb; default $TH_TARGET or sim)")
+    p.add_argument("--target", help="sim | rooted-vnc | iphone-usb | watch (aliases: device=rooted-vnc, mirror=iphone-usb; default $TH_TARGET or sim)")
     p.add_argument("--app", choices=sorted(apps.APPS),
                    help="the app under test: trio or loop (LoopWorkspace); default $TH_APP, else trio")
     p.add_argument("--git-protocol", choices=["ssh", "https"],
@@ -1114,6 +1175,16 @@ def build_parser() -> argparse.ArgumentParser:
     ty = sp.add_parser("type"); ty.add_argument("text"); ty.set_defaults(fn=cmd_type)
     k = sp.add_parser("key"); k.add_argument("name"); k.set_defaults(fn=cmd_key)
     sp.add_parser("home").set_defaults(fn=cmd_home)
+    cr = sp.add_parser("crown", help="--target watch: turn the Digital Crown (1.0 = one full turn, negative = the other way)")
+    cr.add_argument("delta", type=float); cr.add_argument("--velocity", type=float, help="turns per second")
+    cr.set_defaults(fn=cmd_crown)
+    wt = sp.add_parser("watch", help="watch simulator paired with the sim, and its input agent (harness/watch.py)")
+    wts = wt.add_subparsers(dest="sub", required=True)
+    wts.add_parser("pair", help="create the watch simulator, pair it with the sim, boot both")
+    wts.add_parser("status")
+    wa = wts.add_parser("agent", help="the XCUITest agent that taps, reads the tree and turns the crown")
+    wa.add_argument("action", choices=["build", "start", "stop", "status"])
+    wt.set_defaults(fn=cmd_watch)
     for name, helptext in (("lock", "lock the simulator: `shot` then captures the Lock Screen and Live Activities"),
                            ("unlock", "unlock the simulator after `lock`")):
         sp.add_parser(name, help=helptext).set_defaults(fn=cmd_lock, sub=name)

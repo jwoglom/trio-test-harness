@@ -34,6 +34,9 @@ DEFAULTS = {
     "TH_SIM_DEVICE": "iPhone 16",     # simulator device type name
     "TH_SIM_RUNTIME": "",             # e.g. "iOS 26.3"; blank = newest installed iOS runtime
     "TH_SIM_NAME": "TrioHarness",     # name of the dedicated simulator we create/boot
+    "TH_WATCH_SIM_DEVICE": "Apple Watch Series 11 (46mm)",  # watch simulator paired with TH_SIM_NAME (`--target watch`)
+    "TH_WATCH_SIM_RUNTIME": "",       # e.g. "watchOS 26.2"; blank = newest installed watchOS runtime
+    "TH_WATCH_SIM_NAME": "TrioHarnessWatch",
     "TH_DEVICE_UDID": "",             # physical iPhone UDID; blank = the only connected device
     "TH_XCODE_DEVICE": "",            # iPhone for Xcode (devicectl) installs: UDID or name; blank = the only paired one on USB
     "TH_VNC_HOST": "localhost",       # TrollVNC host. localhost + TH_VNC_VIA_USB=1 => iproxy over USB

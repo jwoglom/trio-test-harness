@@ -15,5 +15,10 @@ description: Prepare the iOS Simulator side of the Trio harness — check Xcode 
   `xcrun simctl spawn <udid> defaults write com.apple.Accessibility AccessibilityEnabled -bool true` (+ ApplicationAccessibilityEnabled),
   `th sim shutdown && th sim boot`, retry.
 - `th --target sim daemon start` — persistent driver; `th daemon status`.
+- Watch: `th watch pair` creates `TrioHarnessWatch` (`TH_WATCH_SIM_DEVICE`, default Apple Watch Series 11 (46mm), newest
+  watchOS runtime), pairs it with `TrioHarness` and boots both; `th watch agent start` builds (once, ~20 s) and starts the
+  watch's input agent; `th watch status`; `th --target watch daemon start` for the sandboxed agent. Booting both while
+  xcodebuild runs failed once here with "launchd_sim failed to respond"; booting the watch again on its own worked.
+  Cleanup: `th watch agent stop`, `th --target watch daemon stop`.
 - Cleanup: `th wda stop`, `th --target sim daemon stop`, `th sim shutdown`; `th sim erase` factory-resets the simulator.
 Screenshots are 1206×2622 px (iPhone 17); coordinates in `th` are pixels.

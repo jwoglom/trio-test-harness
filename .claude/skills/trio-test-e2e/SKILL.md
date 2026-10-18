@@ -15,6 +15,7 @@ they say where it is in the app and what it does.
    cd ~/repos/trio-test-harness
    ./trio-test-e2e --mode simulator|rooted-vnc|iphone-usb --pr <Trio or submodule PR URL> [--trio-branch feat/tandem] [--cherry-pick <PR|sha|A..B|branch>] [--onboarding walk] [--yes]
    ./trio-test-e2e --mode simulator --branch dev            # a branch instead of a PR
+   ./trio-test-e2e --mode simulator --pr <PR> --watch      # + Trio's Watch app on a paired watch simulator (--target watch)
    ./trio-test-e2e --mode rooted-vnc --skip-build --skip-install   # reuse the last build
    ./trio-test-e2e --app loop --mode simulator --pr <TandemKit, LoopKit/Loop or LoopWorkspace PR>   # Loop instead of Trio
    ```

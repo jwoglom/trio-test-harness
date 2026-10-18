@@ -84,6 +84,9 @@ def _make_driver(target: str) -> Driver:
     if target == "iphone-usb":
         from .mirror import MirrorDriver
         return MirrorDriver()
+    if target == "watch":
+        from .watch import WatchDriver
+        return WatchDriver()
     from .vnc import VNCDriver
     return VNCDriver()
 
@@ -183,7 +186,7 @@ class RemoteDriver(Driver):
 
     def __init__(self, target: str, timeout: float = 600.0):
         self.target = target
-        self.kind = {"sim": "sim", "iphone-usb": "mirror"}.get(target, "device")
+        self.kind = {"sim": "sim", "iphone-usb": "mirror", "watch": "watch"}.get(target, "device")
         self._timeout = timeout
 
     def _call(self, method: str, *args, **kwargs):

@@ -29,7 +29,8 @@ TARGETS = ("sim", "rooted-vnc", "iphone-usb")
 
 
 def lock_path(target: str) -> Path:
-    return LOCK_DIR / f"device-{target}.lock"
+    # the watch simulator is paired with the iPhone simulator and driven in the same run
+    return LOCK_DIR / f"device-{'sim' if target == 'watch' else target}.lock"
 
 
 def holder(target: str) -> dict | None:

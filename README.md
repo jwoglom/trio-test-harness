@@ -56,6 +56,29 @@ On the simulator a new install also empties Loop's app group container, which th
 and where Loop keeps its store and settings. The Loop flows are written from Loop's source and have not yet run against a
 real Loop on a Mac: `docs/HANDOFF.md` lists what to check.
 
+## Apple Watch (`--target watch`)
+
+Trio's Watch app runs on a watchOS simulator paired with the harness's iPhone simulator, so a Watch change can be tested
+the way a phone change is. `trio-test-e2e --mode simulator --watch` does the setup: it creates `TrioHarnessWatch`
+(`TH_WATCH_SIM_DEVICE`, default Apple Watch Series 11 (46mm); `TH_WATCH_SIM_RUNTIME`), pairs it with `TrioHarness`
+(`simctl pair`: Xcode ships no pre-paired simulators), installs the build's embedded Watch app on it, launches it **before**
+the phone app (Trio's phone session looks for the watch when it starts) and screenshots it at home and once the phone's
+glucose reaches it. Then every primitive takes `--target watch`, plus `th --target watch crown <turns>` for the Digital
+Crown. By hand: `th watch pair`, `th --target watch install`, `th watch agent start`, `th --target watch launch`,
+`th launch`.
+
+| | |
+|---|---|
+| Screenshots | `simctl io screenshot` of the watch (416×496 px on the 46 mm watch) |
+| Taps, tree, crown, Home | the watch agent, `harness/watchagent`: a watchOS XCUITest runner (`XCUIDevice.rotateDigitalCrown`, `XCUIElement.snapshot`) run with `xcodebuild test-without-building` beside WebDriverAgent, which has no watchOS runner. Built on first use into `build/watchagent-dd`; `th watch agent build|start|stop|status` |
+| Harness ↔ agent | JSON files in `runs/.tmp/watch-agent` (`cmd-<id>.json` in, `res-<id>.json` out, `alive.json` every second): a simulator process always reaches the Mac's file system, while sockets on watchOS are restricted |
+| Phone ↔ watch | real WatchConnectivity between the two simulators: messages, application context and user info all arrive |
+| Lock | the watch shares the simulator's device lock (`th busy`) |
+
+What the phone did with a Watch request is in `th logs trio --grep WatchManager`; the Watch app's own log reaches
+`th logs watch` only when the watch flushes it to the phone (every 3 minutes or 100 entries). The Trio Watch facts the
+agent relies on are in the `trio-ui-drive` skill.
+
 ## How it works
 
 Three connection modes (`--mode` / `--target`):
@@ -153,7 +176,7 @@ Mode, and the phone unlocked while installing. Install only — driving the phon
 
 ## CLI overview (`./trio-test-harness --help`; `th` = short alias in `bin/`)
 `doctor` · `build` · `install` · `launch` · `sim {list,runtimes,install-runtime,boot,shutdown,erase,container,defaults,openurl}` ·
-`device {list,vnc-check,serve-ipa,wake,ssh,diag,vnc-restart,kill,apps}` · `daemon {start,stop,status,restart}` · `wda {build,start,stop,status}` · `shot` · `tap` · `swipe` · `drag` · `scroll` · `type` · `key` · `home` · `tap-text` · `find` ·
+`device {list,vnc-check,serve-ipa,wake,ssh,diag,vnc-restart,kill,apps}` · `daemon {start,stop,status,restart}` · `wda {build,start,stop,status}` · `watch {pair,status,agent}` · `shot` · `tap` · `swipe` · `drag` · `scroll` · `type` · `key` · `home` · `crown` · `tap-text` · `find` ·
 `tree` · `wait-text` · `ocr` · `logs [trio|tandem|watch|all]` · `db {stores,tables,schema,query,exec}` · `oslog` · `crashes` · `files {ls,cat}` · `perf` · `run {new,current,use,note,finish,list,steps}` · `report {html,pr,markdown}` ·
 `flow {onboarding-walk,add-cgm-sim,add-pump-sim,back-home,dismiss,at-home}` · `test smoke`
 

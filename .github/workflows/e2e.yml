@@ -40,6 +40,10 @@ on:
         description: "Configure the simulated CGM + Pump Simulator"
         type: boolean
         default: true
+      watch:
+        description: "Also run the Watch app on a paired watch simulator (Trio; the agent drives it with --target watch)"
+        type: boolean
+        default: false
       claude_model:
         description: "Claude model for the agent (sonnet, opus, haiku, or a model ID)"
         type: string
@@ -91,6 +95,7 @@ jobs:
       IN_CONFIGURATION: ${{ inputs.configuration }}
       IN_SKIP_ONBOARDING: ${{ inputs.skip_onboarding }}
       IN_SMOKE: ${{ inputs.smoke }}
+      IN_WATCH: ${{ inputs.watch }}
       IN_AGENT_INSTRUCTIONS: ${{ inputs.agent_instructions }}
       TH_XCODE_APP: /Applications/Xcode_${{ inputs.xcode }}.app
       TH_SIM_DEVICE: ${{ inputs.sim_device }}
@@ -144,6 +149,7 @@ jobs:
           [ "$IN_SMOKE" = true ] || args+=(--no-smoke)
           # The fake CGM/pump setup steps are left out of report.html and the comment (everything else stays).
           if [ "$IN_SMOKE" = true ]; then args+=(--hide-setup-screenshots); fi
+          if [ "$IN_WATCH" = true ]; then args+=(--watch); fi
           # The runner's bash has -e; keep going so the run dir is recorded even when the run fails.
           rc=0
           ./trio-test-e2e "${args[@]}" || rc=$?
@@ -167,6 +173,7 @@ jobs:
           else cgm="Glucose Simulator" prompt_file=ci/agent-prompt.md; fi
           smoke_note=$([ "$IN_SMOKE" = true ] && echo ", with the $cgm and Pump Simulator configured" || true)
           extra=$([ -n "$IN_AGENT_INSTRUCTIONS" ] && printf '\nFocus from the person who started this run:\n%s\n' "$IN_AGENT_INSTRUCTIONS" || true)
+          if [ "$IN_WATCH" = true ]; then extra="$extra"$'\n'"$(cat ci/agent-watch.md)"; fi
           prompt=$(RUN_DIR="$RUN_DIR" SMOKE="$smoke_note" EXTRA="$extra" PROMPT_FILE="$prompt_file" .venv/bin/python -c '
           import os, pathlib
           t = pathlib.Path(os.environ["PROMPT_FILE"]).read_text()
@@ -181,6 +188,10 @@ jobs:
           .venv/bin/python ci/claude-sandbox.py "$RUNNER_TEMP/claude-settings.json" sim "$IN_APP"
           ./trio-test-harness --target sim daemon start
           trap './trio-test-harness --target sim daemon stop >/dev/null 2>&1 || true' EXIT
+          if [ "$IN_WATCH" = true ]; then
+            ./trio-test-harness --target watch daemon start
+            trap './trio-test-harness --target sim daemon stop >/dev/null 2>&1; ./trio-test-harness --target watch daemon stop >/dev/null 2>&1 || true' EXIT
+          fi
           claude -p "$prompt" --model "$CLAUDE_MODEL" --output-format stream-json --verbose \
             --permission-mode dontAsk --permission-prompts none --settings "$RUNNER_TEMP/claude-settings.json" \
             --append-system-prompt "$(cat ci/agent-limits.md)" \
