@@ -60,7 +60,7 @@ real Loop on a Mac: `docs/HANDOFF.md` lists what to check.
 
 Trio's Watch app runs on a watchOS simulator paired with the harness's iPhone simulator, so a Watch change can be tested
 the way a phone change is. `trio-test-e2e --devices phone|phone+watch|auto` (`--watch` = phone+watch; CI's `devices`
-input, the web UI's Devices field) says whether a run includes it. **phone** is the default. **auto** asks a small model
+and `watch_model` dropdowns, `trio-test-ci --devices … --watch-model 40mm`, the web UI's Devices field) says whether a run includes it. **phone** is the default. **auto** asks a small model
 (Haiku through `claude -p`, `TH_SCOPE_MODEL`) whether the change can alter anything the watch shows or does, from every PR
 of the run: the app's (Trio or LoopWorkspace), the submodule PR, other submodule PRs and cherry-picked PRs, with their
 titles, descriptions and changed files (`harness/watchscope.py`, ~10 s); without Claude the changed paths decide. The

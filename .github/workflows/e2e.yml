@@ -46,8 +46,10 @@ on:
         options: [phone, phone+watch, auto]
         default: phone
       watch_model:
-        description: "Watch size when the watch is used: 40mm, 41mm, 42mm, 44mm, 45mm, 46mm (blank: the default), 49mm, or a model name"
-        type: string
+        description: "Watch size when the watch is used (default: TH_WATCH_SIM_DEVICE, Apple Watch Series 11 (46mm))"
+        type: choice
+        options: [default, 40mm, 41mm, 42mm, 44mm, 45mm, 46mm, 49mm]
+        default: default
       claude_model:
         description: "Claude model for the agent (sonnet, opus, haiku, or a model ID)"
         type: string
@@ -100,7 +102,7 @@ jobs:
       IN_SKIP_ONBOARDING: ${{ inputs.skip_onboarding }}
       IN_SMOKE: ${{ inputs.smoke }}
       IN_DEVICES: ${{ inputs.devices || 'phone' }}
-      IN_WATCH_MODEL: ${{ inputs.watch_model }}
+      IN_WATCH_MODEL: ${{ inputs.watch_model || 'default' }}
       IN_AGENT_INSTRUCTIONS: ${{ inputs.agent_instructions }}
       TH_XCODE_APP: /Applications/Xcode_${{ inputs.xcode }}.app
       TH_SIM_DEVICE: ${{ inputs.sim_device }}
@@ -157,7 +159,7 @@ jobs:
           # The fake CGM/pump setup steps are left out of report.html and the comment (everything else stays).
           if [ "$IN_SMOKE" = true ]; then args+=(--hide-setup-screenshots); fi
           args+=(--devices "$IN_DEVICES")
-          if [ -n "$IN_WATCH_MODEL" ]; then args+=(--watch-model "$IN_WATCH_MODEL"); fi
+          if [ "$IN_WATCH_MODEL" != default ]; then args+=(--watch-model "$IN_WATCH_MODEL"); fi
           # The runner's bash has -e; keep going so the run dir is recorded even when the run fails.
           rc=0
           ./trio-test-e2e "${args[@]}" || rc=$?
