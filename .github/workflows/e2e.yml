@@ -194,9 +194,10 @@ jobs:
           # final answer into agent-summary.md for the job summary.
           # Locked down (ci/claude-sandbox.py, ci/agent-limits.md): Bash may only run the harness and sleep,
           # everything else is denied (dontAsk), and the harness commands run in macOS's sandbox with no network,
-          # writes only under runs/ and build/ and the installed app's own simulator containers (`th db`), and one Unix
-          # socket: the harness daemon, started here outside the sandbox because it holds the simulator and
-          # WebDriverAgent connections. The venv's Python: the container lookup imports the harness.
+          # writes only under runs/, build/, the temp folders and the installed app's own simulator containers (`th db`),
+          # and the harness daemons' Unix sockets (in /private/tmp: a socket path under this runner's checkout is over
+          # macOS's 104 bytes), started here outside the sandbox because they hold the simulator and WebDriverAgent
+          # connections. The venv's Python: the container lookup imports the harness.
           .venv/bin/python ci/claude-sandbox.py "$RUNNER_TEMP/claude-settings.json" sim "$IN_APP"
           ./trio-test-harness --target sim daemon start
           trap './trio-test-harness --target sim daemon stop >/dev/null 2>&1 || true' EXIT
@@ -204,6 +205,8 @@ jobs:
             ./trio-test-harness --target watch daemon start
             trap './trio-test-harness --target sim daemon stop >/dev/null 2>&1; ./trio-test-harness --target watch daemon stop >/dev/null 2>&1 || true' EXIT
           fi
+          # read by "Fail the job if the agent step failed": a failure before this line is the harness's, not the agent's
+          echo "setup=ok" >> "$GITHUB_OUTPUT"
           claude -p "$prompt" --model "$CLAUDE_MODEL" --output-format stream-json --verbose \
             --permission-mode dontAsk --permission-prompts none --settings "$RUNNER_TEMP/claude-settings.json" \
             --append-system-prompt "$(cat ci/agent-limits.md)" \
@@ -320,3 +323,17 @@ jobs:
           path: build/xcodebuild-*.log
           retention-days: 14
           if-no-files-found: ignore
+
+      # The agent step continues on error so the highlights, report, PR comment and uploads above still run; this
+      # step then fails the job, since a run whose agent step failed tested less than it reports.
+      - name: Fail the job if the agent step failed
+        if: always() && steps.agent.outcome == 'failure'
+        env:
+          SETUP: ${{ steps.agent.outputs.setup }}
+        run: |
+          if [ "$SETUP" = ok ]; then
+            echo "::error::The agent step failed: the Claude session ended with an error or ran out of time (see its log)."
+          else
+            echo "::error::The agent step failed before the agent started: the harness could not set up the sandbox or its daemons (see the step's log)."
+          fi
+          exit 1

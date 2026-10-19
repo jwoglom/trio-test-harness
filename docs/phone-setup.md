@@ -78,7 +78,7 @@ launchctl, dpkg (no curl, nc, plutil). TrollVNC prefs live at
 `/var/jb/var/mobile/Library/Preferences/com.82flex.trollvnc.plist` (binary; edit on the Mac with plutil, scp back, restart).
 
 ## Persistent connection: `th daemon`
-`th --target rooted-vnc daemon start` keeps one VNC connection open in a background process (socket `runs/.tmp/daemon-device.sock`);
+`th --target rooted-vnc daemon start` keeps one VNC connection open in a background process (socket `/private/tmp/th-<checkout>/rooted-vnc.sock`: `config.daemon_socket`);
 every `th` command uses it automatically (2–3 s per screenshot instead of a reconnect each time, and no connect/disconnect
 banners on the phone). `th daemon status|stop|restart`. The daemon reconnects once if the phone drops the connection.
 Same for the simulator: `th --target sim daemon start` holds the WDA session.

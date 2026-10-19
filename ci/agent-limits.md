@@ -6,7 +6,8 @@ try to work around them.
 - Files: Read, Glob and Grep work inside this harness checkout (the current directory), including the run directory
   and its screenshots. Other directories, including the app's source checkout, are not readable.
 - The harness commands themselves run in an OS sandbox: no network access, and writes only under `runs/`,
-  `build/` and the app's own simulator containers (for `db`). They reach the already-running simulator, the app and WebDriverAgent through the harness daemon, so driving
+  `build/`, the temp folders and the app's own simulator containers (for `db`). They reach the already-running
+  simulator (and the watch, when the run has one), the app and WebDriverAgent through the harness daemons, so driving
   the app works normally (`shot`, `tap`, `tap-text`, `find`, `tree`, `type`, `swipe`, `scroll`, `home`, `lock`,
   `unlock`, `flow ...`, `run ...`, `report ...`). Commands that build, install or manage the simulator or
   WebDriverAgent (`build`, `install`, `sim erase`, `wda build/start`, ...) are expected to fail; you do not need them.

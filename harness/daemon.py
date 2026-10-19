@@ -1,7 +1,7 @@
 """Daemon mode: keep one driver (VNC connection / WDA session) alive in a
 background process and let every `th` invocation reuse it.
 
-    th daemon start --target device     # forks; socket at runs/.tmp/daemon-device.sock
+    th daemon start --target device     # forks; socket config.daemon_socket("device") (/private/tmp/th-<checkout>/)
     th daemon status|stop
 
 When the socket answers a ping, `cli.get_driver()` transparently returns a
@@ -22,7 +22,7 @@ import traceback
 from pathlib import Path
 
 from .appdebug import REMOTE as DEBUG_CALLS
-from .config import REPO_ROOT
+from .config import REPO_ROOT, daemon_socket
 from .driver import Driver, UINode
 from .util import HarnessError, log
 
@@ -34,7 +34,17 @@ ALLOWED_PRIVATE = {"unlock", "is_dark", "status", "spotlight", "open_app_via_spo
 
 
 def sock_path(target: str) -> Path:
-    return SOCK_DIR / f"daemon-{target}.sock"
+    return daemon_socket(target)
+
+
+def _socket_dir() -> Path:
+    """The sockets' directory, ours alone: /tmp is shared, and whoever owns it could answer for the daemon."""
+    d = daemon_socket("x").parent
+    d.mkdir(mode=0o700, parents=True, exist_ok=True)
+    st = d.stat()
+    if st.st_uid != os.getuid() or st.st_mode & 0o077:
+        raise HarnessError(f"{d} is not this user's alone (owner {st.st_uid}, mode {oct(st.st_mode & 0o777)}); remove it")
+    return d
 
 
 def pid_path(target: str) -> Path:
@@ -94,6 +104,7 @@ def _make_driver(target: str) -> Driver:
 def serve(target: str) -> None:
     sp, pp = sock_path(target), pid_path(target)
     SOCK_DIR.mkdir(parents=True, exist_ok=True)
+    _socket_dir()
     if sp.exists():
         sp.unlink()
     drv = _make_driver(target)
@@ -171,9 +182,6 @@ def _serve_connection(conn, drv, target, _shutdown) -> None:
 # ---------------- client -----------------
 
 def is_running(target: str, timeout: float = 2.0) -> bool:
-    sp = sock_path(target)
-    if not sp.exists():
-        return False
     try:
         RemoteDriver(target, timeout=timeout).ping()
         return True
@@ -283,6 +291,7 @@ def start(target: str, foreground: bool = False) -> None:
         serve(target)
         return
     SOCK_DIR.mkdir(parents=True, exist_ok=True)
+    _socket_dir()
     with open(log_path(target), "a") as fh:
         p = subprocess.Popen([sys.executable, "-m", "harness.daemon", "--target", target], stdout=fh, stderr=fh,
                              cwd=str(REPO_ROOT), start_new_session=True)
@@ -305,12 +314,12 @@ def stop(target: str) -> None:
         except Exception:  # noqa: BLE001
             pass
     pp = pid_path(target)
-    if pp.exists():
-        try:
-            os.kill(int(pp.read_text()), signal.SIGTERM)
-        except (ProcessLookupError, ValueError):
-            pass
-        pp.unlink(missing_ok=True)
+    try:
+        # the shutdown above has the daemon remove its pid file as it exits, so it may be gone by now
+        os.kill(int(pp.read_text()), signal.SIGTERM)
+    except (FileNotFoundError, ProcessLookupError, ValueError):
+        pass
+    pp.unlink(missing_ok=True)
     sock_path(target).unlink(missing_ok=True)
 
 

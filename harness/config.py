@@ -12,6 +12,14 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parent.parent
 ENV_FILE = REPO_ROOT / "harness.env"
 
+
+def daemon_socket(target: str) -> Path:
+    """The harness daemon's Unix socket for a target. macOS caps a socket path at 104 bytes and a CI runner's checkout
+    path alone is ~90 (`daemon-watch.sock` under runs/.tmp went over), so sockets live in a short directory per checkout
+    under the real /tmp: the resolved path, since the agent sandbox's allowUnixSockets matches that (ci/claude-sandbox.py)."""
+    import hashlib
+    return Path(os.path.realpath("/tmp")) / f"th-{hashlib.sha1(str(REPO_ROOT).encode()).hexdigest()[:10]}" / f"{target}.sock"
+
 DEFAULTS = {
     "TH_APP": "trio",                 # the app under test: trio | loop (harness/apps.py); --app on th / trio-test-e2e
     "TRIO_REPO": str(REPO_ROOT / "Trio"),        # Trio checkout the harness builds from (cloned on demand)

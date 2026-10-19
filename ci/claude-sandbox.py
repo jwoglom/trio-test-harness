@@ -6,7 +6,7 @@
 The agent may only run the harness CLI (plus sleep) through Bash; `--permission-mode dontAsk` and
 `--permission-prompts none` deny everything else, and the file tools cannot read outside the working
 directories. On top of that, macOS's sandbox (Seatbelt) confines those commands: no network at all,
-writes only into the run folders (and, with APP on the simulator, that installed app's own data and app group
+writes only into the run folders and the temp folders (and, with APP on the simulator, that installed app's own data and app group
 containers, for `th db`: harness/appdb.py), and the harness daemons' Unix sockets (the simulator's, and with
 it the paired watch's). The daemon is started
 outside the sandbox before the agent (it holds the simulator and WebDriverAgent connections, which a
@@ -20,6 +20,21 @@ import sys
 from pathlib import Path
 
 HARNESS = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(HARNESS))
+from harness.config import daemon_socket  # noqa: E402  (the sockets' path is the harness's to choose)
+
+
+def temp_dirs() -> list[str]:
+    """The temp folders the harness may always use (its daemon sockets live in /tmp): the real /tmp, the user's
+    $TMPDIR and, on a runner, $RUNNER_TEMP, each resolved, as Seatbelt matches resolved paths."""
+    import os
+    import tempfile
+    dirs = ["/tmp", tempfile.gettempdir(), os.environ.get("TMPDIR", ""), os.environ.get("RUNNER_TEMP", "")]
+    out: list[str] = []
+    for d in dirs:
+        if d and os.path.isdir(d) and (r := os.path.realpath(d)) not in out:
+            out.append(r)
+    return out
 
 
 def settings(target: str = "sim", app: str | None = None) -> dict:
@@ -29,9 +44,8 @@ def settings(target: str = "sim", app: str | None = None) -> dict:
         # the apps' documentation only (`th docs`: Trio's, LoopDocs), so the agent can look up where settings live
         "allowedDomains": ["triodocs.org", "loopkit.github.io"],
         "strictAllowlist": True,
-        # on the simulator also the paired watch's daemon (`trio-test-e2e --watch`); its socket exists only while it runs
-        "allowUnixSockets": [str(HARNESS / "runs" / ".tmp" / f"daemon-{t}.sock")
-                             for t in ((target, "watch") if target == "sim" else (target,))],
+        # on the simulator also the paired watch's daemon (`--devices phone+watch`); its socket exists only while it runs
+        "allowUnixSockets": [str(daemon_socket(t)) for t in ((target, "watch") if target == "sim" else (target,))],
     }
     app_dirs: list[str] = []
     if target == "sim":
@@ -52,10 +66,10 @@ def settings(target: str = "sim", app: str | None = None) -> dict:
             "autoAllowBashIfSandboxed": False,  # --allowedTools stays the gate for what may run
             "excludedCommands": [],
             "filesystem": {
-                "allowWrite": [str(HARNESS / "runs"), str(HARNESS / "build"), *app_dirs],
+                "allowWrite": [str(HARNESS / "runs"), str(HARNESS / "build"), *temp_dirs(), *app_dirs],
                 # blockReadsOutsideWorkingDirectories also takes reads of /Users away from sandboxed commands, and
                 # allowWrite does not give them back; the file tools still cannot read these
-                "allowRead": app_dirs,
+                "allowRead": [*temp_dirs(), *app_dirs],
             },
             "network": network,
         },

@@ -135,6 +135,12 @@ macOS iPhone Mirroring using phone-harness; driver written and window capture ve
   **Unverified**: the CI workflow's `watch` input and the agent using the watch from inside the sandbox (the socket is
   allowed and the daemon path works unsandboxed); the web UI has no watch option yet.
 
+- **Daemon sockets, 2026-10-19**: the CI job's watch daemon failed with `OSError: AF_UNIX path too long`: macOS caps a
+  socket path at 104 bytes and `runs/.tmp/daemon-watch.sock` under the runner's checkout came to 104 (the sim's, two
+  shorter, fit). Sockets now live in `/private/tmp/th-<hash of the checkout>/<target>.sock` (`config.daemon_socket`,
+  a directory of the user's own, mode 0700), and `ci/claude-sandbox.py` takes the paths from there; the agent sandbox
+  may also read and write the temp folders (/tmp, $TMPDIR, $RUNNER_TEMP).
+
 ## Still unverified
 - `th report pr` against a real PR (gh --attach inline uploads; ask before posting).
 - `th webui` with a real job: only tested with the stages stubbed (auth, validation, stage order, sandbox settings per

@@ -393,6 +393,7 @@ def run_job(job: Job) -> None:
     rd = job.run_dir()
 
     # --- agent: Claude Code tests what the PR describes, sandboxed as in CI ---
+    agent_failed = False
     if rc == 0 and rd and not inp.get("agent", True):
         job.stage("agent", "skipped", "Trigger agent was off")
     elif rc == 0 and rd:
@@ -434,8 +435,13 @@ def run_job(job: Job) -> None:
                      "SID": sid,
                      "LIMITS": (REPO_ROOT / "ci" / limits_file).read_text(), "OUT": str(rd / "agent-summary.md"), "PY": py}
         arc = -1
+        # the sandboxed agent reaches the devices only through these
+        missing = [t for t in (target, "watch" if watch else None) if t and not D.is_running(t)]
         try:
-            arc, _ = job.sh(["bash", "-c",
+            if missing:
+                job.note(f"the {' and '.join(missing)} daemon did not start; the agent did not run (see the log)")
+            else:
+                arc, _ = job.sh(["bash", "-c",
                              'set -o pipefail; claude -p "$PROMPT" --model "$MODEL" --output-format stream-json --verbose '
                              '--session-id "$SID" '
                              '--permission-mode dontAsk --permission-prompts none --settings "$SETTINGS" '
@@ -453,7 +459,9 @@ def run_job(job: Job) -> None:
                 D.stop("watch")
                 job.note("stopped the watch daemon")
             _render(job, rd)
-        job.stage("agent", "passed" if arc == 0 else "failed")   # continue-on-error, as in CI
+        # the later stages still run (continue-on-error, as in CI), and the job then reads failed
+        job.stage("agent", "passed" if arc == 0 else "failed")
+        agent_failed = arc != 0
 
     # --- highlights: a separate pass with no memory of the session picks the relevant screenshots ---
     # Without an agent nothing was tested beyond launch/setup, so there is nothing to pick (the comment has no shots).
@@ -481,7 +489,7 @@ def run_job(job: Job) -> None:
     if job.cancelled:
         return
     meta = read_json(rd / "run.json", {}) if rd else {}
-    job.update(status=(meta or {}).get("status") or ("passed" if rc == 0 else "failed"))
+    job.update(status="failed" if agent_failed else (meta or {}).get("status") or ("passed" if rc == 0 else "failed"))
     if inp["post_comment"] and rd and job.data.get("pr"):
         post_comment(job, None)
 
