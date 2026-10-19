@@ -18,6 +18,8 @@ from __future__ import annotations
 
 import glob
 import json
+import plistlib
+import re
 import os
 import signal
 import subprocess
@@ -25,7 +27,7 @@ import time
 import uuid
 from pathlib import Path
 
-from .config import REPO_ROOT
+from .config import CONFIG, REPO_ROOT
 from .driver import Driver, UINode
 from .util import HarnessError, log, run, wait_for
 from . import xcode
@@ -38,6 +40,7 @@ LOG_FILE = REPO_ROOT / "runs" / ".tmp" / "watch-agent.log"
 APP_FILE = REPO_ROOT / "runs" / ".tmp" / "watch-app.txt"     # the Watch app last launched, for a restarted agent
 CURRENT_FILE = REPO_ROOT / "runs" / ".tmp" / "watch-udid.txt"  # the watch in use (`th watch model`), for every process
 AGENT_UDID_FILE = REPO_ROOT / "runs" / ".tmp" / "watch-agent-udid.txt"
+HOME_FLAG = REPO_ROOT / "runs" / ".tmp" / "watch-at-home"      # `th --target watch home`: leave the clock in front
 CAROUSEL = "com.apple.Carousel"
 
 # Settings ▸ General ▸ Orientation and Settings ▸ Display & Brightness ▸ Text Size, as the watch stores them. An app
@@ -61,21 +64,77 @@ SUGGESTED_MODELS = ["Apple Watch SE 3 (40mm)", "Apple Watch Series 9 (41mm)", "A
 
 # ---------------- simulators -----------------
 
-def watch_udid() -> str:
-    """The watch in use: the model `th watch model` last chose, else TH_WATCH_SIM_DEVICE."""
-    if CURRENT_FILE.exists():
-        udid = CURRENT_FILE.read_text().strip()
-        if any(d["udid"] == udid and d.get("isAvailable", True) for d in xcode.list_devices()):
-            return udid
-    return xcode.ensure_watch_simulator()["udid"]
+def resolve_model(name: str | None) -> str:
+    """A watch model from a size ("40mm", "40 mm", "40": that size's model in SUGGESTED_MODELS), "ultra", or a model name
+    in any case; None gives TH_WATCH_SIM_DEVICE."""
+    name = (name or CONFIG.get("TH_WATCH_SIM_DEVICE")).strip()
+    names = [dt["name"] for dt in xcode.watch_devicetypes()]
+    for n in names:
+        if n.lower() == name.lower():
+            return n
+    m = re.fullmatch(r"(\d{2})\s*(mm)?", name.lower())
+    if m:
+        for n in SUGGESTED_MODELS:
+            if f"({m.group(1)}mm)" in n and n in names:
+                return n
+    if name.lower() == "ultra":
+        return next(n for n in SUGGESTED_MODELS if "Ultra" in n)
+    sizes = ", ".join(re.search(r"\((\d+mm)\)", n).group(1) for n in SUGGESTED_MODELS)
+    raise HarnessError(f"unknown watch model {name!r}: give a size ({sizes}, or ultra) or a name from `th watch model`")
 
 
-def select_model(device: str | None) -> str:
-    """Make the harness's simulator of this watch model (created on first use) the one in use; returns its udid."""
-    udid = xcode.ensure_watch_simulator(device)["udid"]
+def pair_names(model: str) -> tuple[str, str]:
+    """The harness's phone and watch simulator names for a watch model."""
+    return f"{CONFIG.get('TH_SIM_NAME')} ({model})", f"{CONFIG.get('TH_WATCH_SIM_NAME')} ({model})"
+
+
+def ensure_pair(model: str | None = None, *, recreate: bool = False) -> tuple[str, str]:
+    """The phone + watch simulator pair for a watch model (default TH_WATCH_SIM_DEVICE), created on first use, and
+    made the pair in use for every harness command (the phone too). Returns (watch udid, phone udid); boots neither.
+
+    Each model gets a phone of its own, paired once, at creation, while both are shut down. A phone simulator that has
+    been paired again (another watch, `pair_activate`, `unpair`) or erased stops linking Watch apps to their iPhone apps
+    (its wcd logs `iOSApplicationsWithWatchAppInstalled: {()}`, so WCSession.isWatchAppInstalled is false), and nothing
+    short of a new simulator brought it back (docs/HANDOFF.md)."""
+    model = resolve_model(model)
+    phone_name, watch_name = pair_names(model)
+    devices = [d for d in xcode.list_devices() if d.get("isAvailable", True)]
+    phones = {d["udid"] for d in devices if d["name"] == phone_name}
+    watches = {d["udid"] for d in devices if d["name"] == watch_name}
+    found = None if recreate else next(
+        ((p["watch"]["udid"], p["phone"]["udid"]) for p in xcode.list_pairs().values()
+         if p["watch"]["udid"] in watches and p["phone"]["udid"] in phones), None)
+    if not found:
+        for udid in phones | watches:           # this harness's own, half-made or broken pair
+            xcode.xcrun(["simctl", "shutdown", udid], check=False, quiet=True)
+            xcode.xcrun(["simctl", "delete", udid], quiet=True)
+        log(f"creating the phone + watch simulator pair for {model} (first boot takes minutes)")
+        phone = xcode.create_device(phone_name, CONFIG.get("TH_SIM_DEVICE"),
+                                    xcode.pick_runtime(CONFIG.get("TH_SIM_RUNTIME")))["udid"]
+        watch = xcode.create_device(watch_name, model,
+                                    xcode.pick_runtime(CONFIG.get("TH_WATCH_SIM_RUNTIME"), "watchOS"))["udid"]
+        xcode.xcrun(["simctl", "pair", watch, phone])
+        found = (watch, phone)
     CURRENT_FILE.parent.mkdir(parents=True, exist_ok=True)
-    CURRENT_FILE.write_text(udid)
-    return udid
+    CURRENT_FILE.write_text(found[0])
+    xcode.SIM_CURRENT_FILE.write_text(found[1])
+    return found
+
+
+def current_pair() -> tuple[str, str] | None:
+    """(watch, phone) of the pair in use, or None before `th watch pair`."""
+    if not CURRENT_FILE.exists() or not xcode.SIM_CURRENT_FILE.exists():
+        return None
+    w, ph = CURRENT_FILE.read_text().strip(), xcode.SIM_CURRENT_FILE.read_text().strip()
+    for p in xcode.list_pairs().values():
+        if p["watch"]["udid"] == w and p["phone"]["udid"] == ph:
+            return w, ph
+    return None
+
+
+def watch_udid() -> str:
+    """The watch of the pair in use, or the default model's pair (created on first use)."""
+    return (current_pair() or ensure_pair())[0]
 
 
 def model_name(udid: str) -> str:
@@ -121,12 +180,10 @@ def write_settings(udid: str, *, wrist: str | None = None, crown: str | None = N
     return bool(wrist or crown or text_size)
 
 
-def pair(udid: str | None = None) -> tuple[str, str]:
-    """Create the watch simulator if needed, pair it with the harness's iPhone simulator, boot both.
+def pair(model: str | None = None, *, recreate: bool = False) -> tuple[str, str]:
+    """The pair for `model` (or the one in use, else the default model's), booted: phone first, then the watch.
     Returns (watch udid, phone udid)."""
-    phone = xcode.ensure_simulator()["udid"]
-    watch = udid or watch_udid()
-    xcode.ensure_pair(watch, phone)
+    watch, phone = ensure_pair(model, recreate=recreate) if (model or recreate or not current_pair()) else current_pair()
     xcode.boot_simulator(phone)
     xcode.boot_simulator(watch)
     return watch, phone
@@ -278,7 +335,7 @@ class WatchDriver(Driver):
 
     # ---- lifecycle ----
     def boot(self) -> None:
-        pair(self.udid)
+        pair()
 
     def settings(self, *, wrist: str | None = None, crown: str | None = None, text_size: str | None = None) -> dict:
         """Change the watch's wrist, crown side or text size (None leaves one as it is) and relaunch the Watch app in
@@ -288,33 +345,59 @@ class WatchDriver(Driver):
             call("launch", bundleId=APP_FILE.read_text().strip())
         return {"model": model_name(self.udid), **read_settings(self.udid)}
 
-    def use_model(self, device: str, *, app_path: str | None = None, bundle_id: str | None = None,
-                  phone_bundle_id: str | None = None, wrist: str | None = None, crown: str | None = None,
-                  text_size: str | None = None) -> dict:
-        """Switch to the harness's simulator of watch model `device` (created on first use): pair it with the phone
-        simulator, boot it, install `app_path`'s Watch app, apply the settings, move the agent to it, launch the Watch
-        app, then relaunch the phone app, whose session looks for the watch when it starts. Takes minutes for a new
-        model (its first boot); the previous watch keeps its state and stays booted."""
-        udid = select_model(device)
-        self.udid, self._points = udid, None
-        pair(udid)
-        write_settings(udid, wrist=wrist, crown=crown, text_size=text_size)
-        if app_path:
-            self.install(Path(app_path))
-        start(udid)
+    def use_model(self, device: str | None = None, *, app_path: str | None = None, bundle_id: str | None = None,
+                  wrist: str | None = None, crown: str | None = None, text_size: str | None = None,
+                  recreate: bool = False) -> dict:
+        """Switch to the phone + watch pair of watch model `device` (both created on first use, minutes): boot it,
+        install `app_path` on the phone and then its Watch app on the watch where missing, apply the settings, move
+        the watch agent and WebDriverAgent to it, launch the Watch app and then the phone app (onboarding pre-seeded).
+        It is another phone simulator: its app keeps its own data, so a new pair has no fake CGM or pump yet."""
+        prev = current_pair()
+        target = ensure_pair(device, recreate=recreate)
+        if prev and prev != target:
+            # the pair left behind keeps its state; shut down, it does not compete with the new pair's (first) boot
+            stop()
+            from . import wda
+            wda.stop()
+            for udid in prev:
+                xcode.xcrun(["simctl", "shutdown", udid], check=False, quiet=True)
+        watch, phone = pair(device)
+        self.udid = watch
+        write_settings(watch, wrist=wrist, crown=crown, text_size=text_size)
+        from .sim import SimulatorDriver
+        from . import apps, wda
+        phone_drv = SimulatorDriver(phone)
+        if app_path and bundle_id:
+            # the phone app before its Watch app, as on every pair that linked them
+            if not phone_drv.is_installed(bundle_id):
+                phone_drv.install(Path(app_path))
+            if not self.is_installed(bundle_id):
+                self.install(Path(app_path))
+            apps.current().flows.preseed_simulator(phone_drv, bundle_id)
+        start(watch)
+        if wda.is_running():
+            wda.start(phone)
         if bundle_id:
             self.launch(bundle_id)
-        if phone_bundle_id:
-            phone = xcode.ensure_simulator()["udid"]
-            xcode.xcrun(["simctl", "terminate", phone, phone_bundle_id], check=False, quiet=True)
-            xcode.xcrun(["simctl", "launch", phone, phone_bundle_id], quiet=True)
-        return {"udid": udid, "model": model_name(udid), **read_settings(udid)}
-
-    def ensure_agent(self) -> None:
-        start(self.udid)
+            phone_drv.launch(bundle_id)
+            # A new pair's phone links its apps to their Watch apps seconds after the first launch, which then finds no
+            # watch (isWatchAppInstalled false); a relaunch a little later does.
+            time.sleep(30)
+            phone_drv.launch(bundle_id)
+        return {"watch": watch, "phone": phone, "model": model_name(watch), **read_settings(watch)}
 
     def install(self, app_path: Path) -> None:
-        self._simctl(["install", self.udid, str(embedded_watch_app(Path(app_path)))])
+        # Uninstalling the phone app on a paired phone also deletes its Watch app, and that deletion reaches the watch
+        # seconds later, so a Watch app installed meanwhile vanishes (seen 3 s after its install): install until it stays.
+        watch_app = embedded_watch_app(Path(app_path))
+        bid = plistlib.loads((watch_app / "Info.plist").read_bytes())["CFBundleIdentifier"]
+        for attempt in range(3):
+            self._simctl(["install", self.udid, str(watch_app)])
+            time.sleep(10)
+            if self.is_installed(bid):
+                return
+            log(f"{bid} was removed from the watch right after its install (the phone app's uninstall); installing again")
+        raise HarnessError(f"{bid} does not stay installed on the watch")
 
     def uninstall(self, bundle_id: str) -> None:
         self._simctl(["uninstall", self.udid, watch_bundle_id(bundle_id)], check=False)
@@ -327,6 +410,7 @@ class WatchDriver(Driver):
         bid = watch_bundle_id(bundle_id)
         APP_FILE.parent.mkdir(parents=True, exist_ok=True)
         APP_FILE.write_text(bid)
+        HOME_FLAG.unlink(missing_ok=True)
         # simctl starts a watch app suspended, and a suspended Watch app is not reachable from the phone, so the agent
         # brings it to the front. Not with XCUIApplication.launch: a launch it cannot complete fails the test, which
         # is the agent (seen right after a watch was erased).
@@ -350,8 +434,20 @@ class WatchDriver(Driver):
     def app_data_container(self, bundle_id: str) -> Path:
         return xcode.app_container(self.udid, watch_bundle_id(bundle_id), "data")
 
+    def _keep_front(self) -> None:
+        """watchOS returns to the clock after 2 minutes without a touch, which would put the next screenshot or tap on
+        the watch face; bring the Watch app the harness launched back, unless `home` put the clock there on purpose."""
+        if HOME_FLAG.exists() or not APP_FILE.exists() or not is_running():
+            return
+        bid = APP_FILE.read_text().strip()
+        if call("state", bundleId=bid).get("state") != "foreground":
+            log("the Watch app had gone back to the clock (watchOS does after 2 min idle); bringing it to the front")
+            call("activate", bundleId=bid)
+            time.sleep(1)
+
     # ---- screen (screenshot pixels; the agent works in points) ----
     def screenshot(self, path: Path) -> Path:
+        self._keep_front()
         path.parent.mkdir(parents=True, exist_ok=True)
         self._simctl(["io", self.udid, "screenshot", "--type=png", str(path)], quiet=True)
         return path
@@ -376,6 +472,7 @@ class WatchDriver(Driver):
 
     # ---- input (pixel coords) ----
     def tap(self, x: int, y: int, *, duration: float = 0.0) -> None:
+        self._keep_front()
         px, py = self._pt(x, y)
         if duration:
             call("press", x=px, y=py, duration=duration)
@@ -393,6 +490,7 @@ class WatchDriver(Driver):
 
     def crown(self, delta: float, *, velocity: float | None = None) -> None:
         """Turn the Digital Crown: 1.0 is one full turn; negative turns the other way."""
+        self._keep_front()
         if velocity is None:
             call("crown", delta=delta)
         else:
@@ -406,6 +504,7 @@ class WatchDriver(Driver):
 
     def home(self) -> None:
         call("home")
+        HOME_FLAG.touch()
 
     def wake(self) -> None:
         pass
@@ -430,6 +529,7 @@ class WatchDriver(Driver):
 
     # ---- accessibility tree ----
     def ui_tree(self) -> list[UINode]:
+        self._keep_front()
         s = self.scale
         return [UINode(label=n.get("label") or "", value=n.get("value") or "", identifier=n.get("identifier") or "",
                        role=n.get("role") or "", enabled=bool(n.get("enabled", True)),

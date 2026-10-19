@@ -114,6 +114,12 @@ button.small{padding:2px 9px;font-size:12px;margin-top:8px;display:block}
     <label class="check"><input type="checkbox" name="skip_onboarding" checked>Skip onboarding</label>
     <label class="check"><input type="checkbox" name="cgm_sim" checked><span id="cgmlabel">Use Glucose Simulator</span></label>
     <label class="check"><input type="checkbox" name="pump_sim" checked>Use Pump Simulator</label>
+    <fieldset id="devfields">
+      <label for="devices">Devices (simulator)</label>
+      <select id="devices" name="devices" title="phone + watch: Trio's Watch app on a watch simulator paired with the phone. auto: a small model decides from the app's and submodules' PRs whether the watch is needed">
+        <option value="phone" selected>phone only</option><option value="phone+watch">phone + watch</option>
+        <option value="auto">auto (a model decides from the PRs)</option></select>
+    </fieldset>
     <div class="section">
     <label class="check" style="margin-top:0"><input type="checkbox" name="agent" checked>Trigger agent</label>
     <datalist id="models"><option value="sonnet"><option value="opus"><option value="haiku"></datalist>
@@ -142,10 +148,6 @@ button.small{padding:2px 9px;font-size:12px;margin-top:8px;display:block}
         <label for="sim_runtime">Runtime</label>
         <input type="text" id="sim_runtime" name="sim_runtime" list="sim_runtimes" placeholder="newest installed">
         <datalist id="sim_runtimes"></datalist>
-        <label for="devices">Devices</label>
-        <select id="devices" name="devices" title="auto: a small model decides from the PR whether Trio's Watch app is needed">
-          <option value="auto">auto (decided from the PR)</option><option value="phone">phone</option>
-          <option value="phone+watch">phone + watch</option></select>
         <label for="watch_model">Watch model</label>
         <input type="text" id="watch_model" name="watch_model" list="watch_models">
         <datalist id="watch_models"></datalist>
@@ -221,6 +223,7 @@ const form = $("#form");
 function syncTarget() {
   const sim = form.target.value === "simulator";
   $("#simfields").disabled = !sim;
+  $("#devfields").disabled = !sim;
   if (sim) $("#simbox").open = true;
   $("#phonetoggle").hidden = sim;
 }

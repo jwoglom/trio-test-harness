@@ -26,6 +26,7 @@ from . import xcode
 WDA_SRC = REPO_ROOT / "vendor" / "WebDriverAgent"
 WDA_DD = REPO_ROOT / "build" / "wda-dd"
 PID_FILE = REPO_ROOT / "runs" / ".tmp" / "wda.pid"
+UDID_FILE = REPO_ROOT / "runs" / ".tmp" / "wda-udid.txt"     # the simulator the runner is on
 LOG_FILE = REPO_ROOT / "runs" / ".tmp" / "wda.log"
 PORT = int(CONFIG.get("TH_WDA_PORT", "8100"))
 
@@ -83,7 +84,10 @@ def is_running() -> bool:
 
 def start(udid: str, timeout: float = 600) -> None:
     if is_running():
-        return
+        if not UDID_FILE.exists() or UDID_FILE.read_text().strip() == udid:
+            return
+        log("WebDriverAgent runs on another simulator; moving it")
+        stop()
     xr = xctestrun() or from_prebuilt() or build(udid)
     PID_FILE.parent.mkdir(parents=True, exist_ok=True)
     cmd = ["xcodebuild", "test-without-building", "-xctestrun", str(xr), "-destination", f"id={udid}",
@@ -93,6 +97,7 @@ def start(udid: str, timeout: float = 600) -> None:
         p = subprocess.Popen(cmd, stdout=fh, stderr=subprocess.STDOUT, env={**os.environ, **xcode.developer_env()},
                              start_new_session=True)
     PID_FILE.write_text(str(p.pid))
+    UDID_FILE.write_text(udid)
     try:
         wait_for(is_running, timeout, 1.0, what="WebDriverAgent /status")
     except HarnessError:

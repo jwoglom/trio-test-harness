@@ -78,12 +78,16 @@ def decide_devices(args, info: dict, src: Path) -> dict:
     """Settle --devices auto: the watch only for Trio on the simulator, and then when the change can reach it."""
     if args.devices != "auto":
         return {"devices": args.devices, "reason": "asked for", "by": "option"}
-    if args.target != "sim" or _app().key != "trio":
-        return {"devices": "phone", "reason": "the watch runs only beside the iPhone simulator, with Trio", "by": "mode"}
+    if args.target != "sim":
+        return {"devices": "phone", "reason": "the watch runs only beside the iPhone simulator", "by": "mode"}
     from . import watchscope
-    d = watchscope.decide(info, src, _app().base_branch)
-    args.watch = d["devices"] == "phone+watch"
+    app = _app()
+    d = watchscope.decide(info, src, app.base_branch, app.key)
     log(f"devices: {d['devices']} ({d['by']}: {d['reason']})")
+    if d["devices"] == "phone+watch" and app.key != "trio":
+        d["reason"] += f" — but the harness runs only Trio's Watch app, so this {app.name} run is phone-only"
+        d["devices"] = "phone"
+    args.watch = d["devices"] == "phone+watch"
     return d
 
 
@@ -135,16 +139,20 @@ def stage_install(args, bi):
     from .cli import get_driver
     log("== stage: install")
     if args.target == "sim":
+        if args.watch:
+            # The watch model's own phone + watch pair (harness/watch.py ensure_pair): from here on every command
+            # drives that phone.
+            from . import watch as WT
+            WT.pair(args.watch_model)
         drv = get_driver("sim"); drv.boot()
+        if args.watch and args.reinstall:
+            get_driver("watch").uninstall(bi.bundle_id)     # before the phone app, whose uninstall would delete it too
         drv.uninstall(bi.bundle_id) if args.reinstall else None
         drv.install(Path(bi.app_path))
         _app().flows.reset_after_install(drv, bi.bundle_id) if args.reinstall else None
         if args.watch:
-            from . import watch as WT
-            WT.select_model(args.watch_model) if args.watch_model else None
-            w = get_driver("watch"); w.boot()
-            w.uninstall(bi.bundle_id) if args.reinstall else None
-            w.install(Path(bi.app_path))
+            # after the phone app: the Watch app installed first was never linked to it
+            get_driver("watch").install(Path(bi.app_path))
     elif args.target == "rooted-vnc":
         from . import devices as D
         D.appsync_install(Path(bi.ipa_path), CONFIG.get("TH_DEVICE_UDID") or None)
@@ -159,6 +167,9 @@ def stage_launch(args, bi, run):
     app = _app()
     F = app.flows
     log(f"== stage: launch ({app.name})")
+    if args.target == "sim" and args.watch:
+        from . import watch as WT
+        WT.pair(args.watch_model)
     drv = get_driver(args.target)
     if args.target == "sim":
         drv.boot()
@@ -167,15 +178,13 @@ def stage_launch(args, bi, run):
         if args.watch:
             # The Watch app goes first: Trio's phone session checks for it once, when the phone app starts.
             from . import watch as WT
-            udid = WT.select_model(args.watch_model) if args.watch_model else WT.watch_udid()
-            WT.pair(udid)
+            udid = WT.watch_udid()
             WT.write_settings(udid, wrist=args.watch_wrist, crown=args.watch_crown, text_size=args.watch_text_size)
             WT.start(udid)
             get_driver("watch").launch(bi.bundle_id)
         drv.launch(bi.bundle_id)
         from . import wda as W
-        if not W.is_running():
-            W.start(drv.udid)
+        W.start(drv.udid)       # moves it when it runs on another phone (another watch pair)
     elif args.target == "rooted-vnc":
         from . import devices as D
         drv.unlock()
@@ -382,13 +391,15 @@ def main(argv=None) -> int:
     p.add_argument("--clean", action="store_true"); p.add_argument("--no-fetch", action="store_true")
     p.add_argument("--reinstall", action="store_true", default=True)
     p.add_argument("--onboarding", choices=["preseed", "walk"], default="preseed")
-    p.add_argument("--devices", choices=["auto", "phone", "phone+watch"], default="auto",
-                   help="phone+watch also pairs a watch simulator, installs and launches the app's Watch app and starts "
-                        "the watch input agent, for `th --target watch ...` (simulator, Trio). auto (default) has a small "
-                        "model decide from the PR's title, description and changed files (harness/watchscope.py)")
+    p.add_argument("--devices", choices=["phone", "phone+watch", "auto"], default="phone",
+                   help="phone (default): the iPhone app only. phone+watch: also a watch simulator paired with the "
+                        "phone, the app's Watch app on it and the watch input agent, for `th --target watch ...` "
+                        "(simulator, Trio). auto: a small model decides from every PR of the run (the app's and its "
+                        "submodules': titles, descriptions, changed files; harness/watchscope.py)")
     p.add_argument("--watch", dest="devices", action="store_const", const="phone+watch", help="= --devices phone+watch")
-    p.add_argument("--watch-model", metavar="MODEL", help='watch model, e.g. "Apple Watch SE 3 (40mm)" '
-                                                          "(default TH_WATCH_SIM_DEVICE; `th watch model` lists them)")
+    p.add_argument("--watch-model", metavar="MODEL", help="watch size: 40mm, 41mm, 42mm, 44mm, 45mm, 46mm, 49mm (or "
+                                                          "ultra), or a model name from `th watch model` (default "
+                                                          "TH_WATCH_SIM_DEVICE)")
     p.add_argument("--watch-wrist", choices=["left", "right"])
     p.add_argument("--watch-crown", choices=["left", "right"], help="the side the Digital Crown is on")
     p.add_argument("--watch-text-size", metavar="SIZE", help="watch text size (`th watch settings --help`)")
@@ -422,6 +433,9 @@ def main(argv=None) -> int:
         raise HarnessError("--devices phone+watch needs --mode simulator and Trio: the watch is a simulator paired with "
                            "the iPhone simulator, and the Watch flows are Trio's")
     args.watch = args.devices == "phone+watch"     # auto is settled after the checkout (run_stages)
+    if args.watch_model and args.target == "sim":
+        from . import watch as WT
+        args.watch_model = WT.resolve_model(args.watch_model)    # a typo fails now, not after the build
     if not args.pr and not args.branch and not args.in_place and not args.yes:
         ans = _ask(f"PR URL ({app.name} or submodule), branch name, or blank for the current checkout", default="")
         if ans.startswith("http") or "#" in ans:

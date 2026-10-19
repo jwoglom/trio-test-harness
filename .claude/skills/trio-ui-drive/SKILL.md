@@ -58,8 +58,9 @@ The phone driver cannot kill or launch by bundle id: use the App Switcher / Spot
 - Only one `accessibilityIdentifier` exists in Trio (device picker rows); everything else is matched by visible label.
 
 ## Apple Watch (`--target watch`, simulator only)
-A watchOS simulator (`TrioHarnessWatch`) paired with the iPhone simulator runs Trio's Watch app; `trio-test-e2e --watch`
-sets it all up. By hand: `th watch pair` → `th --target watch install` (the last build's embedded Watch app) →
+A watchOS simulator paired with an iPhone simulator of its own (`TrioHarnessWatch (<model>)` with `TrioHarness
+(<model>)`) runs Trio's Watch app; `trio-test-e2e --watch` sets it all up. While a pair is in use, every `--target sim`
+command drives its phone. By hand: `th watch pair` → `th install` (the phone app first) → `th --target watch install` (the last build's embedded Watch app) →
 `th watch agent start` → `th --target watch launch` → then `th launch` (the phone app **after** the Watch app: Trio's
 phone session checks for the watch when it starts, and logs `📱 Phone isReachable after activation: true` when it found it).
 `th watch status` shows the pair, the agent and the app in front.
@@ -68,8 +69,9 @@ phone session checks for the watch when it starts, and logs `📱 Phone isReacha
   extra-small … extra-extra-extra-large, accessibility-medium … accessibility-extra-extra-extra-large. Trio reads only
   the wrist (the crown arrow on the bolus confirmation turns clockwise for left, counterclockwise for right); the crown
   side moves the system's page dots; text size scales every label (largest accessibility size: "Bolus" 87×41 → 111×55 px).
-- **Watch model** (experimental: switching broke the phone-watch link in testing, see docs/HANDOFF.md): `th watch model`
-  lists them; `th watch model "Apple Watch SE 3 (40mm)"` switches (one simulator per model, kept): pairs it, installs the last build's Watch app, moves the agent, relaunches both apps. Trio lays out by
+- **Watch model** is chosen when the watch starts: `th watch model` lists them; `th watch pair --model "Apple Watch SE 3
+  (40mm)"` (or just `--model 40mm`) shuts the pair in use down and starts that model's pair (its own phone; created on first use, ~10 min here):
+  installs the last build where missing, moves the agents, launches both apps. Another phone means another Trio: add its fake CGM and pump if it has none. Trio lays out by
   exact screen size (`WatchSize`: 40, 41, 42, 44, 45, 49 mm); the 46 mm Series 10/11 matches none and gets `.unknown`.
 - Same primitives with `--target watch`: `shot`, `tap`, `tap-text`, `find`, `tree`, `swipe`, `home` (pixels: the 46 mm
   watch is 416×496, 2× points). Plus **`th --target watch crown <turns>`**: 1.0 is one full turn of the Digital Crown,

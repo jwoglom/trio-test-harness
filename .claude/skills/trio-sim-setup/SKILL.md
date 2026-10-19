@@ -15,8 +15,10 @@ description: Prepare the iOS Simulator side of the Trio harness — check Xcode 
   `xcrun simctl spawn <udid> defaults write com.apple.Accessibility AccessibilityEnabled -bool true` (+ ApplicationAccessibilityEnabled),
   `th sim shutdown && th sim boot`, retry.
 - `th --target sim daemon start` — persistent driver; `th daemon status`.
-- Watch: `th watch pair` creates `TrioHarnessWatch` (`TH_WATCH_SIM_DEVICE`, default Apple Watch Series 11 (46mm), newest
-  watchOS runtime), pairs it with `TrioHarness` and boots both; `th watch agent start` builds (once, ~20 s) and starts the
+- Watch: `th watch pair [--model M]` gives the watch model (default `TH_WATCH_SIM_DEVICE`, Apple Watch Series 11 (46mm))
+  its own pair, `TrioHarness (<model>)` + `TrioHarnessWatch (<model>)`, paired once at creation, boots both, and makes that
+  phone the one every command drives. Never re-pair or erase a paired phone (`th sim erase` refuses): it stops linking
+  Watch apps for good; `th watch pair --recreate` makes the pair anew; `th watch agent start` builds (once, ~20 s) and starts the
   watch's input agent; `th watch status`; `th --target watch daemon start` for the sandboxed agent. Booting both while
   xcodebuild runs failed once here with "launchd_sim failed to respond"; booting the watch again on its own worked.
   Cleanup: `th watch agent stop`, `th --target watch daemon stop`.

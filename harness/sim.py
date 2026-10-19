@@ -20,10 +20,18 @@ class SimulatorDriver(Driver):
     kind = "sim"
 
     def __init__(self, udid: str | None = None):
-        self.udid = udid or xcode.ensure_simulator()["udid"]
+        self._udid = udid or xcode.ensure_simulator()["udid"]
         self._scale: float | None = None
         self._env = xcode.developer_env()
         self._wda = None
+
+    @property
+    def udid(self) -> str:
+        # follows `th watch pair` / `th watch model` from any process, a daemon's driver included
+        f = xcode.SIM_CURRENT_FILE
+        if f.exists() and (cur := f.read_text().strip()) and cur != self._udid:
+            self._udid, self._scale, self._wda = cur, None, None
+        return self._udid
 
     # ---- backend: WebDriverAgent (preferred) or idb ----
     @property

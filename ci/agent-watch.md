@@ -8,5 +8,8 @@ When the change could look different on another watch, also try it there:
 - `./trio-test-harness watch settings --wrist left|right --crown left|right --text-size <size>` (sizes: default,
   extra-small … extra-extra-extra-large, accessibility-medium … accessibility-extra-extra-extra-large); the Watch app is
   relaunched to read them, the simulator keeps running. Say in your notes what you changed.
+- `./trio-test-harness watch pair --model 40mm` (or 41mm, 42mm, 44mm, 45mm, 46mm, 49mm) starts another watch size (`watch model` lists
+  them; the smallest and largest screens show layout problems first), shutting the current pair down. Each model has its own phone simulator: a new one
+  takes about 10 minutes and has no fake CGM or pump until you add them (`flow add-cgm-sim`, `flow add-pump-sim`).
 What the phone did with a Watch request is in `./trio-test-harness --target sim logs trio --grep WatchManager`.
 Screenshot the watch and the phone at each step that involves both.

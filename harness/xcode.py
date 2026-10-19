@@ -7,8 +7,11 @@ import os
 import plistlib
 from pathlib import Path
 
-from .config import CONFIG
-from .util import HarnessError, run
+from .config import CONFIG, REPO_ROOT
+from .util import HarnessError, log, run
+
+# The iPhone simulator in use when it is not TH_SIM_NAME: the phone of a phone + watch pair (harness/watch.py).
+SIM_CURRENT_FILE = REPO_ROOT / "runs" / ".tmp" / "sim-udid.txt"
 
 
 def find_xcode() -> Path | None:
@@ -100,7 +103,13 @@ def pick_devicetype(name: str) -> dict:
 
 
 def ensure_simulator() -> dict:
-    """Find or create the dedicated harness simulator; return its simctl record."""
+    """The harness's iPhone simulator, created on first use: the phone of the watch pair in use (`th watch pair`), else
+    TH_SIM_NAME. Returns its simctl record."""
+    if SIM_CURRENT_FILE.exists():
+        udid = SIM_CURRENT_FILE.read_text().strip()
+        for d in list_devices():
+            if d["udid"] == udid and d.get("isAvailable", True):
+                return d
     name = CONFIG.get("TH_SIM_NAME")
     rt = pick_runtime(CONFIG.get("TH_SIM_RUNTIME"))
     for d in list_devices():
@@ -114,24 +123,17 @@ def ensure_simulator() -> dict:
     raise HarnessError("simulator creation failed")
 
 
-def ensure_watch_simulator(device: str | None = None) -> dict:
-    """Find or create the harness's watch simulator of model `device` (default TH_WATCH_SIM_DEVICE); return its simctl
-    record. Each model is its own simulator: TH_WATCH_SIM_NAME for the default model, "<name> (<model>)" for others."""
-    base = CONFIG.get("TH_WATCH_SIM_NAME")
-    default = CONFIG.get("TH_WATCH_SIM_DEVICE")
-    device = device or default
-    rt = pick_runtime(CONFIG.get("TH_WATCH_SIM_RUNTIME"), "watchOS")
-    dt = pick_devicetype(device)
-    for d in list_devices():
-        if (d["name"] == base or d["name"].startswith(base + " (")) and d["runtimeIdentifier"] == rt["identifier"] \
-                and d.get("deviceTypeIdentifier") == dt["identifier"] and d.get("isAvailable", True):
-            return d
-    name = base if device == default else f"{base} ({device})"
-    udid = xcrun(["simctl", "create", name, dt["identifier"], rt["identifier"]]).stdout.strip()
+def create_device(name: str, devicetype: str, runtime: dict) -> dict:
+    udid = xcrun(["simctl", "create", name, pick_devicetype(devicetype)["identifier"], runtime["identifier"]]).stdout.strip()
     for d in list_devices():
         if d["udid"] == udid:
             return d
-    raise HarnessError("watch simulator creation failed")
+    raise HarnessError(f"simulator creation failed: {name}")
+
+
+def list_pairs() -> dict:
+    """pair id -> {"watch": {...}, "phone": {...}, "state": "(active, connected)"}"""
+    return simctl_json(["list", "pairs"]).get("pairs", {})
 
 
 def watch_devicetypes() -> list[dict]:
@@ -146,29 +148,28 @@ def _version(v: str) -> tuple[int, ...]:
     return tuple(int(x) for x in v.split(".") if x.isdigit())
 
 
-def list_pairs() -> dict:
-    """pair id -> {"watch": {...}, "phone": {...}, "state": "(active, connected)"}"""
-    return simctl_json(["list", "pairs"]).get("pairs", {})
-
-
-def ensure_pair(watch_udid: str, phone_udid: str) -> str:
-    """Pair the watch simulator with the phone simulator (once) and make that pair the phone's active one."""
-    for pid, p in list_pairs().items():
-        if p["watch"]["udid"] == watch_udid and p["phone"]["udid"] == phone_udid:
-            if "active" not in p.get("state", "") or "inactive" in p.get("state", ""):
-                xcrun(["simctl", "pair_activate", pid])
-            return pid
-        if p["watch"]["udid"] == watch_udid:     # a watch pairs with one phone only
-            xcrun(["simctl", "unpair", pid])
-    pid = xcrun(["simctl", "pair", watch_udid, phone_udid]).stdout.strip()
-    xcrun(["simctl", "pair_activate", pid], check=False)
-    return pid
-
-
 def boot_simulator(udid: str) -> None:
-    state = {d["udid"]: d["state"] for d in list_devices()}.get(udid)
+    devices = list_devices()
+    me = next((d for d in devices if d["udid"] == udid), {})
+    state = me.get("state")
     if state != "Booted":
-        xcrun(["simctl", "boot", udid])
+        # One harness iPhone and one harness watch at a time: four simulators on a small Mac fail to boot, and a second
+        # pair's phone answers nothing the agent drives. Simulators outside the harness are left alone.
+        family = me.get("runtimeIdentifier", "").split(".")[-1].split("-")[0]
+        names = (CONFIG.get("TH_SIM_NAME"), CONFIG.get("TH_WATCH_SIM_NAME"))
+        for d in devices:
+            if d["udid"] != udid and d["state"] == "Booted" and d["name"].startswith(names) \
+                    and d["runtimeIdentifier"].split(".")[-1].split("-")[0] == family:
+                log(f"shutting down {d['name']}: one harness {family} simulator at a time")
+                xcrun(["simctl", "shutdown", d["udid"]], check=False, quiet=True)
+        # "launchd failed to respond" while the Mac is loaded (a build, another simulator's first boot); a later try boots
+        import time
+        for attempt in range(4):
+            cp = xcrun(["simctl", "boot", udid], check=attempt == 3)
+            if cp.returncode == 0 or "current state: Booted" in (cp.stderr or ""):
+                break
+            log(f"simulator {udid} did not boot ({(cp.stderr or cp.stdout).strip().splitlines()[-1:]}); retrying in 60 s")
+            time.sleep(60)
     xcrun(["simctl", "bootstatus", udid, "-b"], timeout=900)
     # Bring the Simulator.app UI up so screenshots include a live window (also needed by idb).
     app = find_xcode()

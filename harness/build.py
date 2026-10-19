@@ -73,6 +73,7 @@ class SubmoduleOverride:
     name: str
     ref: str                 # branch name, "pr/123", or a commit sha
     url: str | None = None   # alternate remote (fork) URL
+    pr: str | None = None    # owner/repo#N when the override is a submodule PR
 
     @classmethod
     def parse(cls, spec: str) -> "SubmoduleOverride":
@@ -307,7 +308,8 @@ def submodule_override(spec: str, src: Path) -> SubmoduleOverride:
         if _repo_name(m.get("url", "")) == _repo_name(slug):
             # owner/repo@ref names the repo: a fork's branch or commit is fetched from that fork
             same = _gh_slug(m.get("url", "")) == _gh_slug(_gh_repo_url(slug))
-            return SubmoduleOverride(name, ref, None if pr or same else _gh_repo_url(slug))
+            return SubmoduleOverride(name, ref, None if pr or same else _gh_repo_url(slug),
+                                     f"{slug}#{pr.group(2)}" if pr else None)
     raise HarnessError(f"{slug} is not a submodule of the checkout at {src} ({', '.join(sorted(mods)) or 'none'})")
 
 

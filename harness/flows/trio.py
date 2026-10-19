@@ -286,8 +286,8 @@ def _open_picker_from_home(drv: Driver, run: Run | None, label: str, x_frac: flo
     drv.tap(int(w * x_frac), int(h * 0.155))
     time.sleep(2.5)
     # The home header stays in the accessibility tree behind a sheet, so finding the label above does
-    # not prove the tap opened the picker; the picker's Cancel button does.
-    if not drv.wait_for_text("Cancel", timeout=5, ocr=False):
+    # not prove the tap opened the picker; the picker's Cancel button does. The sheet took over 7 s on a loaded Mac.
+    if not drv.wait_for_text("Cancel", timeout=20, ocr=False):
         step(run, drv, label.lower().replace(" ", "-") + "-no-picker", f"'{label}' shortcut did not open a picker")
         return False
     step(run, drv, label.lower().replace(" ", "-") + "-picker", f"picker opened from the home '{label}' shortcut")
@@ -369,7 +369,9 @@ def _add_cgm_once(drv: Driver, run: Run | None, via_settings: bool) -> None:
     if via_settings or not _open_picker_from_home(drv, run, "Add CGM", 0.5):
         open_settings(drv)
         step(run, drv, "settings", "Settings root")
-        _tap_seq(drv, run, ["Devices", "CGM"])
+        # Trio 1.0's Devices screen calls the row "Continuous Glucose Monitor"; older ones "CGM"
+        _tap_seq(drv, run, ["Devices"])
+        _tap_seq(drv, run, ["Continuous Glucose Monitor" if drv.find("Continuous Glucose Monitor") else "CGM"])
         dismiss_dialogs(drv, ["Allow", "OK"])
         drv.tap_text("Add CGM"); time.sleep(2)
     _tap_picker_row(drv, "Glucose Simulator")

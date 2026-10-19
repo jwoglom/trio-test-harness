@@ -305,7 +305,7 @@ class Manager:
             raise ValueError("agent_minutes must be a number") from None
         if not 1 <= minutes <= 180:
             raise ValueError("agent_minutes must be between 1 and 180")
-        devices = text("devices") or "auto"
+        devices = text("devices") or "phone"
         if devices not in ("auto", "phone", "phone+watch"):
             raise ValueError("devices: auto, phone or phone+watch")
         if devices == "phone+watch" and (target != "simulator" or app != "trio"):
@@ -381,7 +381,7 @@ def run_job(job: Job) -> None:
     cmd += ["--no-cgm-sim"] if sims == ["Pump Simulator"] else []
     cmd += ["--no-pump-sim"] if sims and "Pump Simulator" not in sims else []
     if inp["target"] == "simulator":
-        cmd += ["--devices", inp.get("devices") or "auto"]
+        cmd += ["--devices", inp.get("devices") or "phone"]
         cmd += ["--watch-model", inp["watch_model"]] if inp.get("watch_model") else []
     rc, out = job.sh(cmd, env)
     # The pipeline prints its run directory at the end ("run: <dir>"); runs/.current may belong to another session.
@@ -534,7 +534,9 @@ def options() -> dict:
         try:
             o["sim_devices"] = [d["name"] for d in X.list_devicetypes() if d.get("name", "").startswith("iPhone")]
             o["sim_runtimes"] = [r["name"] for r in X.list_runtimes()]
-            o["watch_models"] = [d["name"] for d in X.watch_devicetypes()]
+            from . import watch as WT
+            o["watch_models"] = [m.split("(")[-1].rstrip(")") for m in WT.SUGGESTED_MODELS] + \
+                [d["name"] for d in X.watch_devicetypes()]
         except Exception as e:  # noqa: BLE001  (no Xcode yet: free-text fields still work)
             log(f"webui: simulator options unavailable: {e}")
         _OPTIONS = o

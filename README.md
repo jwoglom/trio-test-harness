@@ -59,15 +59,20 @@ real Loop on a Mac: `docs/HANDOFF.md` lists what to check.
 ## Apple Watch (`--target watch`)
 
 Trio's Watch app runs on a watchOS simulator paired with the harness's iPhone simulator, so a Watch change can be tested
-the way a phone change is. `trio-test-e2e --devices auto|phone|phone+watch` (`--watch` = phone+watch; CI's `devices`
-input, the web UI's Devices field) says whether a run includes it. **auto**, the default, asks a small model (Haiku through
-`claude -p`, `TH_SCOPE_MODEL`) whether the PR can change anything the watch shows or does, from its title, description and
-changed files (`harness/watchscope.py`, ~10 s); without Claude the changed paths decide. The answer and its reason go
-into `pr.md` and `run.json`. With the watch, `trio-test-e2e` does the setup: it creates `TrioHarnessWatch`
-(`TH_WATCH_SIM_DEVICE`, default Apple Watch Series 11 (46mm); `TH_WATCH_SIM_RUNTIME`), pairs it with `TrioHarness`
-(`simctl pair`: Xcode ships no pre-paired simulators), installs the build's embedded Watch app on it, launches it **before**
-the phone app (Trio's phone session looks for the watch when it starts) and screenshots it at home and once the phone's
-glucose reaches it. Then every primitive takes `--target watch`, plus `th --target watch crown <turns>` for the Digital
+the way a phone change is. `trio-test-e2e --devices phone|phone+watch|auto` (`--watch` = phone+watch; CI's `devices`
+input, the web UI's Devices field) says whether a run includes it. **phone** is the default. **auto** asks a small model
+(Haiku through `claude -p`, `TH_SCOPE_MODEL`) whether the change can alter anything the watch shows or does, from every PR
+of the run: the app's (Trio or LoopWorkspace), the submodule PR, other submodule PRs and cherry-picked PRs, with their
+titles, descriptions and changed files (`harness/watchscope.py`, ~10 s); without Claude the changed paths decide. The
+answer and its reason go into `pr.md` and `run.json`. In CI, auto needs `CLAUDE_CODE_OAUTH_TOKEN` in the build step too.
+The harness runs only Trio's Watch app: a Loop run that auto finds needs the watch runs phone-only and says so. With the watch, `trio-test-e2e` does the setup on the watch model's own **phone + watch
+pair**: `TrioHarness (<model>)` and `TrioHarnessWatch (<model>)` (`TH_WATCH_SIM_DEVICE`, default Apple Watch Series 11
+(46mm); `TH_WATCH_SIM_RUNTIME`), created on first use and paired once, while both are shut down (`simctl pair`: Xcode ships
+no pre-paired simulators). From then on that phone is the simulator every command drives. A phone simulator that is paired
+again or erased stops linking Watch apps to iPhone apps, so a pair is never re-paired, and `th watch pair --recreate`
+makes a broken one anew (`docs/HANDOFF.md`). It installs the build on the phone and then its embedded Watch app on the
+watch, launches the Watch app **before** the phone app (Trio's phone session looks for the watch when it starts) and
+screenshots it at home and once the phone's glucose reaches it. Then every primitive takes `--target watch`, plus `th --target watch crown <turns>` for the Digital
 Crown. By hand: `th watch pair`, `th --target watch install`, `th watch agent start`, `th --target watch launch`,
 `th launch`.
 
@@ -79,8 +84,12 @@ Crown. By hand: `th watch pair`, `th --target watch install`, `th watch agent st
 | Phone ↔ watch | real WatchConnectivity between the two simulators: messages, application context and user info all arrive |
 | Lock | the watch shares the simulator's device lock (`th busy`) |
 
-Watch model and settings: `--watch-model "Apple Watch SE 3 (40mm)"` or `th watch model <name>` (one simulator per
-model; **experimental**: switching broke the phone-watch link in testing, see `docs/HANDOFF.md`), `--watch-wrist`, `--watch-crown`, `--watch-text-size` (or `th watch settings`). Wrist and crown
+Watch model and settings: the model is chosen when the watch starts, `--watch-model 40mm` or `th watch pair --model 40mm`: a size (40mm, 41mm, 42mm,
+44mm, 45mm, 46mm, 49mm or ultra) picks one model per screen size Trio lays out for, or give a full model name
+(`th watch model` lists both). Another size is another pair, so another phone simulator
+whose Trio keeps its own data (a new one needs its fake CGM and pump); starting it shuts the pair in use down, and the
+harness never boots more than one iPhone and one watch simulator of its own. The settings change on the running watch:
+`--watch-wrist`, `--watch-crown`, `--watch-text-size` (or `th watch settings`). Wrist and crown
 are the watch's `com.apple.nano` `wornOnRightArm` / `invertUI`, text size UIKit's preferred content size category
 (`simctl ui content_size` refuses watchOS); apps read them at launch, so changing one relaunches the Watch app, never the
 simulator.

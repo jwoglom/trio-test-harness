@@ -135,10 +135,9 @@ def cmd_doctor(args):
         print("watch (paired with the simulator; --watch / --target watch)")
         from . import watch as WT
         try:
-            wdevs = [d for d in xcode.list_devices() if d["name"] == CONFIG.get("TH_WATCH_SIM_NAME")]
-            pairs = [p for p in xcode.list_pairs().values() if wdevs and p["watch"]["udid"] == wdevs[0]["udid"]]
-            item(f"watch simulator '{CONFIG.get('TH_WATCH_SIM_NAME')}' paired", pairs,
-                 pairs[0]["state"] if pairs else "th watch pair", warn=True)
+            cur = WT.current_pair()
+            item("phone + watch pair in use", cur, f"{WT.model_name(cur[0])}" if cur else
+                 "none yet: th watch pair (each watch model gets its own phone simulator)", warn=True)
         except HarnessError as e:
             item("simctl pairs", False, str(e)[:160], warn=True)
         xr = WT.xctestrun(); item("watch agent built", xr, xr.name if xr else "th watch agent build (or start)", warn=True)
@@ -624,7 +623,11 @@ def cmd_sim(args):
     elif sub == "shutdown":
         d = xcode.ensure_simulator(); xcode.xcrun(["simctl", "shutdown", d["udid"]], check=False)
     elif sub == "erase":
-        d = xcode.ensure_simulator(); xcode.xcrun(["simctl", "shutdown", d["udid"]], check=False)
+        d = xcode.ensure_simulator()
+        if any(p["phone"]["udid"] == d["udid"] for p in xcode.list_pairs().values()):
+            raise HarnessError("this phone is paired with a watch, and an erased phone no longer links Watch apps: "
+                               "`th watch pair --recreate` makes the pair anew")
+        xcode.xcrun(["simctl", "shutdown", d["udid"]], check=False)
         xcode.xcrun(["simctl", "erase", d["udid"]])
     elif sub == "container":
         from .build import BuildInfo
@@ -778,10 +781,22 @@ def cmd_watch(args):
     from . import watch as W
     from . import xcode
     if args.sub == "pair":
-        w, p = W.pair(); print(f"watch {w} paired with phone {p}; both booted")
+        from .build import BuildInfo
+        bi = BuildInfo.load()
+        cur = W.current_pair()
+        model = args.model or (W.model_name(cur[0]) if cur else None)
+        print(json.dumps(get_driver("watch").use_model(
+            model, app_path=bi.app_path if bi else None, bundle_id=bi.bundle_id if bi else None,
+            wrist=args.wrist, crown=args.crown, text_size=args.text_size, recreate=args.recreate), indent=1))
+        print("Every command now drives this pair's phone. A new pair's phone has no fake CGM or pump yet "
+              "(th flow add-cgm-sim, th flow add-pump-sim).")
     elif args.sub == "status":
-        pairs = [p for p in xcode.list_pairs().values() if p["watch"]["udid"] == W.watch_udid()]
-        print(f"pair: {pairs[0]['state'] if pairs else 'not paired (th watch pair)'}")
+        cur = W.current_pair()
+        if not cur:
+            print("pair: none in use (th watch pair [--model ...])")
+        else:
+            st = next(p["state"] for p in xcode.list_pairs().values() if p["watch"]["udid"] == cur[0])
+            print(f"pair: {W.model_name(cur[0])}, watch {cur[0]}, phone {cur[1]} {st}")
         print(f"agent: {'running' if W.is_running() else 'not running (th watch agent start)'}")
         if W.is_running():
             print(f"front app: {W.call('state')}")
@@ -789,26 +804,20 @@ def cmd_watch(args):
         print(json.dumps(get_driver("watch").settings(wrist=args.wrist, crown=args.crown, text_size=args.text_size),
                          indent=1))
     elif args.sub == "model":
-        if not args.device:
-            udid = W.watch_udid()
-            print(f"in use: {W.model_name(udid)}")
-            have = {dt["name"] for dt in xcode.watch_devicetypes()}
-            print("suggested (one per screen size Trio's Watch app lays out for): "
-                  + "; ".join(m for m in W.SUGGESTED_MODELS if m in have))
-            print(f"all: {'; '.join(sorted(have))}")
-            return 0
-        from .build import BuildInfo
-        bi = BuildInfo.load()
-        print(json.dumps(get_driver("watch").use_model(
-            args.device, app_path=bi.app_path if bi else None, bundle_id=bi.bundle_id if bi else None,
-            phone_bundle_id=bi.bundle_id if bi and not args.no_phone_relaunch else None,
-            wrist=args.wrist, crown=args.crown, text_size=args.text_size), indent=1))
+        cur = W.current_pair()
+        print(f"in use: {W.model_name(cur[0]) if cur else 'none (th watch pair)'}")
+        have = {dt["name"] for dt in xcode.watch_devicetypes()}
+        by_size = [f"{m.split('(')[-1].rstrip(')')} = {m}" for m in W.SUGGESTED_MODELS if m in have]
+        print("by size (what `--model 40mm` and so on pick; one per screen size Trio's Watch app lays out for): "
+              + "; ".join(by_size))
+        print(f"all: {'; '.join(sorted(have))}")
+        print('start one with: th watch pair --model "<model>"')
     elif args.sub == "agent":
         udid = W.watch_udid()
         if args.action == "build":
             print(W.build(udid))
         elif args.action == "start":
-            W.pair(); W.start(udid); print("watch agent ready")
+            W.pair(); W.start(W.watch_udid()); print("watch agent ready")
         elif args.action == "stop":
             W.stop(); print("stopped")
         elif args.action == "status":
@@ -1198,24 +1207,25 @@ def build_parser() -> argparse.ArgumentParser:
     cr.set_defaults(fn=cmd_crown)
     wt = sp.add_parser("watch", help="watch simulator paired with the sim, and its input agent (harness/watch.py)")
     wts = wt.add_subparsers(dest="sub", required=True)
-    wts.add_parser("pair", help="create the watch simulator, pair it with the sim, boot both")
-    wts.add_parser("status")
     def watch_settings_args(sp_):
         sp_.add_argument("--wrist", choices=["left", "right"])
         sp_.add_argument("--crown", choices=["left", "right"], help="the side the Digital Crown is on")
         sp_.add_argument("--text-size", metavar="SIZE", help="default, extra-small … extra-extra-extra-large, "
                          "accessibility-medium … accessibility-extra-extra-extra-large")
+    wpr = wts.add_parser("pair", help="start the phone + watch simulator pair for a watch model (each model has its own "
+                                      "phone, created on first use): shuts down the pair in use, boots this one, installs "
+                                      "the last build where missing, launches the Watch app and then the phone app; every "
+                                      "command then drives this pair")
+    wpr.add_argument("--model", help='watch size or model: 40mm, 41mm, 42mm, 44mm, 45mm, 46mm, 49mm (or ultra), or a name '
+                                     'from `th watch model` (default: the pair in use, else TH_WATCH_SIM_DEVICE)')
+    wpr.add_argument("--recreate", action="store_true", help="delete the pair's two simulators and make new ones (their "
+                                                              "apps and data go)")
+    watch_settings_args(wpr)
+    wts.add_parser("status")
     ws = wts.add_parser("settings", help="wrist, crown side and text size; with none given, prints them. The Watch app "
                                          "in front is relaunched to read them (no simulator restart)")
     watch_settings_args(ws)
-    wm = wts.add_parser("model", help="EXPERIMENTAL (broke the phone-watch link in testing, docs/HANDOFF.md): switch the "
-                                      "watch model (a simulator per model, created on first use): pairs, installs the "
-                                      "last build's Watch app, moves the agent, relaunches both apps; with no model, "
-                                      "lists them")
-    wm.add_argument("device", nargs="?", help='e.g. "Apple Watch SE 3 (40mm)"')
-    wm.add_argument("--no-phone-relaunch", action="store_true", help="leave the phone app running (its session may "
-                                                                     "not find the new watch)")
-    watch_settings_args(wm)
+    wts.add_parser("model", help="list the watch models (start one with `th watch pair --model`)")
     wa = wts.add_parser("agent", help="the XCUITest agent that taps, reads the tree and turns the crown")
     wa.add_argument("action", choices=["build", "start", "stop", "status"])
     wt.set_defaults(fn=cmd_watch)

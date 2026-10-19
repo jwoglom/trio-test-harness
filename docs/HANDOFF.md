@@ -104,20 +104,32 @@ macOS iPhone Mirroring using phone-harness; driver written and window capture ve
   the largest accessibility size grows "Bolus" from 87×41 to 111×55 px.
   **Device scope classifier, 2026-10-18**: Haiku through `claude -p` (~10 s) answered phone+watch for #1648 and phone for
   #1642 (Glycemia Risk Index), #1644 (Live Activity colour) and jwoglom/TandemKit#601, each with a sensible reason.
-  **Watch model switching: broken, unresolved.** A second pair on the phone (`th watch model "Apple Watch SE 3 (40mm)"`)
-  left the phone's wcd with no active pairing (`system pairingID: (null)`, Trio's `isPaired` false) although simctl
-  reported the pair active and connected; restarting the phone's pairing daemons, rebooting either simulator, removing
-  the old pair, and erasing the phone and then both simulators and pairing afresh (40 mm, then 46 mm) did not bring it
-  back within 10-20 minutes. The initial paired sync was not the blocker: pairedsyncd logged it Complete.
-  **Current state (22:20): the phone-watch link does not come back even for a fresh 46 mm pair** (both simulators
-  erased, paired while shut down, phone booted first, Watch app then phone app installed and launched, the Watch app in
-  front through the agent). The phone's wcd sees the Watch app on the watch (`enumerateLocallyAvailableApplications…`)
-  but logs `iOSApplicationsWithWatchAppInstalled: {()}`, so Trio's `isWatchAppInstalled` is false and it skips
-  `setupWatchState`; the watch side reports the phone reachable. Its log also shows
-  `IDS … XPC has informed us that a fatal error has occured`. Not yet compared with a success: the erase removed the
-  phone's logs from the working session. Next to try: a brand-new phone simulator (never erased) with a new watch; the
-  same with the Watch app installed through the phone app's install rather than `simctl install` onto the watch; and
-  whether the `org.nightscout..trio` bundle id (empty team, from the user's ConfigOverride build) matters.
+  **Watch pairing: one phone per watch model (2026-10-19).** A phone simulator that has been paired again (a second
+  watch, `pair_activate`, `unpair`) or erased stops linking Watch apps to their iPhone apps: its wcd still sees the
+  Watch app on the watch (`enumerateLocallyAvailableApplications…`) but logs `iOSApplicationsWithWatchAppInstalled:
+  {()}`, so Trio's `WCSession.isWatchAppInstalled` is false and it never sends the watch anything (`Skipping
+  setupWatchState`), while simctl shows the pair active and connected and the watch side reports the phone reachable.
+  Nothing short of a new phone simulator brought it back: restarting the phone's wcd/nanoregistryd/IDS, rebooting
+  either side, removing the other pair, erasing the phone, then both, then pairing afresh (the 40 mm and then the
+  46 mm watch), waiting for pairedsyncd's initial sync (Complete) and an hour of relaunches. A never-used phone and
+  watch, paired while shut down, phone booted first, Trio installed on the phone and then its Watch app on the watch,
+  linked on the first launch (`iOSApplicationsWithWatchAppInstalled: {( "org.nightscout..trio" )}`, `isReachable:
+  true`). So `ensure_pair` gives each watch model its own phone, `TrioHarness (<model>)` with `TrioHarnessWatch
+  (<model>)`, paired once at creation, and makes it the phone every command drives (`runs/.tmp/sim-udid.txt`, read by
+  `xcode.ensure_simulator`, `SimulatorDriver.udid` and WebDriverAgent, which moves with it). `th sim erase` refuses a
+  paired phone; `th watch pair --recreate` makes both anew. Switching model is switching phone, so a model's Trio has
+  its own data. The phone app goes on before its Watch app everywhere (pipeline, `th watch pair`). The model is chosen
+  when a watch starts (`--watch-model`, `th watch pair --model`), which shuts the pair in use down; `boot_simulator`
+  shuts down any other booted harness iPhone or watch, so one of each runs. Defaults: `--devices phone` in the CLI, CI
+  and the web UI; auto classifies every PR of the run (app, submodule, other submodule PRs, cherry-picks), for Loop too,
+  where a phone+watch answer runs phone-only.
+  Two more on a paired phone: uninstalling the phone app also deletes its Watch app, and that deletion reached the watch
+  ~14 s later, 3 s after the pipeline had reinstalled the Watch app, which then vanished; the pipeline now uninstalls the
+  Watch app first, and `WatchDriver.install` checks ~10 s later and installs again. And watchOS returns to the clock
+  after 2 minutes without a touch, so a later screenshot showed the watch face: the driver brings the launched Watch app
+  back before each screenshot, tap, crown turn or tree read, unless `home` put the clock there. Verified 2026-10-19 on
+  the new pair: `trio-test-e2e --watch` clean (fresh reinstall, CGM + pump, `watch-with-data` with the phone's glucose)
+  and #1648's override flow through the CLI.
   Also found: `XCUIApplication.launch()` failing on a just-erased watch fails the agent's test and so ends the agent;
   the harness now launches with simctl (which starts a watch app suspended) and brings it forward with `activate`.
   **Unverified**: the CI workflow's `watch` input and the agent using the watch from inside the sandbox (the socket is

@@ -41,12 +41,12 @@ on:
         type: boolean
         default: true
       devices:
-        description: "Devices: auto (a small model decides from the PR whether the Watch app is needed), phone, or phone+watch (Trio's Watch app on a paired watch simulator)"
+        description: "Devices: phone (the iPhone app only), phone+watch (also Trio's Watch app on a paired watch simulator), or auto (a small model decides from the app's and submodules' PRs)"
         type: choice
-        options: [auto, phone, phone+watch]
-        default: auto
+        options: [phone, phone+watch, auto]
+        default: phone
       watch_model:
-        description: "Watch model when the watch is used (blank: Apple Watch Series 11 (46mm); e.g. Apple Watch SE 3 (40mm))"
+        description: "Watch size when the watch is used: 40mm, 41mm, 42mm, 44mm, 45mm, 46mm (blank: the default), 49mm, or a model name"
         type: string
       claude_model:
         description: "Claude model for the agent (sonnet, opus, haiku, or a model ID)"
@@ -99,7 +99,7 @@ jobs:
       IN_CONFIGURATION: ${{ inputs.configuration }}
       IN_SKIP_ONBOARDING: ${{ inputs.skip_onboarding }}
       IN_SMOKE: ${{ inputs.smoke }}
-      IN_DEVICES: ${{ inputs.devices || 'auto' }}
+      IN_DEVICES: ${{ inputs.devices || 'phone' }}
       IN_WATCH_MODEL: ${{ inputs.watch_model }}
       IN_AGENT_INSTRUCTIONS: ${{ inputs.agent_instructions }}
       TH_XCODE_APP: /Applications/Xcode_${{ inputs.xcode }}.app
