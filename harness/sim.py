@@ -269,6 +269,11 @@ class SimulatorDriver(Driver):
             walk(data)
         return nodes
 
+    def tap_element(self, text: str) -> tuple[int, int] | None:
+        if self.wda and self.wda.click(text):
+            return None
+        return super().tap_element(text)
+
     def find(self, text: str, *, exact: bool = False, role: str | None = None) -> list[UINode]:
         """Fast path via WDA predicate search; falls back to a full tree walk."""
         if self.wda:

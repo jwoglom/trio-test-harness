@@ -38,6 +38,7 @@ PUMP_SIMULATOR = "Pump Simulator"
 ADD_CGM = "Add CGM"
 ADD_PUMP = "Add pump"
 PROMPTS_AFTER_PRESEED = False      # a pre-seeded Trio opens on its home screen
+WATCH_NO_DATA = "STALE DATA"       # the Watch app's main screen until the phone has sent it a state
 
 NEXT_LABELS = ["Get Started", "Skip Nightscout Setup", "Next", "Continue", "Done", "OK"]
 PERMISSION_LABELS = ["Allow", "Allow While Using App", "OK", "Don't Allow"]

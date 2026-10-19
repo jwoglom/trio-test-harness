@@ -59,7 +59,7 @@ The phone driver cannot kill or launch by bundle id: use the App Switcher / Spot
 
 ## Apple Watch (`--target watch`, simulator only)
 A watchOS simulator paired with an iPhone simulator of its own (`TrioHarnessWatch (<model>)` with `TrioHarness
-(<model>)`) runs Trio's Watch app; `trio-test-e2e --watch` sets it all up. While a pair is in use, every `--target sim`
+(<model>)`) runs the app's Watch app (Trio's, or Loop's with `--app loop`); `trio-test-e2e --watch` sets it all up. While a pair is in use, every `--target sim`
 command drives its phone. By hand: `th watch pair` → `th install` (the phone app first) → `th --target watch install` (the last build's embedded Watch app) →
 `th watch agent start` → `th --target watch launch` → then `th launch` (the phone app **after** the Watch app: Trio's
 phone session checks for the watch when it starts, and logs `📱 Phone isReachable after activation: true` when it found it).
@@ -85,7 +85,18 @@ phone session checks for the watch when it starts, and logs `📱 Phone isReacha
   (`find " U"`), `Remove`/`Add` steppers, crown dials it (a quarter turn went 0 → 1.40 U), **Enact Bolus**. Confirm
   screen: "To confirm, dial crown." — about half a turn fills it (0.05 steps; Settings ▸ Devices ▸ Smart Watch "Confirm
   Bolus Faster" makes it 0.5) and sends the bolus; **Cancel** returns to the main screen.
-- What the phone did: `th logs trio --grep "WatchManager"` (`📱 Received bolus request from watch`, `Enacted bolus via
+- **Facts (Loop Watch app, verified 2026-10-19 on watchOS 26.2, 46 mm)**: bundle id `<Loop's>.LoopWatch`, a WatchKit
+  app with an extension (the tree's application is "WatchApp Extension"). First page: the loop ring, glucose with trend
+  (`112↗︎`) and eventual glucose at the top, then **Carbs**, **Bolus**, **Pre-Meal**, **Preset** (or **Workout**);
+  swipe for the chart page (Active Insulin, Active Carbs, Net Basal Rate, Reservoir Volume). No ring or glucose until
+  the phone has sent a context (each loop, `updateApplicationContext`). Bolus: the amount (starts at the
+  recommendation, `REC: 0.1 U`) takes the crown (`crown 0.5` went 0.10 → 0.35 U) and `−` / `+`; the **Bolus** button
+  (bottom, about 208,424 px) opens "Turn Digital Crown to bolus". **Known gap**: that confirmation does not take the
+  harness's crown (XCUITest's, also after tapping it), so a Loop Watch bolus cannot be confirmed in the harness yet;
+  **Close** (top left) backs out. Carbs: amount by crown, absorption time, **Continue**, **Save & Bolus** / **Save**.
+  watchOS shows a red crossed-out phone in the status bar here even while the context arrives. The phone side is
+  `WatchDataManager`, in the system log only: `th --target sim oslog --grep WatchDataManager --since 10m`.
+- What the phone did (Trio): `th logs trio --grep "WatchManager"` (`📱 Received bolus request from watch`, `Enacted bolus via
   APS Manager`). The Watch app's own log reaches the phone's `th logs watch` only when the watch flushes it (every 3 min
   or 100 entries).
 - Everything on the watch is a simulator and the bolus goes to the Pump Simulator; no real pump is ever involved.

@@ -38,6 +38,7 @@ PUMP_SIMULATOR = "Pump Simulator"
 ADD_CGM = "Add CGM"
 ADD_PUMP = "Add Pump"
 PROMPTS_AFTER_PRESEED = True       # Loop asks for its permissions after onboarding, which walk_onboarding answers
+WATCH_NO_DATA = "– – –"            # the Watch app's glucose until the phone has sent a context (HUDInterfaceController)
 WELCOME = "Welcome to Loop"
 TESTER = "I'm a tester"
 HOME_MARKERS = ["Add Meal", "Bolus", "Settings", "Active Insulin", "Insulin Delivery", "Active Carbohydrates"]
@@ -164,10 +165,32 @@ def give_cgm_glucose(drv, bundle_id: str, *, base: float = 110.0, amplitude: flo
 
 # ---------------- screens -----------------
 
+def _saved_manager(drv: Driver, kind: str) -> bool | None:
+    """On the simulator, whether Loop has saved a CGM / pump manager: DeviceDataManager persists each to
+    Documents/<kind>ManagerState.plist when one is added. None where the container cannot be read (a phone)."""
+    if getattr(drv, "kind", "") != "sim":
+        return None
+    from ..build import BuildInfo
+    bi = BuildInfo.load()
+    try:
+        return (Path(drv.app_data_container(bi.bundle_id)) / "Documents" / f"{kind}ManagerState.plist").exists()
+    except Exception:  # noqa: BLE001  (not installed, no build record)
+        return None
+
+
 def offers(drv: Driver, label: str) -> bool:
-    """`label` on screen: in the accessibility tree, or read off a screenshot where there is no tree (a phone)."""
-    if drv.find(label, exact=True):
+    """`label` on screen: in the accessibility tree, or read off a screenshot where there is no tree (a phone). The HUD's
+    is the value of its status element, not a label ("CGM Status" = "Add CGM, Device Status Critical"), and Loop
+    refreshes that value only with a reading or a highlight change, so it can say either thing: on the simulator Loop's
+    saved managers answer for "Add CGM" / "Add Pump", and elsewhere a value counts only when the screenshot shows it."""
+    saved = _saved_manager(drv, {ADD_CGM: "CGM", ADD_PUMP: "Pump"}[label]) if label in (ADD_CGM, ADD_PUMP) else None
+    if saved is not None:
+        return not saved
+    nodes = drv.find(label)
+    if any(label in (n.label, n.identifier) for n in nodes):
         return True
+    if any((n.value or "").split(",")[0].strip() == label for n in nodes):
+        return bool(T._ocr_hits(drv, drv.screenshot(tmp_path("offers.png")), label))
     return not drv.ui_tree() and bool(T._ocr_hits(drv, drv.screenshot(tmp_path("offers.png")), label))
 
 
@@ -204,23 +227,30 @@ def _logo_point(drv: Driver, shot: Path) -> tuple[int, int]:
 
 
 def _health_sheet(drv: Driver, run: Run | None, shot: Path | None = None) -> bool:
-    """Apple Health's access sheet: turn every category on, then Allow (top right; disabled until one is on)."""
-    if not _visible(drv, ["Turn On All"], shot):
+    """Apple Health's access sheet: turn every category on, then Allow (disabled until one is on): top right before
+    iOS 26, a wide button above "Don't Allow" at the bottom on iOS 26."""
+    if not _visible(drv, ["Turn On All", "Turn Off All"], shot):
         return False
     step(run, drv, "health-access", "Apple Health access sheet") if run else None
-    drv.tap_text("Turn On All", exact=True)
-    time.sleep(1.0)
-    w, h = drv.screen_size()
-    tops = [n for n in drv.find("Allow", exact=True) if n.w > 0 and n.center[1] < h * 0.2]
-    if tops:
-        drv.tap(*tops[0].center)
+    # The sheet is drawn by Apple's Health process and ignores most coordinate taps (iOS 26.3: "Turn On All" and Allow
+    # both), so its buttons are tapped as elements. Allow (UIA.Health.Allow.Button) stays disabled until a category is
+    # on, and its "Allow" text reads enabled even then: go by the button.
+    allow = next((n for n in drv.find("UIA.Health.Allow.Button", exact=True) if n.w > 0 and n.enabled), None)
+    for _ in range(0 if allow else 3):
+        drv.tap_element("Turn On All")
+        time.sleep(1.5)
+        allow = next((n for n in drv.find("UIA.Health.Allow.Button", exact=True) if n.w > 0 and n.enabled), None)
+        if allow:
+            break
+    if allow:
+        drv.tap_element("UIA.Health.Allow.Button")
     else:
-        from ..ocr import find_text
-        s = drv.screenshot(tmp_path("health.png"))
-        hits = [x for x in find_text(s, "Allow", isolated=True) if x.center[1] < h * 0.2]
-        if not hits:
-            raise HarnessError("Apple Health sheet: 'Allow' not found at its top")
-        drv.tap(*hits[0].center)
+        # before iOS 26 the sheet's Allow sits top right, with no identifier
+        w, h = drv.screen_size()
+        tops = [n for n in drv.find("Allow", exact=True) if n.w > 0 and n.center[1] < h * 0.2]
+        if not tops:
+            raise HarnessError("Apple Health sheet: its Allow button did not enable after 'Turn On All'")
+        drv.tap(*tops[0].center)
     log("step: Apple Health access allowed")
     time.sleep(1.5)
     return True

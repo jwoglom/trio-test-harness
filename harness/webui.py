@@ -308,8 +308,8 @@ class Manager:
         devices = text("devices") or "phone"
         if devices not in ("auto", "phone", "phone+watch"):
             raise ValueError("devices: auto, phone or phone+watch")
-        if devices == "phone+watch" and (target != "simulator" or app != "trio"):
-            raise ValueError("devices: the watch runs only with Trio on the simulator")
+        if devices == "phone+watch" and target != "simulator":
+            raise ValueError("devices: the watch runs only beside the simulator")
         xcode = text("xcode")
         if xcode and xcode not in _xcodes():
             raise ValueError(f"xcode: {xcode} is not installed")

@@ -141,6 +141,22 @@ macOS iPhone Mirroring using phone-harness; driver written and window capture ve
   a directory of the user's own, mode 0700), and `ci/claude-sandbox.py` takes the paths from there; the agent sandbox
   may also read and write the temp folders (/tmp, $TMPDIR, $RUNNER_TEMP).
 
+- **Loop with the watch, 2026-10-19**: LoopWorkspace `feat/tandem-closed-beta` cloned into `LoopWorkspace/` (771 MB with
+  submodules) and built for the simulator in ~45 min on this Mac, first try. `trio-test-e2e --app loop --devices
+  phone+watch` then ran clean on the 46 mm pair: Loop and its Watch app (`<Loop>.LoopWatch`, read from the build's
+  embedded Watch app) installed, the Watch app before the phone app, Apple Health's sheet, CGM + Pump Simulator, the
+  CGM's sine curve, and the phone's context on the watch (loop ring, glucose, eventual glucose). Fixed on the way, the
+  Loop phone flows' first run on a Mac: Loop's HUD gives "Add CGM" / "Add Pump" as the value of "CGM Status" / "Pump
+  Status", and refreshes it only with a reading, so on the simulator `offers` asks Loop's saved managers
+  (`Documents/CGMManagerState.plist`, `PumpManagerState.plist`); iOS 26's Health sheet has its Allow at the bottom
+  (`UIA.Health.Allow.Button`) and ignores most coordinate taps, so `Driver.tap_element` taps it as an element through
+  WebDriverAgent. Watch side: after a Watch app is reinstalled, the watch's wcd filed Loop's WatchKit extension under
+  its own id (`…LoopWatch.watchkitextension`) instead of Loop's, so Loop's context never reached it (the first install
+  was right; Trio's single-target app was never affected); `WatchDriver.install` now restarts the watch's wcd.
+  **Not working yet**: the Loop Watch bolus confirmation ("Turn Digital Crown to bolus") takes no crown from XCUITest,
+  while the amount screen before it does; scrolling over the Simulator window could not be tried (the posted scroll
+  events did not arrive). Loop's watch bolus path is otherwise drivable up to that screen.
+
 ## Still unverified
 - `th report pr` against a real PR (gh --attach inline uploads; ask before posting).
 - `th webui` with a real job: only tested with the stages stubbed (auth, validation, stage order, sandbox settings per

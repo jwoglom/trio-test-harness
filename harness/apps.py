@@ -44,6 +44,7 @@ class App:
     team_files: tuple[tuple[str, str], ...]   # (path from the checkout, setting) a user's own team is read from
     docs_url: str
     flows_module: str
+    watch_suffix: str               # the Watch app's bundle id is the phone app's + this (a build's own plist says first)
 
     @property
     def checkout(self) -> Path:
@@ -119,6 +120,7 @@ TRIO = App(
     entitlements="Trio/Resources/Trio.entitlements",
     team_files=(("ConfigOverride.xcconfig", "DEVELOPER_TEAM"),),
     docs_url="https://triodocs.org/", flows_module="harness.flows.trio",
+    watch_suffix=".watchkitapp",    # Trio's Watch App target: $(BUNDLE_IDENTIFIER).watchkitapp
 )
 LOOP = App(
     key="loop", name="Loop", default_repo="LoopKit/LoopWorkspace",
@@ -131,6 +133,7 @@ LOOP = App(
     # build docs put a builder's team
     team_files=(("LoopConfigOverride.xcconfig", "LOOP_DEVELOPMENT_TEAM"), ("../../LoopConfigOverride.xcconfig", "LOOP_DEVELOPMENT_TEAM")),
     docs_url="https://loopkit.github.io/loopdocs/", flows_module="harness.flows.loop",
+    watch_suffix=".LoopWatch",      # Loop's WatchApp target: $(MAIN_APP_BUNDLE_IDENTIFIER).LoopWatch
 )
 APPS = {"trio": TRIO, "loop": LOOP}
 

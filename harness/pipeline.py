@@ -84,9 +84,6 @@ def decide_devices(args, info: dict, src: Path) -> dict:
     app = _app()
     d = watchscope.decide(info, src, app.base_branch, app.key)
     log(f"devices: {d['devices']} ({d['by']}: {d['reason']})")
-    if d["devices"] == "phone+watch" and app.key != "trio":
-        d["reason"] += f" — but the harness runs only Trio's Watch app, so this {app.name} run is phone-only"
-        d["devices"] = "phone"
     args.watch = d["devices"] == "phone+watch"
     return d
 
@@ -232,6 +229,7 @@ def stage_smoke(args, drv, run, bi=None):
     if F.devices_configured(drv):
         run.log_step("devices-present", "CGM and pump already configured from a previous install (app data kept); skipping setup")
         F.step(run, drv, "home-with-devices", "Home with devices already configured")
+        _watch_with_data(args, run)
         return
     if F.CGM_SIMULATOR in want and F.offers(drv, F.ADD_CGM):
         F.add_cgm_simulator(drv, run)
@@ -245,15 +243,22 @@ def stage_smoke(args, drv, run, bi=None):
     time.sleep(4)
     F.settle(drv, run)
     F.step(run, drv, "home-with-devices", f"Home with {' + '.join(want)}")
-    if getattr(args, "watch", False):
-        from .cli import get_driver
-        w = get_driver("watch")
-        # the phone pushes its state to the watch on its next loop; "STALE DATA" until then
-        for _ in range(12):
-            if not w.find("STALE DATA"):
-                break
-            time.sleep(5)
-        F.step(run, w, "watch-with-data", "Watch app after the phone's fake CGM and pump are set up")
+    _watch_with_data(args, run)
+
+
+def _watch_with_data(args, run) -> None:
+    if not getattr(args, "watch", False):
+        return
+    from .cli import get_driver
+    F = _app().flows
+    w = get_driver("watch")
+    # the phone pushes its state to the watch on its next loop; until then the Watch app says it has none
+    no_data = getattr(F, "WATCH_NO_DATA", None)
+    for _ in range(12):
+        if not no_data or not w.find(no_data):
+            break
+        time.sleep(5)
+    F.step(run, w, "watch-with-data", "Watch app after the phone's fake CGM and pump are set up")
 
 
 def stage_report(args, run) -> Path:
@@ -394,7 +399,7 @@ def main(argv=None) -> int:
     p.add_argument("--devices", choices=["phone", "phone+watch", "auto"], default="phone",
                    help="phone (default): the iPhone app only. phone+watch: also a watch simulator paired with the "
                         "phone, the app's Watch app on it and the watch input agent, for `th --target watch ...` "
-                        "(simulator, Trio). auto: a small model decides from every PR of the run (the app's and its "
+                        "(simulator; Trio or Loop). auto: a small model decides from every PR of the run (the app's and its "
                         "submodules': titles, descriptions, changed files; harness/watchscope.py)")
     p.add_argument("--watch", dest="devices", action="store_const", const="phone+watch", help="= --devices phone+watch")
     p.add_argument("--watch-model", metavar="MODEL", help="watch size: 40mm, 41mm, 42mm, 44mm, 45mm, 46mm, 49mm (or "
@@ -429,9 +434,9 @@ def main(argv=None) -> int:
     if not args.mode:
         args.mode = "simulator" if args.yes else _ask("Target", default="simulator", choices=["simulator", "rooted-vnc", "iphone-usb"])
     args.target = MODES[args.mode]
-    if args.devices == "phone+watch" and (args.target != "sim" or app.key != "trio"):
-        raise HarnessError("--devices phone+watch needs --mode simulator and Trio: the watch is a simulator paired with "
-                           "the iPhone simulator, and the Watch flows are Trio's")
+    if args.devices == "phone+watch" and args.target != "sim":
+        raise HarnessError("--devices phone+watch needs --mode simulator: the watch is a simulator paired with the "
+                           "iPhone simulator")
     args.watch = args.devices == "phone+watch"     # auto is settled after the checkout (run_stages)
     if args.watch_model and args.target == "sim":
         from . import watch as WT

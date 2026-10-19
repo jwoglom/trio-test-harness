@@ -99,6 +99,12 @@ class Driver:
                 return x, y
         raise LookupError(f"no UI element matching {text!r}")
 
+    def tap_element(self, text: str) -> tuple[int, int] | None:
+        """Tap an element by its exact label or identifier through the backend's own element tap where it has one
+        (WebDriverAgent): a view another process draws in the app (Apple Health's access sheet) ignores coordinate
+        taps. Elsewhere an ordinary tap_text."""
+        return self.tap_text(text, exact=True, ocr_fallback=False)
+
     def wait_for_text(self, text: str, timeout: float = 20, interval: float = 1.0, *, ocr: bool = True) -> bool:
         deadline = time.time() + timeout
         shot = tmp_path("wait.png")

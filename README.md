@@ -58,14 +58,14 @@ real Loop on a Mac: `docs/HANDOFF.md` lists what to check.
 
 ## Apple Watch (`--target watch`)
 
-Trio's Watch app runs on a watchOS simulator paired with the harness's iPhone simulator, so a Watch change can be tested
-the way a phone change is. `trio-test-e2e --devices phone|phone+watch|auto` (`--watch` = phone+watch; CI's `devices`
+The app's Watch app (Trio's, or Loop's with `--app loop`) runs on a watchOS simulator paired with the harness's iPhone
+simulator, so a Watch change can be tested the way a phone change is. `trio-test-e2e --devices phone|phone+watch|auto` (`--watch` = phone+watch; CI's `devices`
 and `watch_model` dropdowns, `trio-test-ci --devices … --watch-model 40mm`, the web UI's Devices field) says whether a run includes it. **phone** is the default. **auto** asks a small model
 (Haiku through `claude -p`, `TH_SCOPE_MODEL`) whether the change can alter anything the watch shows or does, from every PR
 of the run: the app's (Trio or LoopWorkspace), the submodule PR, other submodule PRs and cherry-picked PRs, with their
 titles, descriptions and changed files (`harness/watchscope.py`, ~10 s); without Claude the changed paths decide. The
 answer and its reason go into `pr.md` and `run.json`. In CI, auto needs `CLAUDE_CODE_OAUTH_TOKEN` in the build step too.
-The harness runs only Trio's Watch app: a Loop run that auto finds needs the watch runs phone-only and says so. With the watch, `trio-test-e2e` does the setup on the watch model's own **phone + watch
+With the watch, `trio-test-e2e` does the setup on the watch model's own **phone + watch
 pair**: `TrioHarness (<model>)` and `TrioHarnessWatch (<model>)` (`TH_WATCH_SIM_DEVICE`, default Apple Watch Series 11
 (46mm); `TH_WATCH_SIM_RUNTIME`), created on first use and paired once, while both are shut down (`simctl pair`: Xcode ships
 no pre-paired simulators). From then on that phone is the simulator every command drives. A phone simulator that is paired

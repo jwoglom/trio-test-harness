@@ -190,10 +190,25 @@ def pair(model: str | None = None, *, recreate: bool = False) -> tuple[str, str]
 
 
 def watch_bundle_id(bundle_id: str) -> str:
-    """The Watch app's bundle id for an app's (the phone app's id + .watchkitapp, Trio's PRODUCT_BUNDLE_IDENTIFIER)."""
-    if bundle_id == CAROUSEL or bundle_id.endswith(".watchkitapp") or bundle_id.startswith("com.apple."):
+    """The Watch app's bundle id for a phone app's: read from the last build's embedded Watch app when it is that app's
+    companion (its WKCompanionAppBundleIdentifier), else the phone app's id + the app's suffix (harness/apps.py:
+    Trio .watchkitapp, Loop .LoopWatch). A watch app's own id, or a system app's, is returned as it is."""
+    if bundle_id == CAROUSEL or bundle_id.startswith("com.apple."):
         return bundle_id
-    return f"{bundle_id}.watchkitapp"
+    from . import apps
+    from .build import BuildInfo
+    bi = BuildInfo.load()
+    if bi and bi.app_path and Path(bi.app_path).exists():
+        try:
+            info = plistlib.loads((embedded_watch_app(Path(bi.app_path)) / "Info.plist").read_bytes())
+            if bundle_id in (info.get("CFBundleIdentifier"), info.get("WKCompanionAppBundleIdentifier")):
+                return info["CFBundleIdentifier"]
+        except (HarnessError, OSError, KeyError, plistlib.InvalidFileException):
+            pass
+    suffixes = {a.watch_suffix for a in apps.APPS.values()}
+    if bundle_id.endswith(tuple(suffixes)):
+        return bundle_id
+    return f"{bundle_id}{apps.current().watch_suffix}"
 
 
 def embedded_watch_app(app: Path) -> Path:
@@ -395,9 +410,23 @@ class WatchDriver(Driver):
             self._simctl(["install", self.udid, str(watch_app)])
             time.sleep(10)
             if self.is_installed(bid):
+                self._restart_wcd()
                 return
             log(f"{bid} was removed from the watch right after its install (the phone app's uninstall); installing again")
         raise HarnessError(f"{bid} does not stay installed on the watch")
+
+    def _restart_wcd(self) -> None:
+        """After a Watch app is reinstalled, the watch's WatchConnectivity daemon can keep a stale record of it: it then
+        files a WatchKit extension's session under the extension's own id instead of its iPhone app's (Loop's
+        `…LoopWatch.watchkitextension` instead of `…Loop`), and the phone's context never reaches it. A restarted wcd
+        (launchd starts it again on demand) reads the apps afresh."""
+        import signal
+        for parent in run(["pgrep", "-f", f"launchd_sim.*{self.udid}"], check=False, quiet=True).stdout.split():
+            for pid in run(["pgrep", "-P", parent, "-x", "wcd"], check=False, quiet=True).stdout.split():
+                try:
+                    os.kill(int(pid), signal.SIGKILL)
+                except (ProcessLookupError, ValueError):
+                    pass
 
     def uninstall(self, bundle_id: str) -> None:
         self._simctl(["uninstall", self.udid, watch_bundle_id(bundle_id)], check=False)

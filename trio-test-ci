@@ -56,7 +56,7 @@ def parse_args(argv=None) -> argparse.Namespace:
     p.add_argument("--walk-onboarding", action="store_true", help="tap through onboarding instead of skipping it")
     p.add_argument("--no-smoke", action="store_true", help="do not configure the simulated CGM + Pump Simulator")
     p.add_argument("--devices", choices=["phone", "phone+watch", "auto"],
-                   help="phone (default), phone+watch (Trio's Watch app on a paired watch simulator), or auto (a small "
+                   help="phone (default), phone+watch (the app's Watch app on a paired watch simulator), or auto (a small "
                         "model decides from the app's and submodules' PRs)")
     p.add_argument("--watch-model", choices=["40mm", "41mm", "42mm", "44mm", "45mm", "46mm", "49mm"],
                    help="watch size when the watch is used (default 46mm)")

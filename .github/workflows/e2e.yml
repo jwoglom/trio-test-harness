@@ -41,7 +41,7 @@ on:
         type: boolean
         default: true
       devices:
-        description: "Devices: phone (the iPhone app only), phone+watch (also Trio's Watch app on a paired watch simulator), or auto (a small model decides from the app's and submodules' PRs)"
+        description: "Devices: phone (the iPhone app only), phone+watch (also the app's Watch app on a paired watch simulator), or auto (a small model decides from the app's and submodules' PRs)"
         type: choice
         options: [phone, phone+watch, auto]
         default: phone

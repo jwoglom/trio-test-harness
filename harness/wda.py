@@ -208,6 +208,16 @@ class WDAClient:
             out.append({"rect": rect, **attrs})
         return out
 
+    def click(self, name: str) -> bool:
+        """Tap the first element named or labelled `name` as an element (XCUITest's own tap), not at a coordinate."""
+        esc = name.replace("'", "\\'")
+        els = self._req("POST", "/elements", {"using": "predicate string", "value": f"name == '{esc}' OR label == '{esc}'"})
+        if not els:
+            return False
+        eid = els[0].get("ELEMENT") or next(iter(els[0].values()))
+        self._req("POST", f"/element/{eid}/click")
+        return True
+
     def alert_text(self) -> str | None:
         try:
             return self._req("GET", "/alert/text")

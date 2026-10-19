@@ -232,6 +232,9 @@ class RemoteDriver(Driver):
     def tap_text(self, *a, **k):
         return self._call("tap_text", *a, **k)
 
+    def tap_element(self, *a, **k):
+        return self._call("tap_element", *a, **k)
+
     def wait_for_text(self, *a, **k):
         return self._call("wait_for_text", *a, **k)
 
