@@ -91,9 +91,10 @@ phone session checks for the watch when it starts, and logs `📱 Phone isReacha
   swipe for the chart page (Active Insulin, Active Carbs, Net Basal Rate, Reservoir Volume). No ring or glucose until
   the phone has sent a context (each loop, `updateApplicationContext`). Bolus: the amount (starts at the
   recommendation, `REC: 0.1 U`) takes the crown (`crown 0.5` went 0.10 → 0.35 U) and `−` / `+`; the **Bolus** button
-  (bottom, about 208,424 px) opens "Turn Digital Crown to bolus". **Known gap**: that confirmation does not take the
-  harness's crown (XCUITest's, also after tapping it), so a Loop Watch bolus cannot be confirmed in the harness yet;
-  **Close** (top left) backs out. Carbs: amount by crown, absorption time, **Continue**, **Save & Bolus** / **Save**.
+  (bottom, about 208,424 px) opens "Turn Digital Crown to bolus": **one full turn at one turn a second confirms**
+  (`crown 1.0 --velocity 1`; Loop scales its -1…1 progress by 4 at low sensitivity, and half turns or the default
+  speed show no progress), the flow closes and the phone enacts it (`oslog --grep enactBolus`: "enactBolus
+  succeeded"). **Close** (top left) backs out. `REC: – U` means the phone has not answered the recommendation yet. Carbs: amount by crown, absorption time, **Continue**, **Save & Bolus** / **Save**.
   watchOS shows a red crossed-out phone in the status bar here even while the context arrives. The phone side is
   `WatchDataManager`, in the system log only: `th --target sim oslog --grep WatchDataManager --since 10m`.
 - What the phone did (Trio): `th logs trio --grep "WatchManager"` (`📱 Received bolus request from watch`, `Enacted bolus via

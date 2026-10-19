@@ -53,12 +53,19 @@ private final class Agent {
     func serve() throws {
         try fm.createDirectory(at: dir, withIntermediateDirectories: true)
         try write("ready.json", ["pid": Int(getpid()), "screen": screen()])
-        var lastBeat = Date.distantPast
-        while true {
-            if Date().timeIntervalSince(lastBeat) >= 1 {
-                try? write("alive.json", ["at": Date().timeIntervalSince1970])
-                lastBeat = Date()
+        // from its own thread: an XCUITest action can hold the main thread for 20 s and more (Home, a launch)
+        let beat = Thread { [dir] in
+            while true {
+                let tmp = dir.appendingPathComponent(".alive.json.tmp")
+                if let data = try? JSONSerialization.data(withJSONObject: ["at": Date().timeIntervalSince1970]),
+                   (try? data.write(to: tmp)) != nil {
+                    rename(tmp.path, dir.appendingPathComponent("alive.json").path)
+                }
+                Thread.sleep(forTimeInterval: 1)
             }
+        }
+        beat.start()
+        while true {
             let names = ((try? fm.contentsOfDirectory(atPath: dir.path)) ?? [])
                 .filter { $0.hasPrefix("cmd-") && $0.hasSuffix(".json") }
                 .sorted()
@@ -228,6 +235,7 @@ private final class Agent {
                 "identifier": s.identifier,
                 "role": "XCUIElementType" + typeName(s.elementType),
                 "enabled": s.isEnabled,
+                "focused": s.hasFocus,
                 "x": Double(f.minX), "y": Double(f.minY), "w": Double(f.width), "h": Double(f.height)
             ])
         }
@@ -248,9 +256,12 @@ private final class Agent {
         let data = try JSONSerialization.data(withJSONObject: object)
         let tmp = dir.appendingPathComponent(".\(name).tmp")
         try data.write(to: tmp)
+        // rename(2) replaces the file atomically: a remove and a move left a moment with no alive.json, which the
+        // harness read as a stopped agent
         let dest = dir.appendingPathComponent(name)
-        _ = try? fm.removeItem(at: dest)
-        try fm.moveItem(at: tmp, to: dest)
+        guard rename(tmp.path, dest.path) == 0 else {
+            throw AgentError.failed("rename \(name): \(String(cString: strerror(errno)))")
+        }
     }
 
     func typeName(_ t: XCUIElement.ElementType) -> String {

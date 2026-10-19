@@ -299,7 +299,7 @@ def stop() -> None:
 
 def call(method: str, timeout: float = 120, **params):
     """One command to the agent; returns its result or raises with the agent's error (an XCUITest issue)."""
-    if not (AGENT_DIR / "alive.json").exists():
+    if not is_running(max_age=30):
         raise HarnessError("the watch agent is not running: `th watch agent start`")
     cid = f"{time.time_ns()}-{uuid.uuid4().hex[:6]}"
     tmp, cmd, res = AGENT_DIR / f".cmd-{cid}.tmp", AGENT_DIR / f"cmd-{cid}.json", AGENT_DIR / f"res-{cid}.json"

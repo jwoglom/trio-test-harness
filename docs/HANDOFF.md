@@ -153,9 +153,14 @@ macOS iPhone Mirroring using phone-harness; driver written and window capture ve
   WebDriverAgent. Watch side: after a Watch app is reinstalled, the watch's wcd filed Loop's WatchKit extension under
   its own id (`…LoopWatch.watchkitextension`) instead of Loop's, so Loop's context never reached it (the first install
   was right; Trio's single-target app was never affected); `WatchDriver.install` now restarts the watch's wcd.
-  **Not working yet**: the Loop Watch bolus confirmation ("Turn Digital Crown to bolus") takes no crown from XCUITest,
-  while the amount screen before it does; scrolling over the Simulator window could not be tried (the posted scroll
-  events did not arrive). Loop's watch bolus path is otherwise drivable up to that screen.
+  Loop Watch bolus end to end, twice: Bolus, the amount by crown (0.10 and 0.15 U), **Bolus**, then "Turn Digital
+  Crown to bolus" confirmed by one full turn at one turn a second (`crown 1.0 --velocity 1`): the flow closed and Loop's
+  log shows the Mock pump's bolus in progress at that amount and `enactBolus succeeded`. Smaller or slower turns move
+  nothing visible there (Loop scales the confirmation by 4 at low sensitivity), which first read as a focus problem.
+  Agent fixes found on the way: its heartbeat file was replaced by a remove and a move, so the harness could read the
+  agent as stopped in between (now one rename(2)), and it was written only between commands, so a slow action looked
+  like a dead agent (now its own thread). `home` through the agent verified here too (it was listed as verified on
+  2026-10-18 without having run).
 
 ## Still unverified
 - `th report pr` against a real PR (gh --attach inline uploads; ask before posting).

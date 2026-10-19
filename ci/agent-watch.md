@@ -1,7 +1,8 @@
 A watch simulator paired with the iPhone simulator runs the app's Watch app, started before the phone app so the two
 are connected (`pr.md` says why this run includes the watch). Drive it like the phone with `--target watch`:
 `./trio-test-harness --target watch shot --name ... --note ...`, `tap-text`, `find`, `tree`, `tap X Y`, `home`, and
-`./trio-test-harness --target watch crown 0.5` to turn the Digital Crown (1.0 = one full turn). Read the Apple Watch
+`./trio-test-harness --target watch crown 0.5` to turn the Digital Crown (1.0 = one full turn; `--velocity` in turns
+a second). A bolus confirmation takes about half a turn in Trio, one full turn at `--velocity 1` in Loop. Read the Apple Watch
 section of the trio-ui-drive skill (`.claude/skills/trio-ui-drive/SKILL.md`) first: it lists Trio's and Loop's Watch
 screens, how much crown turn confirms a bolus, and where a tap lands.
 When the change could look different on another watch, also try it there:
