@@ -142,6 +142,13 @@ button.small{padding:2px 9px;font-size:12px;margin-top:8px;display:block}
         <label for="sim_runtime">Runtime</label>
         <input type="text" id="sim_runtime" name="sim_runtime" list="sim_runtimes" placeholder="newest installed">
         <datalist id="sim_runtimes"></datalist>
+        <label for="devices">Devices</label>
+        <select id="devices" name="devices" title="auto: a small model decides from the PR whether Trio's Watch app is needed">
+          <option value="auto">auto (decided from the PR)</option><option value="phone">phone</option>
+          <option value="phone+watch">phone + watch</option></select>
+        <label for="watch_model">Watch model</label>
+        <input type="text" id="watch_model" name="watch_model" list="watch_models">
+        <datalist id="watch_models"></datalist>
       </fieldset>
     </details>
     <div class="actions"><button class="primary" type="submit">Run</button><span class="err" id="formerr"></span></div>
@@ -230,6 +237,8 @@ api("/api/options").then(o => {
   $("#sim_devices").innerHTML = o.sim_devices.map(d => `<option value="${esc(d)}">`).join("");
   $("#sim_runtimes").innerHTML = o.sim_runtimes.map(d => `<option value="${esc(d)}">`).join("");
   $("#sim_device").placeholder = o.defaults.sim_device || "iPhone 16";
+  $("#watch_models").innerHTML = (o.watch_models || []).map(d => `<option value="${esc(d)}">`).join("");
+  $("#watch_model").placeholder = o.defaults.watch_model || "Apple Watch Series 11 (46mm)";
 }).catch(() => {});
 // "Add cherry-pick" / "Add submodule override": one field per item, each with its own label and a remove button
 let addSeq = 0;

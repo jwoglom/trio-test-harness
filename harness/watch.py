@@ -36,20 +36,96 @@ AGENT_DIR = REPO_ROOT / "runs" / ".tmp" / "watch-agent"
 PID_FILE = REPO_ROOT / "runs" / ".tmp" / "watch-agent.pid"
 LOG_FILE = REPO_ROOT / "runs" / ".tmp" / "watch-agent.log"
 APP_FILE = REPO_ROOT / "runs" / ".tmp" / "watch-app.txt"     # the Watch app last launched, for a restarted agent
+CURRENT_FILE = REPO_ROOT / "runs" / ".tmp" / "watch-udid.txt"  # the watch in use (`th watch model`), for every process
+AGENT_UDID_FILE = REPO_ROOT / "runs" / ".tmp" / "watch-agent-udid.txt"
 CAROUSEL = "com.apple.Carousel"
+
+# Settings ▸ General ▸ Orientation and Settings ▸ Display & Brightness ▸ Text Size, as the watch stores them. An app
+# reads them when it starts, so a change takes a relaunch of the app (not of the simulator). simctl's own
+# `ui content_size` refuses a watchOS runtime ("does not support dynamic text").
+ORIENTATION_DOMAIN = "com.apple.nano"
+WRIST_KEY = "wornOnRightArm"      # WKInterfaceDevice.wristLocation: right when true
+CROWN_KEY = "invertUI"            # WKInterfaceDevice.crownOrientation: left when true, whichever the wrist
+TEXT_DOMAIN, TEXT_KEY = "com.apple.UIKit", "UIPreferredContentSizeCategoryName"
+TEXT_SIZES = {"extra-small": "XS", "small": "S", "medium": "M", "large": "L", "extra-large": "XL",
+              "extra-extra-large": "XXL", "extra-extra-extra-large": "XXXL",
+              "accessibility-medium": "AccessibilityM", "accessibility-large": "AccessibilityL",
+              "accessibility-extra-large": "AccessibilityXL", "accessibility-extra-extra-large": "AccessibilityXXL",
+              "accessibility-extra-extra-extra-large": "AccessibilityXXXL"}
+# One model per screen size Trio's Watch app tells apart (WatchSize in its Helper+Enums.swift), plus the newest 46 mm,
+# which matches none of its sizes and gets its `.unknown` layout.
+SUGGESTED_MODELS = ["Apple Watch SE 3 (40mm)", "Apple Watch Series 9 (41mm)", "Apple Watch Series 11 (42mm)",
+                    "Apple Watch SE 3 (44mm)", "Apple Watch Series 9 (45mm)", "Apple Watch Series 11 (46mm)",
+                    "Apple Watch Ultra 3 (49mm)"]
 
 
 # ---------------- simulators -----------------
 
 def watch_udid() -> str:
+    """The watch in use: the model `th watch model` last chose, else TH_WATCH_SIM_DEVICE."""
+    if CURRENT_FILE.exists():
+        udid = CURRENT_FILE.read_text().strip()
+        if any(d["udid"] == udid and d.get("isAvailable", True) for d in xcode.list_devices()):
+            return udid
     return xcode.ensure_watch_simulator()["udid"]
 
 
-def pair() -> tuple[str, str]:
+def select_model(device: str | None) -> str:
+    """Make the harness's simulator of this watch model (created on first use) the one in use; returns its udid."""
+    udid = xcode.ensure_watch_simulator(device)["udid"]
+    CURRENT_FILE.parent.mkdir(parents=True, exist_ok=True)
+    CURRENT_FILE.write_text(udid)
+    return udid
+
+
+def model_name(udid: str) -> str:
+    d = next((d for d in xcode.list_devices() if d["udid"] == udid), {})
+    dtid = d.get("deviceTypeIdentifier", "")
+    return next((dt["name"] for dt in xcode.list_devicetypes() if dt["identifier"] == dtid), d.get("name", udid))
+
+
+def read_settings(udid: str) -> dict:
+    def get(domain, key):
+        cp = xcode.xcrun(["simctl", "spawn", udid, "defaults", "read", domain, key], check=False, quiet=True)
+        return cp.stdout.strip() if cp.returncode == 0 else None
+    size = get(TEXT_DOMAIN, TEXT_KEY)
+    by_value = {f"UICTContentSizeCategory{v}": k for k, v in TEXT_SIZES.items()}
+    return {"wrist": "right" if get(ORIENTATION_DOMAIN, WRIST_KEY) == "1" else "left",
+            "crown": "left" if get(ORIENTATION_DOMAIN, CROWN_KEY) == "1" else "right",
+            "text_size": by_value.get(size, size) if size else "default"}
+
+
+def write_settings(udid: str, *, wrist: str | None = None, crown: str | None = None,
+                   text_size: str | None = None) -> bool:
+    """Write the watch's orientation and text size; returns whether anything was given. Apps see it on their next
+    launch."""
+    def spawn(*a):
+        xcode.xcrun(["simctl", "spawn", udid, *a], quiet=True)
+    if wrist:
+        if wrist not in ("left", "right"):
+            raise HarnessError("--wrist is left or right")
+        spawn("defaults", "write", ORIENTATION_DOMAIN, WRIST_KEY, "-bool", "true" if wrist == "right" else "false")
+        spawn("notifyutil", "-p", "com.apple.nano.wristOrientationChangedNotification")
+    if crown:
+        if crown not in ("left", "right"):
+            raise HarnessError("--crown is left or right")
+        spawn("defaults", "write", ORIENTATION_DOMAIN, CROWN_KEY, "-bool", "true" if crown == "left" else "false")
+        spawn("notifyutil", "-p", "com.apple.nano.invertUIChangedNotification")
+    if text_size:
+        if text_size == "default":
+            xcode.xcrun(["simctl", "spawn", udid, "defaults", "delete", TEXT_DOMAIN, TEXT_KEY], check=False, quiet=True)
+        elif text_size in TEXT_SIZES:
+            spawn("defaults", "write", TEXT_DOMAIN, TEXT_KEY, f"UICTContentSizeCategory{TEXT_SIZES[text_size]}")
+        else:
+            raise HarnessError(f"--text-size is default or one of: {', '.join(TEXT_SIZES)}")
+    return bool(wrist or crown or text_size)
+
+
+def pair(udid: str | None = None) -> tuple[str, str]:
     """Create the watch simulator if needed, pair it with the harness's iPhone simulator, boot both.
     Returns (watch udid, phone udid)."""
     phone = xcode.ensure_simulator()["udid"]
-    watch = watch_udid()
+    watch = udid or watch_udid()
     xcode.ensure_pair(watch, phone)
     xcode.boot_simulator(phone)
     xcode.boot_simulator(watch)
@@ -108,7 +184,8 @@ def is_running(max_age: float = 5.0) -> bool:
 
 
 def start(udid: str, timeout: float = 900) -> None:
-    if is_running():
+    on = AGENT_UDID_FILE.read_text().strip() if AGENT_UDID_FILE.exists() else None
+    if is_running() and on == udid:
         return
     stop()
     xr = xctestrun() or build(udid)
@@ -122,6 +199,7 @@ def start(udid: str, timeout: float = 900) -> None:
     with open(LOG_FILE, "w") as fh:
         p = subprocess.Popen(cmd, stdout=fh, stderr=subprocess.STDOUT, env=env, start_new_session=True)
     PID_FILE.write_text(str(p.pid))
+    AGENT_UDID_FILE.write_text(udid)
     try:
         wait_for(lambda: is_running() or p.poll() is not None, timeout, 1.0, what="the watch agent")
     except HarnessError:
@@ -181,15 +259,56 @@ class WatchDriver(Driver):
     kind = "watch"
 
     def __init__(self, udid: str | None = None):
-        self.udid = udid or watch_udid()
+        self._udid = udid or watch_udid()
         self._points: tuple[float, float] | None = None
+
+    @property
+    def udid(self) -> str:
+        # follows `th watch model` from any process, a daemon's driver included
+        if CURRENT_FILE.exists() and (cur := CURRENT_FILE.read_text().strip()) and cur != self._udid:
+            self._udid, self._points = cur, None
+        return self._udid
+
+    @udid.setter
+    def udid(self, value: str) -> None:
+        self._udid, self._points = value, None
 
     def _simctl(self, args: list[str], **kw):
         return xcode.xcrun(["simctl", *args], **kw)
 
     # ---- lifecycle ----
     def boot(self) -> None:
-        pair()
+        pair(self.udid)
+
+    def settings(self, *, wrist: str | None = None, crown: str | None = None, text_size: str | None = None) -> dict:
+        """Change the watch's wrist, crown side or text size (None leaves one as it is) and relaunch the Watch app in
+        front, which reads them at launch; the simulator keeps running. Returns the settings now in force."""
+        if write_settings(self.udid, wrist=wrist, crown=crown, text_size=text_size) and APP_FILE.exists() \
+                and is_running() and call("state")["state"] == "foreground":
+            call("launch", bundleId=APP_FILE.read_text().strip())
+        return {"model": model_name(self.udid), **read_settings(self.udid)}
+
+    def use_model(self, device: str, *, app_path: str | None = None, bundle_id: str | None = None,
+                  phone_bundle_id: str | None = None, wrist: str | None = None, crown: str | None = None,
+                  text_size: str | None = None) -> dict:
+        """Switch to the harness's simulator of watch model `device` (created on first use): pair it with the phone
+        simulator, boot it, install `app_path`'s Watch app, apply the settings, move the agent to it, launch the Watch
+        app, then relaunch the phone app, whose session looks for the watch when it starts. Takes minutes for a new
+        model (its first boot); the previous watch keeps its state and stays booted."""
+        udid = select_model(device)
+        self.udid, self._points = udid, None
+        pair(udid)
+        write_settings(udid, wrist=wrist, crown=crown, text_size=text_size)
+        if app_path:
+            self.install(Path(app_path))
+        start(udid)
+        if bundle_id:
+            self.launch(bundle_id)
+        if phone_bundle_id:
+            phone = xcode.ensure_simulator()["udid"]
+            xcode.xcrun(["simctl", "terminate", phone, phone_bundle_id], check=False, quiet=True)
+            xcode.xcrun(["simctl", "launch", phone, phone_bundle_id], quiet=True)
+        return {"udid": udid, "model": model_name(udid), **read_settings(udid)}
 
     def ensure_agent(self) -> None:
         start(self.udid)
@@ -208,12 +327,18 @@ class WatchDriver(Driver):
         bid = watch_bundle_id(bundle_id)
         APP_FILE.parent.mkdir(parents=True, exist_ok=True)
         APP_FILE.write_text(bid)
-        if is_running():
-            call("launch" if terminate_first else "activate", bundleId=bid)
-            return
+        # simctl starts a watch app suspended, and a suspended Watch app is not reachable from the phone, so the agent
+        # brings it to the front. Not with XCUIApplication.launch: a launch it cannot complete fails the test, which
+        # is the agent (seen right after a watch was erased).
         if terminate_first:
             self._simctl(["terminate", self.udid, bid], check=False, quiet=True)
-        self._simctl(["launch", self.udid, bid])
+        self._simctl(["launch", self.udid, bid], quiet=True)
+        if is_running():
+            st = call("activate", bundleId=bid)
+            if st.get("state") != "foreground":
+                log(f"the Watch app is {st.get('state')} after activate; the phone may not reach it")
+        else:
+            log("the watch agent is not running: the Watch app may stay suspended (`th watch agent start`)")
 
     def terminate(self, bundle_id: str) -> None:
         bid = watch_bundle_id(bundle_id)

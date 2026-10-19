@@ -785,6 +785,24 @@ def cmd_watch(args):
         print(f"agent: {'running' if W.is_running() else 'not running (th watch agent start)'}")
         if W.is_running():
             print(f"front app: {W.call('state')}")
+    elif args.sub == "settings":
+        print(json.dumps(get_driver("watch").settings(wrist=args.wrist, crown=args.crown, text_size=args.text_size),
+                         indent=1))
+    elif args.sub == "model":
+        if not args.device:
+            udid = W.watch_udid()
+            print(f"in use: {W.model_name(udid)}")
+            have = {dt["name"] for dt in xcode.watch_devicetypes()}
+            print("suggested (one per screen size Trio's Watch app lays out for): "
+                  + "; ".join(m for m in W.SUGGESTED_MODELS if m in have))
+            print(f"all: {'; '.join(sorted(have))}")
+            return 0
+        from .build import BuildInfo
+        bi = BuildInfo.load()
+        print(json.dumps(get_driver("watch").use_model(
+            args.device, app_path=bi.app_path if bi else None, bundle_id=bi.bundle_id if bi else None,
+            phone_bundle_id=bi.bundle_id if bi and not args.no_phone_relaunch else None,
+            wrist=args.wrist, crown=args.crown, text_size=args.text_size), indent=1))
     elif args.sub == "agent":
         udid = W.watch_udid()
         if args.action == "build":
@@ -1182,6 +1200,22 @@ def build_parser() -> argparse.ArgumentParser:
     wts = wt.add_subparsers(dest="sub", required=True)
     wts.add_parser("pair", help="create the watch simulator, pair it with the sim, boot both")
     wts.add_parser("status")
+    def watch_settings_args(sp_):
+        sp_.add_argument("--wrist", choices=["left", "right"])
+        sp_.add_argument("--crown", choices=["left", "right"], help="the side the Digital Crown is on")
+        sp_.add_argument("--text-size", metavar="SIZE", help="default, extra-small … extra-extra-extra-large, "
+                         "accessibility-medium … accessibility-extra-extra-extra-large")
+    ws = wts.add_parser("settings", help="wrist, crown side and text size; with none given, prints them. The Watch app "
+                                         "in front is relaunched to read them (no simulator restart)")
+    watch_settings_args(ws)
+    wm = wts.add_parser("model", help="EXPERIMENTAL (broke the phone-watch link in testing, docs/HANDOFF.md): switch the "
+                                      "watch model (a simulator per model, created on first use): pairs, installs the "
+                                      "last build's Watch app, moves the agent, relaunches both apps; with no model, "
+                                      "lists them")
+    wm.add_argument("device", nargs="?", help='e.g. "Apple Watch SE 3 (40mm)"')
+    wm.add_argument("--no-phone-relaunch", action="store_true", help="leave the phone app running (its session may "
+                                                                     "not find the new watch)")
+    watch_settings_args(wm)
     wa = wts.add_parser("agent", help="the XCUITest agent that taps, reads the tree and turns the crown")
     wa.add_argument("action", choices=["build", "start", "stop", "status"])
     wt.set_defaults(fn=cmd_watch)

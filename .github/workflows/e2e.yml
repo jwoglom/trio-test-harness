@@ -40,10 +40,14 @@ on:
         description: "Configure the simulated CGM + Pump Simulator"
         type: boolean
         default: true
-      watch:
-        description: "Also run the Watch app on a paired watch simulator (Trio; the agent drives it with --target watch)"
-        type: boolean
-        default: false
+      devices:
+        description: "Devices: auto (a small model decides from the PR whether the Watch app is needed), phone, or phone+watch (Trio's Watch app on a paired watch simulator)"
+        type: choice
+        options: [auto, phone, phone+watch]
+        default: auto
+      watch_model:
+        description: "Watch model when the watch is used (blank: Apple Watch Series 11 (46mm); e.g. Apple Watch SE 3 (40mm))"
+        type: string
       claude_model:
         description: "Claude model for the agent (sonnet, opus, haiku, or a model ID)"
         type: string
@@ -95,7 +99,8 @@ jobs:
       IN_CONFIGURATION: ${{ inputs.configuration }}
       IN_SKIP_ONBOARDING: ${{ inputs.skip_onboarding }}
       IN_SMOKE: ${{ inputs.smoke }}
-      IN_WATCH: ${{ inputs.watch }}
+      IN_DEVICES: ${{ inputs.devices || 'auto' }}
+      IN_WATCH_MODEL: ${{ inputs.watch_model }}
       IN_AGENT_INSTRUCTIONS: ${{ inputs.agent_instructions }}
       TH_XCODE_APP: /Applications/Xcode_${{ inputs.xcode }}.app
       TH_SIM_DEVICE: ${{ inputs.sim_device }}
@@ -138,6 +143,8 @@ jobs:
         env:
           TH_GIT_TOKEN: ${{ steps.token.outputs.token }}
           GH_TOKEN: ${{ steps.token.outputs.token }}
+          # --devices auto asks a small model whether the PR needs the watch (harness/watchscope.py)
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
         run: |
           set -uo pipefail
           # Per-job paths (workerd's task dir), so nothing is shared between runs.
@@ -149,7 +156,8 @@ jobs:
           [ "$IN_SMOKE" = true ] || args+=(--no-smoke)
           # The fake CGM/pump setup steps are left out of report.html and the comment (everything else stays).
           if [ "$IN_SMOKE" = true ]; then args+=(--hide-setup-screenshots); fi
-          if [ "$IN_WATCH" = true ]; then args+=(--watch); fi
+          args+=(--devices "$IN_DEVICES")
+          if [ -n "$IN_WATCH_MODEL" ]; then args+=(--watch-model "$IN_WATCH_MODEL"); fi
           # The runner's bash has -e; keep going so the run dir is recorded even when the run fails.
           rc=0
           ./trio-test-e2e "${args[@]}" || rc=$?
@@ -173,7 +181,9 @@ jobs:
           else cgm="Glucose Simulator" prompt_file=ci/agent-prompt.md; fi
           smoke_note=$([ "$IN_SMOKE" = true ] && echo ", with the $cgm and Pump Simulator configured" || true)
           extra=$([ -n "$IN_AGENT_INSTRUCTIONS" ] && printf '\nFocus from the person who started this run:\n%s\n' "$IN_AGENT_INSTRUCTIONS" || true)
-          if [ "$IN_WATCH" = true ]; then extra="$extra"$'\n'"$(cat ci/agent-watch.md)"; fi
+          # whether trio-test-e2e included the watch (asked for, or decided by --devices auto)
+          watch=$(RUN_DIR="$RUN_DIR" .venv/bin/python -c 'import json, os, pathlib; print(str(json.loads((pathlib.Path(os.environ["RUN_DIR"]) / "run.json").read_text()).get("watch", False)).lower())')
+          if [ "$watch" = true ]; then extra="$extra"$'\n'"$(cat ci/agent-watch.md)"; fi
           prompt=$(RUN_DIR="$RUN_DIR" SMOKE="$smoke_note" EXTRA="$extra" PROMPT_FILE="$prompt_file" .venv/bin/python -c '
           import os, pathlib
           t = pathlib.Path(os.environ["PROMPT_FILE"]).read_text()
@@ -188,7 +198,7 @@ jobs:
           .venv/bin/python ci/claude-sandbox.py "$RUNNER_TEMP/claude-settings.json" sim "$IN_APP"
           ./trio-test-harness --target sim daemon start
           trap './trio-test-harness --target sim daemon stop >/dev/null 2>&1 || true' EXIT
-          if [ "$IN_WATCH" = true ]; then
+          if [ "$watch" = true ]; then
             ./trio-test-harness --target watch daemon start
             trap './trio-test-harness --target sim daemon stop >/dev/null 2>&1; ./trio-test-harness --target watch daemon stop >/dev/null 2>&1 || true' EXIT
           fi

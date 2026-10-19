@@ -305,6 +305,11 @@ class Manager:
             raise ValueError("agent_minutes must be a number") from None
         if not 1 <= minutes <= 180:
             raise ValueError("agent_minutes must be between 1 and 180")
+        devices = text("devices") or "auto"
+        if devices not in ("auto", "phone", "phone+watch"):
+            raise ValueError("devices: auto, phone or phone+watch")
+        if devices == "phone+watch" and (target != "simulator" or app != "trio"):
+            raise ValueError("devices: the watch runs only with Trio on the simulator")
         xcode = text("xcode")
         if xcode and xcode not in _xcodes():
             raise ValueError(f"xcode: {xcode} is not installed")
@@ -315,7 +320,8 @@ class Manager:
                 "pump_sim": bool(f.get("pump_sim", f.get("smoke", True))), "claude_model": model,
                 "agent_instructions": text("agent_instructions", 4000), "agent_minutes": minutes,
                 "post_comment": bool(f.get("post_comment")), "xcode": xcode, "agent": bool(f.get("agent", True)),
-                "sim_device": text("sim_device", 100), "sim_runtime": text("sim_runtime", 100)}
+                "sim_device": text("sim_device", 100), "sim_runtime": text("sim_runtime", 100),
+                "devices": devices, "watch_model": text("watch_model", 100)}
 
     # --- running ---
 
@@ -374,6 +380,9 @@ def run_job(job: Job) -> None:
     cmd += ["--hide-setup-screenshots"] if sims else ["--no-smoke"]
     cmd += ["--no-cgm-sim"] if sims == ["Pump Simulator"] else []
     cmd += ["--no-pump-sim"] if sims and "Pump Simulator" not in sims else []
+    if inp["target"] == "simulator":
+        cmd += ["--devices", inp.get("devices") or "auto"]
+        cmd += ["--watch-model", inp["watch_model"]] if inp.get("watch_model") else []
     rc, out = job.sh(cmd, env)
     # The pipeline prints its run directory at the end ("run: <dir>"); runs/.current may belong to another session.
     m = re.findall(r"^run:\s+(/\S.*)$", out, re.M)
@@ -395,6 +404,13 @@ def run_job(job: Job) -> None:
         if inp.get("app") == "loop":
             prompt_file = prompt_file.replace(".md", "-loop.md")
         smoke_note = f", with the {' and '.join(sims)} configured" if sims else ""
+        # whether trio-test-e2e included the watch (asked for, or decided by --devices auto)
+        try:
+            watch = bool(json.loads((rd / "run.json").read_text()).get("watch"))
+        except (OSError, ValueError):
+            watch = False
+        if watch:
+            extra += "\n" + (REPO_ROOT / "ci" / "agent-watch.md").read_text()
         prompt = (REPO_ROOT / "ci" / prompt_file).read_text().format(run_dir=rd, smoke_note=smoke_note, extra=extra)
         from . import daemon as D
         # The daemon holds the VNC/WDA connection outside the sandbox. Another session may already run one:
@@ -402,6 +418,9 @@ def run_job(job: Job) -> None:
         started = False
         if not D.is_running(target):
             started = job.sh(["./trio-test-harness", "--target", target, "daemon", "start"], env)[0] == 0
+        watch_started = False
+        if watch and not D.is_running("watch"):
+            watch_started = job.sh(["./trio-test-harness", "--target", "watch", "daemon", "start"], env)[0] == 0
         # A known session id, so "Continue conversation" can resume it (harness/handoff.py).
         sid = str(uuid.uuid4())
         job.update(agent_session=sid)
@@ -430,6 +449,9 @@ def run_job(job: Job) -> None:
             if started:
                 D.stop(target)
                 job.note(f"stopped the {target} daemon")
+            if watch_started:
+                D.stop("watch")
+                job.note("stopped the watch daemon")
             _render(job, rd)
         job.stage("agent", "passed" if arc == 0 else "failed")   # continue-on-error, as in CI
 
@@ -506,12 +528,13 @@ def options() -> dict:
     global _OPTIONS
     if _OPTIONS is None:
         from . import xcode as X
-        o = {"xcodes": _xcodes(), "sim_devices": [], "sim_runtimes": [],
+        o = {"xcodes": _xcodes(), "sim_devices": [], "sim_runtimes": [], "watch_models": [],
              "defaults": {"xcode": CONFIG.get("TH_XCODE_APP"), "sim_device": CONFIG.get("TH_SIM_DEVICE"),
-                          "sim_runtime": CONFIG.get("TH_SIM_RUNTIME")}}
+                          "sim_runtime": CONFIG.get("TH_SIM_RUNTIME"), "watch_model": CONFIG.get("TH_WATCH_SIM_DEVICE")}}
         try:
             o["sim_devices"] = [d["name"] for d in X.list_devicetypes() if d.get("name", "").startswith("iPhone")]
             o["sim_runtimes"] = [r["name"] for r in X.list_runtimes()]
+            o["watch_models"] = [d["name"] for d in X.watch_devicetypes()]
         except Exception as e:  # noqa: BLE001  (no Xcode yet: free-text fields still work)
             log(f"webui: simulator options unavailable: {e}")
         _OPTIONS = o

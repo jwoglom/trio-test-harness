@@ -74,6 +74,19 @@ def stage_checkout(args) -> tuple[Path, dict]:
     return src, info
 
 
+def decide_devices(args, info: dict, src: Path) -> dict:
+    """Settle --devices auto: the watch only for Trio on the simulator, and then when the change can reach it."""
+    if args.devices != "auto":
+        return {"devices": args.devices, "reason": "asked for", "by": "option"}
+    if args.target != "sim" or _app().key != "trio":
+        return {"devices": "phone", "reason": "the watch runs only beside the iPhone simulator, with Trio", "by": "mode"}
+    from . import watchscope
+    d = watchscope.decide(info, src, _app().base_branch)
+    args.watch = d["devices"] == "phone+watch"
+    log(f"devices: {d['devices']} ({d['by']}: {d['reason']})")
+    return d
+
+
 def write_pr_notes(run, info: dict) -> Path:
     """runs/<run>/pr.md: PR title + description + what the agent should test. Also printed."""
     app = _app()
@@ -91,7 +104,10 @@ def write_pr_notes(run, info: dict) -> Path:
     for c in info.get("submodule_cherry_picks") or []:
         lines.append(f"Cherry-picked onto submodule {c['submodule']}: {c['what']}: {c['applied']} commit(s)"
                      + (f", {c['dropped']} already there" if c["dropped"] else ""))
-    lines += [f"Commit: {info.get('sha','?')} {info.get('describe','')}", ""]
+    lines += [f"Commit: {info.get('sha','?')} {info.get('describe','')}"]
+    if d := info.get("devices"):
+        lines.append(f"Devices: {d['devices'].replace('+', ' + ')} ({'chosen' if d['by'] == 'option' else d['by'] + ': ' + d['reason']})")
+    lines.append("")
     if info.get("pr_body"):
         lines += ["## PR description", "", info["pr_body"].strip(), ""]
     for c in (info.get("cherry_picks") or []) + (info.get("submodule_cherry_picks") or []):
@@ -124,6 +140,8 @@ def stage_install(args, bi):
         drv.install(Path(bi.app_path))
         _app().flows.reset_after_install(drv, bi.bundle_id) if args.reinstall else None
         if args.watch:
+            from . import watch as WT
+            WT.select_model(args.watch_model) if args.watch_model else None
             w = get_driver("watch"); w.boot()
             w.uninstall(bi.bundle_id) if args.reinstall else None
             w.install(Path(bi.app_path))
@@ -149,8 +167,10 @@ def stage_launch(args, bi, run):
         if args.watch:
             # The Watch app goes first: Trio's phone session checks for it once, when the phone app starts.
             from . import watch as WT
-            WT.pair()
-            WT.start(WT.watch_udid())
+            udid = WT.select_model(args.watch_model) if args.watch_model else WT.watch_udid()
+            WT.pair(udid)
+            WT.write_settings(udid, wrist=args.watch_wrist, crown=args.watch_crown, text_size=args.watch_text_size)
+            WT.start(udid)
             get_driver("watch").launch(bi.bundle_id)
         drv.launch(bi.bundle_id)
         from . import wda as W
@@ -299,6 +319,7 @@ def run_stages(args):
         info.setdefault("pr_title", f"{picked.get('title')} (on {info.get('branch')})")
     if args.checkout_only:
         print(json.dumps(info, indent=2, default=str)); return 0, None, None, None
+    info["devices"] = decide_devices(args, info, src)
     name = (f"pr-{info['pr'].split('#')[-1]}" if info.get("pr") else (info.get("branch") or "inplace")).replace("/", "-")
     if info.get("cherry_picks") or info.get("submodule_cherry_picks"):
         name += "-picks"
@@ -306,6 +327,7 @@ def run_stages(args):
     if app.key != "trio":
         name = f"{app.key}-{name}"
     run = Run.new(f"{name}-{args.target}", {"target": args.target, "mode": args.mode, "app": app.key, "watch": args.watch,
+                                             "devices": info.get("devices"),
                                              "title": f"{app.name} test: {info.get('pr_title') or info.get('branch') or 'in-place'} ({args.mode})",
                                              "pr_url": pr_url})
     notes = write_pr_notes(run, info)
@@ -360,9 +382,16 @@ def main(argv=None) -> int:
     p.add_argument("--clean", action="store_true"); p.add_argument("--no-fetch", action="store_true")
     p.add_argument("--reinstall", action="store_true", default=True)
     p.add_argument("--onboarding", choices=["preseed", "walk"], default="preseed")
-    p.add_argument("--watch", action="store_true",
-                   help="simulator: also pair a watch simulator, install and launch the app's Watch app and start the "
-                        "watch input agent, for `th --target watch ...` (Trio only)")
+    p.add_argument("--devices", choices=["auto", "phone", "phone+watch"], default="auto",
+                   help="phone+watch also pairs a watch simulator, installs and launches the app's Watch app and starts "
+                        "the watch input agent, for `th --target watch ...` (simulator, Trio). auto (default) has a small "
+                        "model decide from the PR's title, description and changed files (harness/watchscope.py)")
+    p.add_argument("--watch", dest="devices", action="store_const", const="phone+watch", help="= --devices phone+watch")
+    p.add_argument("--watch-model", metavar="MODEL", help='watch model, e.g. "Apple Watch SE 3 (40mm)" '
+                                                          "(default TH_WATCH_SIM_DEVICE; `th watch model` lists them)")
+    p.add_argument("--watch-wrist", choices=["left", "right"])
+    p.add_argument("--watch-crown", choices=["left", "right"], help="the side the Digital Crown is on")
+    p.add_argument("--watch-text-size", metavar="SIZE", help="watch text size (`th watch settings --help`)")
     p.add_argument("--skip-build", action="store_true", help="reuse build/last-build.json")
     p.add_argument("--skip-install", action="store_true")
     p.add_argument("--no-smoke", action="store_true", help="stop after reaching the home screen")
@@ -389,9 +418,10 @@ def main(argv=None) -> int:
     if not args.mode:
         args.mode = "simulator" if args.yes else _ask("Target", default="simulator", choices=["simulator", "rooted-vnc", "iphone-usb"])
     args.target = MODES[args.mode]
-    if args.watch and (args.target != "sim" or app.key != "trio"):
-        raise HarnessError("--watch needs --mode simulator and Trio: the watch is a simulator paired with the iPhone "
-                           "simulator, and the Watch flows are Trio's")
+    if args.devices == "phone+watch" and (args.target != "sim" or app.key != "trio"):
+        raise HarnessError("--devices phone+watch needs --mode simulator and Trio: the watch is a simulator paired with "
+                           "the iPhone simulator, and the Watch flows are Trio's")
+    args.watch = args.devices == "phone+watch"     # auto is settled after the checkout (run_stages)
     if not args.pr and not args.branch and not args.in_place and not args.yes:
         ans = _ask(f"PR URL ({app.name} or submodule), branch name, or blank for the current checkout", default="")
         if ans.startswith("http") or "#" in ans:

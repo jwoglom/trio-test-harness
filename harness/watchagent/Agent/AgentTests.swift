@@ -1,3 +1,4 @@
+import WatchKit
 import XCTest
 
 /// One endless UI test that serves the harness (harness/watch.py) through files in $TH_WATCH_AGENT_DIR:
@@ -100,6 +101,8 @@ private final class Agent {
         case "screen":
             return screen()
         case "launch":
+            // Fails the test, and so ends the agent, when the launch cannot complete; the harness launches with simctl
+            // and then calls activate.
             let id = try string(p, "bundleId")
             let app = XCUIApplication(bundleIdentifier: id)
             app.launch()
@@ -120,6 +123,17 @@ private final class Agent {
             // After an agent restart: the app the harness last launched, without relaunching it.
             bundleId = try string(p, "bundleId")
             return state(XCUIApplication(bundleIdentifier: bundleId))
+        case "device":
+            // What an app reads from WatchKit: Trio picks its layout by screenBounds and its crown icon by wristLocation.
+            let d = WKInterfaceDevice.current()
+            let b = d.screenBounds
+            return [
+                "wrist": d.wristLocation == .left ? "left" : "right",
+                "crown": d.crownOrientation == .left ? "left" : "right",
+                "width": Double(b.width), "height": Double(b.height), "scale": Double(d.screenScale),
+                "model": d.model, "systemVersion": d.systemVersion,
+                "contentSize": d.preferredContentSizeCategory
+            ]
         case "state":
             return state(XCUIApplication(bundleIdentifier: (p["bundleId"] as? String) ?? bundleId))
         case "tap":

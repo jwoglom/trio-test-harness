@@ -114,19 +114,36 @@ def ensure_simulator() -> dict:
     raise HarnessError("simulator creation failed")
 
 
-def ensure_watch_simulator() -> dict:
-    """Find or create the harness's watch simulator; return its simctl record."""
-    name = CONFIG.get("TH_WATCH_SIM_NAME")
+def ensure_watch_simulator(device: str | None = None) -> dict:
+    """Find or create the harness's watch simulator of model `device` (default TH_WATCH_SIM_DEVICE); return its simctl
+    record. Each model is its own simulator: TH_WATCH_SIM_NAME for the default model, "<name> (<model>)" for others."""
+    base = CONFIG.get("TH_WATCH_SIM_NAME")
+    default = CONFIG.get("TH_WATCH_SIM_DEVICE")
+    device = device or default
     rt = pick_runtime(CONFIG.get("TH_WATCH_SIM_RUNTIME"), "watchOS")
+    dt = pick_devicetype(device)
     for d in list_devices():
-        if d["name"] == name and d["runtimeIdentifier"] == rt["identifier"] and d.get("isAvailable", True):
+        if (d["name"] == base or d["name"].startswith(base + " (")) and d["runtimeIdentifier"] == rt["identifier"] \
+                and d.get("deviceTypeIdentifier") == dt["identifier"] and d.get("isAvailable", True):
             return d
-    dt = pick_devicetype(CONFIG.get("TH_WATCH_SIM_DEVICE"))
+    name = base if device == default else f"{base} ({device})"
     udid = xcrun(["simctl", "create", name, dt["identifier"], rt["identifier"]]).stdout.strip()
     for d in list_devices():
         if d["udid"] == udid:
             return d
     raise HarnessError("watch simulator creation failed")
+
+
+def watch_devicetypes() -> list[dict]:
+    """The watch models the watch runtime in use can run (name, identifier), newest first as simctl lists them."""
+    rt = pick_runtime(CONFIG.get("TH_WATCH_SIM_RUNTIME"), "watchOS")
+    ver = _version(rt["version"])
+    return [dt for dt in list_devicetypes() if dt.get("productFamily") == "Apple Watch"
+            and _version(dt.get("minRuntimeVersionString", "0")) <= ver <= _version(dt.get("maxRuntimeVersionString", "65535"))]
+
+
+def _version(v: str) -> tuple[int, ...]:
+    return tuple(int(x) for x in v.split(".") if x.isdigit())
 
 
 def list_pairs() -> dict:
