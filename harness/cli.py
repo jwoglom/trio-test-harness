@@ -374,6 +374,14 @@ def cmd_faketandem(args):
     raise HarnessError(f"unknown faketandem command {args.sub}")
 
 
+def cmd_faceid(args):
+    if _target(args) != "sim":
+        raise HarnessError("faceid is for the simulator (--target sim)")
+    get_driver("sim").face_id(args.action)
+    print(args.action)
+    return 0
+
+
 def _seed_faketandem_pump(state: dict) -> None:
     """The installed app (simulator) with the pump already paired with this faketandem; `th launch` afterwards."""
     from . import faketandem as FT
@@ -1177,6 +1185,10 @@ def build_parser() -> argparse.ArgumentParser:
     fap.add_argument("method", choices=["GET", "POST", "PUT", "PATCH", "DELETE", "get", "post", "put", "patch", "delete"])
     fap.add_argument("path"); fap.add_argument("body", nargs="?")
     ft.set_defaults(fn=cmd_faketandem)
+
+    fi = sp.add_parser("faceid", help="simulator Face ID: enroll a face (trio-test-e2e does at launch), then answer an "
+                                      "app's Face ID prompt (a bolus) with match or nomatch")
+    fi.add_argument("action", choices=["enroll", "unenroll", "match", "nomatch"]); fi.set_defaults(fn=cmd_faceid)
 
     dc = sp.add_parser("docs", help="search / browse the app's docs (triodocs.org; with --app loop, LoopDocs) as text: "
                                     "search, toc, page",

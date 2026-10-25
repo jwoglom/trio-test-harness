@@ -16,6 +16,8 @@ The simulator can show everything a phone would, including the Lock Screen and L
   next glucose update (the Glucose Simulator produces one every few minutes; `sleep` while waiting).
 - Lock Screen: `./trio-test-harness --target sim lock`, then `shot`; `./trio-test-harness --target sim unlock` afterwards.
 - Dynamic Island: `./trio-test-harness --target sim home` (Trio in the background), then `shot`.
+- Face ID: Trio asks for it before a bolus. The simulator has a face enrolled. Once the Face ID prompt shows, answer it
+  with `./trio-test-harness faceid match`, or with `faceid nomatch` to test a refused one.
 Only genuinely hardware-bound behavior (Bluetooth pumps and sensors, real pairing) is out of reach.
 
 Rules:

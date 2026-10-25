@@ -29,3 +29,6 @@ Two things to know:
   gives the app faketandem's address. An app started any other way cannot reach the pump.
 - The app computes IOB with its own insulin model, so it will not equal the pump's figure. Report both, and what you
   compared.
+- faketandem answers at once. To see a progress screen, or a timeout, slow the pump's answers down. For example,
+  `faketandem api POST /api/faults '{"kind": "delay_response", "message": "HistoryLogRequest", "delay_ms": 1500,
+  "every": true}'` slows the history reads. `faketandem api DELETE /api/faults` takes it back.

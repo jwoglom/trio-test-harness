@@ -52,6 +52,9 @@ The phone driver cannot kill or launch by bundle id: use the App Switcher / Spot
   (acc. id `devicePickerItem-simulator`). Settings ▸ Devices ▸ **Insulin Pump** ▸ Add Pump ▸ **Pump Simulator**
   (`devicePickerItem-MockPumpManager`), then Continue/Done through the mock pump setup. Flows: `th flow add-cgm-sim`,
   `th flow add-pump-sim`, `th flow back-home`. The CGM screen shows a "Bluetooth required" view until Bluetooth is authorized.
+- **Face ID** (simulator): a bolus asks for it (`LAContext` `.deviceOwnerAuthentication`). `trio-test-e2e` enrolls a
+  face at launch (`th faceid enroll`). When the prompt shows, `th faceid match` passes it and `th faceid nomatch`
+  fails it. Without an enrolled face the prompt asks for an iPhone passcode, which the simulator never accepts.
 - **Tandem pump on faketandem** (`--pump faketandem`, Trio `feat/tandem-closed-beta`): the picker row is **Tandem**
   (`devicePickerItem-TandemPumpManager`). TandemKit's setup screens are insulin type, sounds, then pairing (Mobi on pad
   → double tap → code prompt), an alert to turn Control-IQ off if the pump runs it, Load Pump History (TandemKit#609),

@@ -23,6 +23,8 @@ Finding your way around Loop:
 - The CGM Simulator added by the smoke stage reads a sine curve around 110 mg/dL, one reading every 5 minutes (`sleep`
   while waiting); its model is under its own settings ▸ Simulator Settings.
 - Lock Screen: `./trio-test-harness --target sim lock`, then `shot`; `./trio-test-harness --target sim unlock` afterwards.
+- Face ID: Loop asks for it before a bolus. The simulator has a face enrolled. Once the Face ID prompt shows, answer it
+  with `./trio-test-harness faceid match`, or with `faceid nomatch` to test a refused one.
 Only genuinely hardware-bound behavior (Bluetooth pumps and sensors, real pairing) is out of reach.
 
 Rules:

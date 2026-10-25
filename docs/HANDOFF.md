@@ -171,10 +171,22 @@ until merged: pass `--faketandem-ref` until then).
 - Verified on Linux, without a simulator: building faketandem from a checkout, starting it for either setup with a
   scenario, `th faketandem status|history|pairing|api|stop --save`, and the seeded `PumpManagerState.plist` (the key
   faketandem holds, its peripheral id) and basal profile.
-- Not verified on a Mac yet: the virtual-pump build of Trio through the harness (the TSan-free scheme copy, the
-  `-virtualpump` DerivedData), `SIMCTL_CHILD_TANDEMKIT_VIRTUAL_PUMP` on every launch path, the preseeded driver
-  authenticating, TandemKit's setup walked in Trio, the CI agent reaching faketandem through the sim daemon, and Loop
-  with `--pump faketandem` at all.
+- **Verified on the macOS workers, 2026-10-25** (Trio `feat/tandem-closed-beta` + jwoglom/TandemKit#609, scenario
+  `recent-doses`, faketandem from source with Go via `actions/setup-go`): the virtual-pump build (the TSan-free scheme
+  copy, `-virtualpump` DerivedData; build to launch in about 7 minutes). `walk` (run 40223372300): the agent added Tandem
+  from Trio's pump picker, went through insulin type and sounds, saw "Found the Tandem Mobi 123" at the double-press
+  step, ran `faketandem pairing PairStep2`, entered 123456 and paired. It then loaded the history on #609's Load Pump
+  History screen. Trio's treatments list carried the pump's four boluses (the stopped one at 1.2 U delivered) and its
+  two temp rates as reconciled basal, and Trio's IOB went from 0 to 2.88 U on its next determination (8.2 U of
+  boluses). The pump showed 3.1 U under its own model. `preseed` (run 40223375850): the seeded driver authenticated
+  with faketandem during the smoke stage, and Trio's pump screen showed the Tandem Mobi with faketandem's battery,
+  cartridge and 0.85 U/hr. The agent reached faketandem through the sim daemon in both runs.
+- A bolus from Trio in that run stopped at "Enter iPhone Passcode": with no enrolled face, Trio's
+  `.deviceOwnerAuthentication` falls back to a passcode the simulator never takes. `trio-test-e2e` now enrolls a face
+  at launch, and `th faceid match` answers the prompt.
+- Not verified yet: `th faceid` on the simulator and a Trio bolus reaching faketandem; `th faketandem seed` by hand;
+  the web UI's pump fields; Loop with `--pump faketandem`. In both runs, `docs search` from the agent's sandbox failed
+  with IncompleteRead on triodocs.org's search index, which has nothing to do with faketandem.
 
 ## Still unverified
 - `th report pr` against a real PR (gh --attach inline uploads; ask before posting).

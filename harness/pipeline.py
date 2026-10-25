@@ -178,6 +178,11 @@ def stage_launch(args, bi, run):
     drv = get_driver(args.target)
     if args.target == "sim":
         drv.boot()
+        # a bolus asks for Face ID, which `th faceid match` then answers; without a face it asks for a passcode
+        try:
+            drv.face_id("enroll")
+        except HarnessError as e:
+            log(f"Face ID not enrolled: {e}")
         if args.onboarding == "preseed":
             F.preseed_simulator(drv, bi.bundle_id)
         if args.pump == "faketandem":
