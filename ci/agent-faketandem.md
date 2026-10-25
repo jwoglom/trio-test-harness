@@ -29,6 +29,10 @@ Two things to know:
   gives the app faketandem's address. An app started any other way cannot reach the pump.
 - The app computes IOB with its own insulin model, so it will not equal the pump's figure. Report both, and what you
   compared.
-- faketandem answers at once. To see a progress screen, or a timeout, slow the pump's answers down. For example,
-  `faketandem api POST /api/faults '{"kind": "delay_response", "message": "HistoryLogRequest", "delay_ms": 1500,
-  "every": true}'` slows the history reads. `faketandem api DELETE /api/faults` takes it back.
+- faketandem answers at once. To see a progress screen, or a timeout, slow the pump's answers down with a
+  `delay_response` fault on the request the screen waits for, and `faketandem api DELETE /api/faults` takes it back.
+  For TandemKit's Load Pump History step: the driver reads the pump's whole log right after pairing, so the step's own
+  reads are few and a delay on `HistoryLogRequest` never fires. Hold back the status read every history pass starts
+  with, after pairing and before tapping Load: `faketandem api POST /api/faults '{"kind": "delay_response", "message":
+  "HistoryLogStatusRequest", "delay_ms": 8000, "every": true}'`. Its bar shows how much of the window the log read at
+  pairing covers, so it can open near 100%.

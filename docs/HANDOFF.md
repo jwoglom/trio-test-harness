@@ -183,12 +183,27 @@ until merged: pass `--faketandem-ref` until then).
   cartridge and 0.85 U/hr. The agent reached faketandem through the sim daemon in both runs.
 - A bolus from Trio in that run stopped at "Enter iPhone Passcode": with no enrolled face, Trio's
   `.deviceOwnerAuthentication` falls back to a passcode the simulator never takes. `trio-test-e2e` now enrolls a face
-  at launch, and `th faceid match` answers the prompt.
-- Not verified yet: `th faceid` on the simulator and a Trio bolus reaching faketandem; `th faketandem seed` by hand;
-  the web UI's pump fields; Loop with `--pump faketandem`. In both runs, `docs search` from the agent's sandbox failed
-  with IncompleteRead on triodocs.org's search index (not faketandem's doing). `harness/triodocs.py` now asks for gzip,
-  completes a cut-short body with Range requests (checked against a local server that cuts responses) and falls back
-  to fetching through the harness daemon; not yet confirmed from the sandbox.
+  at launch, and `th faceid match` answers the prompt. Verified in runs 40227024386 (`preseed`) and 40227028882
+  (`walk`): Trio's 0.5 U bolus asked for Face ID, `faceid match` answered it, the home screen showed "Bolusing 0.2 of
+  0.5 U", faketandem recorded the bolus delivered in full, and Trio finalized it at 0.5 U.
+- What the `walk` run 40227028882 found in TandemKit#609, and what came of it:
+  - The pump's 15-minute suspend in `recent-doses` did not reach Trio: the setup load reported boluses and basal
+    corrections but none of the pump's suspends and resumes from before pairing. TandemKit's
+    `DeliveryTransitionLedger` now reports them from the load's window on (`historySince`, on jwoglom/TandemKit
+    `claude/beautiful-dirac-aoq7i7`).
+  - Delete Pump, pair again and Load: Trio's own 0.5 U bolus came back from the pump's history under another
+    identifier and was stored twice. The new manager has no record of what the deleted one reported, which
+    TandemKit's docs list as a known limitation of loading history the host already counts.
+  - A setup started from Settings ▸ Devices ends on the pump's settings rather than Setup Complete, whichever button
+    the Load Pump History step was given: Trio's pump screen swaps to the settings as soon as the manager is handed
+    over, which TandemKit does before Setup Complete. From the home screen's "Add pump", Setup Complete shows.
+  - The Load step's progress screen was never on screen: the driver had read the whole log right after pairing, and a
+    delay on `HistoryLogRequest` never fired. `ci/agent-faketandem.md` now says to delay `HistoryLogStatusRequest`.
+- Not verified yet: `th faketandem seed` by hand; the web UI's pump fields; Loop with `--pump faketandem`. In the
+  first runs, `docs search` from the agent's sandbox failed with IncompleteRead on triodocs.org's search index (not
+  faketandem's doing). `harness/triodocs.py` now asks for gzip, completes a cut-short body with Range requests
+  (checked against a local server that cuts responses) and falls back to fetching through the harness daemon; not yet
+  confirmed from the sandbox.
 
 ## Still unverified
 - `th report pr` against a real PR (gh --attach inline uploads; ask before posting).
