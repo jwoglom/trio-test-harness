@@ -63,6 +63,10 @@ DEFAULTS = {
     "TH_BUILD_LOG_STDOUT": "",        # 1: print every xcodebuild line too (it always goes to build/xcodebuild-<target>.log)
     "TH_WEBUI_HOST": "127.0.0.1",     # `th webui` bind address; 0.0.0.0 = reachable from other machines (token still required)
     "TH_WEBUI_PORT": "8787",
+    "TH_FAKETANDEM_REPO": "jwoglom/faketandem",   # --pump faketandem: the Tandem pump emulator, built with Go from here
+    "TH_FAKETANDEM_REF": "main",      # its branch, tag or sha (--faketandem-ref)
+    "TH_FAKETANDEM_DIR": "",          # a local faketandem checkout to build instead
+    "TH_FAKETANDEM_BIN": "",          # a faketandem binary to run instead of building one
     "TH_RUNS_DIR": str(REPO_ROOT / "runs"),
     "TH_DERIVED_DATA": str(Path.home() / "Library/Developer/Xcode/DerivedData/trio-test-harness"),
     "TH_BUILD_DIR": str(REPO_ROOT / "build"),

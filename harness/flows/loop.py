@@ -35,6 +35,7 @@ from .trio import step, _visible, _tap_label, _diagnose, _tap_picker_row
 NAME = "Loop"
 CGM_SIMULATOR = "CGM Simulator"
 PUMP_SIMULATOR = "Pump Simulator"
+TANDEM_PUMP = "Tandem"
 ADD_CGM = "Add CGM"
 ADD_PUMP = "Add Pump"
 PROMPTS_AFTER_PRESEED = True       # Loop asks for its permissions after onboarding, which walk_onboarding answers
@@ -120,6 +121,20 @@ def preseed_simulator(drv, bundle_id: str, *, settings: dict | None = None) -> l
     path.write_bytes(plistlib.dumps(values, fmt=plistlib.FMT_BINARY))
     drv.drop_preferences_cache()
     return [path]
+
+
+def preseed_virtual_pump(drv, bundle_id: str, pump_state: dict | None, *, onboarding: bool = True) -> list[Path]:
+    """Loop on faketandem (simulator): with a pre-seeded onboarding, therapy settings at the pump's basal rate and
+    limits, and with `pump_state` (harness/faketandem.py) the Tandem pump already paired: Loop restores its pump manager
+    from Documents/PumpManagerState.plist, as Trio does."""
+    from .. import faketandem
+    written = []
+    if onboarding:
+        written += preseed_simulator(drv, bundle_id, settings=therapy_settings(
+            basal_rate=faketandem.PUMP_BASAL_RATE, max_basal=faketandem.MAX_BASAL, max_bolus=faketandem.MAX_BOLUS))
+    if pump_state:
+        written.append(faketandem.write_pump_manager_state(drv.app_data_container(bundle_id), pump_state))
+    return written
 
 
 def preseed_phone(bundle_id: str, *, onboarding: bool = True) -> bool:

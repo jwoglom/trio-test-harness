@@ -162,6 +162,20 @@ macOS iPhone Mirroring using phone-harness; driver written and window capture ve
   like a dead agent (now its own thread). `home` through the agent verified here too (it was listed as verified on
   2026-10-18 without having run).
 
+## Tandem pump on faketandem (`--pump faketandem`, 2026-10-25)
+The app's TandemKit built on its virtual pump (`TANDEMKIT_VIRTUAL_PUMP`), against faketandem, a Tandem Mobi emulator
+(README "Tandem pump on faketandem"; `harness/faketandem.py`). It has two setups: `preseed` starts the app paired,
+and `walk` leaves the pump for the agent to add, following `ci/agent-faketandem-walk.md`. `--pump-scenario` gives the
+pump hours of use first, through faketandem's scenarios (jwoglom/faketandem branch `claude/beautiful-dirac-aoq7i7`
+until merged: pass `--faketandem-ref` until then).
+- Verified on Linux, without a simulator: building faketandem from a checkout, starting it for either setup with a
+  scenario, `th faketandem status|history|pairing|api|stop --save`, and the seeded `PumpManagerState.plist` (the key
+  faketandem holds, its peripheral id) and basal profile.
+- Not verified on a Mac yet: the virtual-pump build of Trio through the harness (the TSan-free scheme copy, the
+  `-virtualpump` DerivedData), `SIMCTL_CHILD_TANDEMKIT_VIRTUAL_PUMP` on every launch path, the preseeded driver
+  authenticating, TandemKit's setup walked in Trio, the CI agent reaching faketandem through the sim daemon, and Loop
+  with `--pump faketandem` at all.
+
 ## Still unverified
 - `th report pr` against a real PR (gh --attach inline uploads; ask before posting).
 - `th webui` with a real job: only tested with the stages stubbed (auth, validation, stage order, sandbox settings per

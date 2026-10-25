@@ -22,6 +22,7 @@ import traceback
 from pathlib import Path
 
 from .appdebug import REMOTE as DEBUG_CALLS
+from .faketandem import REMOTE as FAKETANDEM_CALLS
 from .config import REPO_ROOT, daemon_socket
 from .driver import Driver, UINode
 from .util import HarnessError, log
@@ -157,6 +158,9 @@ def _serve_connection(conn, drv, target, _shutdown) -> None:
                     elif method in DEBUG_CALLS:      # `th oslog/crashes/files/perf` (harness/appdebug.py), same reason
                         from . import appdebug
                         resp = {"ok": True, "result": _encode(getattr(appdebug, method)(target, *args, **kwargs))}
+                    elif method in FAKETANDEM_CALLS:  # `th faketandem`: faketandem's API is TCP, which the sandbox denies
+                        from . import faketandem
+                        resp = {"ok": True, "result": _encode(getattr(faketandem, method)(target, *args, **kwargs))}
                     elif method == "shutdown":
                         f.write(b'{"ok": true, "result": "bye"}\n'); f.flush()
                         _shutdown()

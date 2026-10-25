@@ -115,7 +115,10 @@ class SimulatorDriver(Driver):
     def launch(self, bundle_id: str, *, terminate_first: bool = True) -> None:
         if terminate_first:
             self._simctl(["terminate", self.udid, bundle_id], check=False, quiet=True)
-        self._simctl(["launch", self.udid, bundle_id])
+        # simctl passes SIMCTL_CHILD_* on to the app without the prefix: a virtual-pump build finds faketandem there
+        from . import faketandem
+        child = {f"SIMCTL_CHILD_{k}": v for k, v in faketandem.launch_env().items()}
+        run(["xcrun", "simctl", "launch", self.udid, bundle_id], env={**self._env, **child})
 
     def terminate(self, bundle_id: str) -> None:
         self._simctl(["terminate", self.udid, bundle_id], check=False)

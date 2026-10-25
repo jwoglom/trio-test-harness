@@ -52,6 +52,11 @@ The phone driver cannot kill or launch by bundle id: use the App Switcher / Spot
   (acc. id `devicePickerItem-simulator`). Settings ▸ Devices ▸ **Insulin Pump** ▸ Add Pump ▸ **Pump Simulator**
   (`devicePickerItem-MockPumpManager`), then Continue/Done through the mock pump setup. Flows: `th flow add-cgm-sim`,
   `th flow add-pump-sim`, `th flow back-home`. The CGM screen shows a "Bluetooth required" view until Bluetooth is authorized.
+- **Tandem pump on faketandem** (`--pump faketandem`, Trio `feat/tandem-closed-beta`): the picker row is **Tandem**
+  (`devicePickerItem-TandemPumpManager`). TandemKit's setup screens are insulin type, sounds, then pairing (Mobi on pad
+  → double tap → code prompt), an alert to turn Control-IQ off if the pump runs it, Load Pump History (TandemKit#609),
+  and setup complete. faketandem's side: `th faketandem status|history|pairing|api` (trio-fake-devices skill). Relaunch
+  only with `th launch`.
 - Glucose Simulator tuning lives in Settings ▸ Devices ▸ CGM (center value, amplitude, noise, scenario) and in UserDefaults
   keys `GlucoseSimulator_CenterValue`, `GlucoseSimulator_Amplitude`, `GlucoseSimulator.simulatedScenario` (sim: `th sim defaults`).
 - Settings root lists Devices, Therapy, Algorithm, Features, Notifications, Services and shows the branch/version at the bottom.
