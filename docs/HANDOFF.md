@@ -186,7 +186,9 @@ until merged: pass `--faketandem-ref` until then).
   at launch, and `th faceid match` answers the prompt.
 - Not verified yet: `th faceid` on the simulator and a Trio bolus reaching faketandem; `th faketandem seed` by hand;
   the web UI's pump fields; Loop with `--pump faketandem`. In both runs, `docs search` from the agent's sandbox failed
-  with IncompleteRead on triodocs.org's search index, which has nothing to do with faketandem.
+  with IncompleteRead on triodocs.org's search index (not faketandem's doing). `harness/triodocs.py` now asks for gzip,
+  completes a cut-short body with Range requests (checked against a local server that cuts responses) and falls back
+  to fetching through the harness daemon; not yet confirmed from the sandbox.
 
 ## Still unverified
 - `th report pr` against a real PR (gh --attach inline uploads; ask before posting).

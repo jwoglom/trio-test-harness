@@ -238,6 +238,9 @@ text: search runs over the site's own search index (every section's title and te
 lists all pages as a tree (from the sitemap), `page` prints a page's article (headings, lists, tables, admonitions,
 links) or one section. Pages are cached for a day in `runs/.tmp/triodocs/`. The web UI/CI agent's sandbox allows
 `triodocs.org` (and nothing else) for it, and the agents are told to look settings up there before navigating.
+Through the sandbox's network proxy the 640 KB search index arrived cut short (IncompleteRead), so pages are fetched
+gzipped, a plain body cut short is completed with Range requests, and failing that a running harness daemon, outside
+the sandbox, fetches it.
 
 `th logs` reads the installed app's log files: Trio's `Documents/logs/log.txt`, TandemKit's
 `Documents/tandem/tandem_log.txt` (info and above; debug goes to OSLog only) and the watch log, plus each one's `*_prev`
