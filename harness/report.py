@@ -341,6 +341,18 @@ def render_markdown(run: Run, *, columns: int = 3, max_shots: int | None = None,
     return "\n".join(lines), files
 
 
+def authored_markdown(run: Run, body: str) -> tuple[str, list[Path]]:
+    """A comment written for the run, and the screenshots its ![...](./screenshots/...) images name, in order."""
+    files: list[Path] = []
+    for rel in re.findall(r"!\[[^\]]*\]\(\./(screenshots/[^)\s]+)\)", body):
+        f = run.path / rel
+        if not f.is_file():
+            raise HarnessError(f"the comment shows {rel}, which {run.path} does not have")
+        if f not in files:
+            files.append(f)
+    return body, files
+
+
 def upload_assets(files: list[Path], token: str, repo: str) -> dict[Path, str]:
     """Upload images as GitHub comment attachments (user-attachments) with a user token.
 
@@ -382,11 +394,16 @@ def _without_images(md: str, artifact_url: str | None) -> str:
 
 
 def post_to_pr(run: Run, pr: str, *, mode: str = "comment", repo: str | None = None,
-               columns: int = 3, max_shots: int | None = None, artifact_url: str | None = None) -> str:
-    """Comment on (or append to the description of) a PR with the run's screenshots attached inline."""
+               columns: int = 3, max_shots: int | None = None, artifact_url: str | None = None,
+               body: str | None = None) -> str:
+    """Comment on (or append to the description of) a PR with the run's screenshots attached inline.
+
+    `body` replaces the generated summary with a comment written for the run.
+    """
     from .build import resolve_pr
     slug, num = resolve_pr(pr) if not repo else (repo, int(pr))
-    md, files = render_markdown(run, columns=columns, max_shots=max_shots, artifact_url=artifact_url)
+    md, files = (authored_markdown(run, body) if body is not None
+                 else render_markdown(run, columns=columns, max_shots=max_shots, artifact_url=artifact_url))
     body = run.path / "pr-comment.md"
     body.write_text(md)
     attach = []

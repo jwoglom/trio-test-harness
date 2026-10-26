@@ -277,6 +277,10 @@ More debugging (`harness/appdebug.py`; simulator and rooted-vnc, through the dae
 `./trio-test-harness report pr <PR> [--artifact-url <link>] [--max-shots N]` posts a comment whose screenshots are uploaded
 *into* the comment with `gh pr comment --attach` (gh ≥ 2.99; up to 50 files, evenly thinned when a run has more). No extra
 repo or hosting. `--mode description` maintains a `<!-- trio-test-harness -->` section in the PR body instead.
+`--body FILE` posts a comment written for the run in place of the generated one; each screenshot it shows as
+`![caption](./screenshots/NNN.png)` is attached the same way. In CI, the e2e workflow's `comment_on_run` (a run id) and
+`comment_body` do this for an earlier run on the PR the run's inputs name, and test nothing:
+`gh workflow run e2e.yml -f submodules=jwoglom/TandemKit#609 -f comment_on_run=<run id> -f comment_body="$(cat comment.md)"`.
 
 ## CI (GitHub Actions)
 `.github/workflows/e2e.yml` runs `trio-test-e2e --mode simulator` on the self-hosted macOS workers

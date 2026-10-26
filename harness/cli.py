@@ -1004,8 +1004,9 @@ def cmd_report(args):
     if args.sub == "html":
         print(render_html(r, Path(args.out) if args.out else None))
     elif args.sub == "pr":
+        body = Path(args.body).read_text() if args.body else None
         print(post_to_pr(r, args.pr, mode=args.mode, columns=args.columns, max_shots=args.max_shots,
-                         artifact_url=args.artifact_url))
+                         artifact_url=args.artifact_url, body=body))
     elif args.sub == "markdown":
         from .report import render_markdown
         md, files = render_markdown(r, columns=args.columns, max_shots=args.max_shots, artifact_url=args.artifact_url)
@@ -1364,6 +1365,8 @@ def build_parser() -> argparse.ArgumentParser:
     rpr = rps.add_parser("pr"); rpr.add_argument("pr"); rpr.add_argument("--run"); rpr.add_argument("--mode", choices=["comment", "description"], default="comment")
     rpr.add_argument("--columns", type=int, default=3); rpr.add_argument("--max-shots", type=int)
     rpr.add_argument("--artifact-url", help="claude.ai artifact link to include in the comment")
+    rpr.add_argument("--body", metavar="FILE", help="post this markdown instead of the generated summary; the run's "
+                     "screenshots it shows as ![caption](./screenshots/NNN.png) are attached")
     rm = rps.add_parser("markdown", help="preview the PR comment body"); rm.add_argument("--run"); rm.add_argument("--columns", type=int, default=3)
     rm.add_argument("--max-shots", type=int); rm.add_argument("--artifact-url")
     rp.set_defaults(fn=cmd_report)

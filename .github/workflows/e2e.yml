@@ -7,8 +7,12 @@
 # pump=faketandem runs the app's TandemKit against faketandem, a Tandem Mobi emulator (harness/faketandem.py):
 #   gh workflow run e2e.yml -R jwoglom/trio-test-harness -f trio=feat/tandem-closed-beta -f pump=faketandem \
 #     -f pump_setup=walk -f pump_scenario=recent-doses
+# comment_on_run posts a comment written after an earlier run on the PR this run is about, with that run's
+# screenshots, and tests nothing (`trio-test-harness report pr --body`):
+#   gh workflow run e2e.yml -R jwoglom/trio-test-harness -f submodules=jwoglom/TandemKit#609 \
+#     -f comment_on_run=40232151326 -f comment_body="$(cat comment.md)"
 name: Trio e2e (simulator)
-run-name: "e2e${{ inputs.app == 'loop' && ' (Loop)' || '' }}: ${{ inputs.trio || (!inputs.submodules && 'dev') || '' }}${{ inputs.trio && inputs.submodules && ' + ' || '' }}${{ inputs.submodules }}${{ inputs.pump == 'faketandem' && format(' (faketandem, {0})', inputs.pump_setup) || '' }}"
+run-name: "${{ inputs.comment_on_run && format('comment from e2e run {0}: ', inputs.comment_on_run) || '' }}e2e${{ inputs.app == 'loop' && ' (Loop)' || '' }}: ${{ inputs.trio || (!inputs.submodules && 'dev') || '' }}${{ inputs.trio && inputs.submodules && ' + ' || '' }}${{ inputs.submodules }}${{ inputs.pump == 'faketandem' && format(' (faketandem, {0})', inputs.pump_setup) || '' }}"
 
 on:
   workflow_dispatch:
@@ -84,6 +88,12 @@ on:
         description: "Post PR comment"
         type: boolean
         default: false
+      comment_on_run:
+        description: "Instead of testing: post comment_body on the PR with this earlier run's screenshots"
+        type: string
+      comment_body:
+        description: "With comment_on_run: the comment (markdown); ![caption](./screenshots/NNN.png) shows a screenshot"
+        type: string
       sim_device:
         description: "Simulator device"
         type: string
@@ -106,6 +116,7 @@ concurrency:
 
 jobs:
   e2e:
+    if: ${{ !inputs.comment_on_run }}
     runs-on: [self-hosted, macOS, worker]
     timeout-minutes: 150
     env:
@@ -388,3 +399,64 @@ jobs:
             echo "::error::The agent step failed before the agent started: the harness could not set up the sandbox or its daemons (see the step's log)."
           fi
           exit 1
+
+  comment:
+    if: ${{ inputs.comment_on_run }}
+    runs-on: [self-hosted, macOS, worker]
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      actions: read
+    env:
+      IN_APP: ${{ inputs.app || 'trio' }}
+      IN_TRIO: ${{ inputs.trio }}
+      IN_SUBMODULES: ${{ inputs.submodules }}
+      IN_CHERRY_PICK: ${{ inputs.cherry_pick }}
+      IN_SUBMODULE_CHERRY_PICK: ${{ inputs.submodule_cherry_pick }}
+      IN_RUN_ID: ${{ inputs.comment_on_run }}
+      IN_BODY: ${{ inputs.comment_body }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate inputs
+        id: v
+        run: |
+          [[ $IN_RUN_ID =~ ^[0-9]+$ ]] || { echo "::error::comment_on_run must be a workflow run id"; exit 1; }
+          [ -n "$IN_BODY" ] || { echo "::error::comment_body is empty"; exit 1; }
+          python3 ci/inputs.py "$RUNNER_TEMP/e2e-args" >> "$GITHUB_OUTPUT"
+
+      - name: GitHub App token (PR owner)
+        id: token
+        if: steps.v.outputs.pr != ''
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ secrets.TRIO_E2E_APP_ID }}
+          private-key: ${{ secrets.TRIO_E2E_APP_KEY }}
+          owner: ${{ steps.v.outputs.pr_owner }}
+
+      - name: Download the run
+        uses: actions/download-artifact@v4
+        with:
+          name: trio-e2e-${{ inputs.comment_on_run }}
+          run-id: ${{ inputs.comment_on_run }}
+          github-token: ${{ github.token }}
+          path: ${{ runner.temp }}/run
+
+      - name: Python environment
+        run: |
+          set -euo pipefail
+          uv venv --quiet .venv
+          uv pip install --quiet --python .venv/bin/python -r requirements.txt
+
+      - name: PR comment
+        env:
+          GH_TOKEN: ${{ steps.token.outputs.token }}
+          PR: ${{ steps.v.outputs.pr }}
+          # As for the e2e job's comment: only PRs in jwoglom's repos get the screenshots inline.
+          TH_UPLOAD_TOKEN: ${{ steps.v.outputs.pr_owner == 'jwoglom' && secrets.TRIO_TEST_HARNESS_USER_PAT || '' }}
+          TH_UPLOAD_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          [ -n "$PR" ] || { echo "::error::trio, submodules or cherry_pick must name the PR to comment on"; exit 1; }
+          printf '%s\n' "$IN_BODY" > "$RUNNER_TEMP/comment.md"
+          ./trio-test-harness report pr "$PR" --run "$RUNNER_TEMP/run" --body "$RUNNER_TEMP/comment.md"
