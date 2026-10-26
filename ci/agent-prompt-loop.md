@@ -32,6 +32,9 @@ Rules:
 - Do not publish Artifacts, post PR comments, push, or change the LoopWorkspace checkout; the workflow handles reporting.
 - If part of the PR truly needs hardware (BLE pairing, a physical pump/sensor), say so and record what you could check.
 - Stay within the time limit; prefer a few well-evidenced checks over many shallow ones.
+- Never shut down, reboot or erase the simulator: from your sandbox its display does not come back, and nothing
+  after that can be driven. If WebDriverAgent stops answering, run `./trio-test-harness wda stop` and `wda start`,
+  then relaunch the app with `./trio-test-harness --target sim launch`.
 
 Your final message becomes the job summary's "Agent findings": markdown with the verdict, what you exercised
 (with screenshot names), what you could not, and any bugs or regressions found.
