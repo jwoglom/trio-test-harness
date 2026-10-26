@@ -194,8 +194,7 @@ until merged: pass `--faketandem-ref` until then).
     `submodule_cherry_pick`): Trio's treatments list PumpSuspend and PumpResume at the pump's times, with no basal
     inside the suspend, alongside the four boluses and the basal corrections.
   - Delete Pump, pair again and Load: Trio's own 0.5 U bolus came back from the pump's history under another
-    identifier and was stored twice. The new manager has no record of what the deleted one reported, which
-    TandemKit's docs list as a known limitation of loading history the host already counts.
+    identifier and was stored twice. Fixed on TandemKit#609 (see below).
   - A setup started from Settings ▸ Devices ends on the pump's settings rather than Setup Complete, whichever button
     the Load Pump History step was given: Trio's pump screen swaps to the settings as soon as the manager is handed
     over, which TandemKit does before Setup Complete. From the home screen's "Add pump", Setup Complete shows.
@@ -206,13 +205,18 @@ until merged: pass `--faketandem-ref` until then).
   (not faketandem's doing). `harness/triodocs.py` now asks for gzip, completes a cut-short body with Range requests
   (checked against a local server that cuts responses) and falls back to fetching through the harness daemon. Verified
   from the sandbox in run 40232151326: `docs search "pump settings"` found Settings ▸ Devices ▸ Insulin Pump.
-- TandemKit#609's delete-and-re-pair fix (jwoglom/TandemKit `047b40f`), run 40263901771: Trio set up the pump and loaded
-  its history, bolused 0.5 U, deleted the pump and set it up again with the load; Trio's stored pump events gained only
-  the one basal cycle it never had. Run 40258291563 before it lost the simulator's display: its agent shut the simulator
-  down to free a hung WebDriverAgent, and from the sandbox the display never came back. `ci/agent-prompt*.md` now forbid
-  that.
+- TandemKit#609's delete-and-re-pair fix. Run 40263901771 tested a first version at `047b40f`, which kept an archive of what
+  the deleted manager reported; it was reverted for identity-keyed reporting (every dose under an id the pump assigns, so a
+  second manager reports the same rows under the same ids). Run 40279063228 tested that at `14ba66c`: Trio set up the pump
+  and loaded history, bolused 0.5 U, suspended and resumed, deleted the pump and set it up again with the load; Trio's 19
+  stored pump events were unchanged although the second setup re-reported them all. It also found Trio's sheet left blank
+  after the first Delete Pump (TandemKit `80c7bee` fixes it) and the deleted pump back after a relaunch (Trio keeps its saved
+  pump manager; TandemKit's `TrioPumpDeletionTests` pins that). Run 40258291563 before them lost the simulator's display:
+  its agent shut the simulator down to free a hung WebDriverAgent, and from the sandbox the display never came back.
+  `ci/agent-prompt*.md` now forbid that.
 - `report pr --body` and the e2e workflow's `comment_on_run`/`comment_body`: verified by run 40267059203, which posted a
-  written comment on jwoglom/TandemKit#609 with 14 of run 40263901771's screenshots uploaded inline.
+  written comment on jwoglom/TandemKit#609 with 14 of run 40263901771's screenshots uploaded inline, and again by run
+  40289321649 for run 40279063228.
 - Not verified yet: `th faketandem seed` by hand; the web UI's pump fields; Loop with `--pump faketandem`.
 
 ## Still unverified
