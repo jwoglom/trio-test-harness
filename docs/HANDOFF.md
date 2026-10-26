@@ -206,6 +206,13 @@ until merged: pass `--faketandem-ref` until then).
   (not faketandem's doing). `harness/triodocs.py` now asks for gzip, completes a cut-short body with Range requests
   (checked against a local server that cuts responses) and falls back to fetching through the harness daemon. Verified
   from the sandbox in run 40232151326: `docs search "pump settings"` found Settings ▸ Devices ▸ Insulin Pump.
+- TandemKit#609's delete-and-re-pair fix (jwoglom/TandemKit `047b40f`), run 40263901771: Trio set up the pump and loaded
+  its history, bolused 0.5 U, deleted the pump and set it up again with the load; Trio's stored pump events gained only
+  the one basal cycle it never had. Run 40258291563 before it lost the simulator's display: its agent shut the simulator
+  down to free a hung WebDriverAgent, and from the sandbox the display never came back. `ci/agent-prompt*.md` now forbid
+  that.
+- `report pr --body` and the e2e workflow's `comment_on_run`/`comment_body`: verified by run 40267059203, which posted a
+  written comment on jwoglom/TandemKit#609 with 14 of run 40263901771's screenshots uploaded inline.
 - Not verified yet: `th faketandem seed` by hand; the web UI's pump fields; Loop with `--pump faketandem`.
 
 ## Still unverified
