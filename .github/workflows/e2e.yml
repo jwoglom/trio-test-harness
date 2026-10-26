@@ -58,7 +58,7 @@ on:
         options: [preseed, walk]
         default: preseed
       pump_scenario:
-        description: "faketandem: pump use before the app connects (history, IOB, last bolus, temp basal): recent-doses, basal-only, or blank for none"
+        description: "faketandem: pump use before the app connects (history, IOB, last bolus, temp basal): recent-doses, scheduled-basal, or blank for none"
         type: string
       faketandem_ref:
         description: "faketandem branch, tag or sha (blank: main)"

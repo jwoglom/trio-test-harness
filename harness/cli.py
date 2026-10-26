@@ -1165,7 +1165,7 @@ def build_parser() -> argparse.ArgumentParser:
                      help="preseed: holds a long-term key, for an app seeded as paired (--seed); walk: waits to be "
                           "paired, at the double-tap step")
     fst.add_argument("--scenario", metavar="NAME|FILE", help="pump use replayed before the app connects: recent-doses, "
-                                                             "basal-only, or a scenario JSON file")
+                                                             "scheduled-basal, or a scenario JSON file")
     fst.add_argument("--ref", help="faketandem branch/tag/sha to build (default $TH_FAKETANDEM_REF, else main)")
     fst.add_argument("--seed", action="store_true", help="with --setup preseed: seed the installed app as paired")
     fsp = fts.add_parser("stop"); fsp.add_argument("--save", action="store_true",

@@ -488,7 +488,7 @@ def main(argv=None) -> int:
                         "leaves it to be added and paired in the app (the agent walks TandemKit's setup)")
     p.add_argument("--pump-scenario", metavar="NAME|FILE",
                    help="with --pump faketandem: hours of pump use replayed before the app connects (faketandem "
-                        "-scenario): a preset such as recent-doses or basal-only, or a scenario JSON file")
+                        "-scenario): a preset such as recent-doses or scheduled-basal, or a scenario JSON file")
     p.add_argument("--faketandem-ref", metavar="REF",
                    help="faketandem branch, tag or sha to build (default $TH_FAKETANDEM_REF, else main)")
     p.add_argument("--skip-build", action="store_true", help="reuse build/last-build.json")
