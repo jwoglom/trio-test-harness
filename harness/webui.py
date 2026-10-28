@@ -313,6 +313,15 @@ class Manager:
         xcode = text("xcode")
         if xcode and xcode not in _xcodes():
             raise ValueError(f"xcode: {xcode} is not installed")
+        pump, pump_setup = text("pump") or "simulator", text("pump_setup") or "preseed"
+        if pump not in ("simulator", "faketandem") or pump_setup not in ("preseed", "walk"):
+            raise ValueError("pump: simulator or faketandem; pump_setup: preseed or walk")
+        if pump == "faketandem" and (target != "simulator" or conf != "Debug"):
+            raise ValueError("pump: faketandem runs on the simulator, in a Debug build")
+        pump_scenario, faketandem_ref = text("pump_scenario", 200), text("faketandem_ref", 100)
+        for k, v in (("pump_scenario", pump_scenario), ("faketandem_ref", faketandem_ref)):
+            if v and not re.fullmatch(r"[\w./-]+", v):
+                raise ValueError(f"{k}: letters, digits and . / - _ only")
         return {"app": app, "target": target, "trio": text("trio"), "submodules": text("submodules", 1000),
                 "cherry_pick": text("cherry_pick", 1000), "submodule_cherry_pick": text("submodule_cherry_pick", 1000),
                 "configuration": conf, "skip_onboarding": bool(f.get("skip_onboarding", True)),
@@ -321,7 +330,8 @@ class Manager:
                 "agent_instructions": text("agent_instructions", 4000), "agent_minutes": minutes,
                 "post_comment": bool(f.get("post_comment")), "xcode": xcode, "agent": bool(f.get("agent", True)),
                 "sim_device": text("sim_device", 100), "sim_runtime": text("sim_runtime", 100),
-                "devices": devices, "watch_model": text("watch_model", 100)}
+                "devices": devices, "watch_model": text("watch_model", 100),
+                "pump": pump, "pump_setup": pump_setup, "pump_scenario": pump_scenario, "faketandem_ref": faketandem_ref}
 
     # --- running ---
 
@@ -356,10 +366,13 @@ class Manager:
 
 
 def _sims(inp: dict) -> list[str]:
-    """The fake devices a job sets up (jobs from before the split have one "smoke" flag)."""
+    """The fake devices a job sets up (jobs from before the split have one "smoke" flag). The faketandem pump is
+    seeded or walked, not set up by the smoke stage."""
     old = inp.get("smoke", True)
     cgm = "CGM Simulator" if inp.get("app") == "loop" else "Glucose Simulator"
-    return [n for n, k in ((cgm, "cgm_sim"), ("Pump Simulator", "pump_sim")) if inp.get(k, old)]
+    faketandem = inp.get("pump") == "faketandem"
+    return [n for n, k in ((cgm, "cgm_sim"), ("Pump Simulator", "pump_sim"))
+            if inp.get(k, old) and not (faketandem and k == "pump_sim")]
 
 
 def run_job(job: Job) -> None:
@@ -383,6 +396,10 @@ def run_job(job: Job) -> None:
     if inp["target"] == "simulator":
         cmd += ["--devices", inp.get("devices") or "phone"]
         cmd += ["--watch-model", inp["watch_model"]] if inp.get("watch_model") else []
+    if inp.get("pump") == "faketandem":
+        cmd += ["--pump", "faketandem", "--pump-setup", inp.get("pump_setup") or "preseed"]
+        cmd += ["--pump-scenario", inp["pump_scenario"]] if inp.get("pump_scenario") else []
+        cmd += ["--faketandem-ref", inp["faketandem_ref"]] if inp.get("faketandem_ref") else []
     rc, out = job.sh(cmd, env)
     # The pipeline prints its run directory at the end ("run: <dir>"); runs/.current may belong to another session.
     m = re.findall(r"^run:\s+(/\S.*)$", out, re.M)
@@ -405,6 +422,11 @@ def run_job(job: Job) -> None:
         if inp.get("app") == "loop":
             prompt_file = prompt_file.replace(".md", "-loop.md")
         smoke_note = f", with the {' and '.join(sims)} configured" if sims else ""
+        if inp.get("pump") == "faketandem":
+            from . import faketandem
+            smoke_note += (", and a Tandem pump on faketandem " + ("not set up yet: you walk its setup"
+                           if inp.get("pump_setup") == "walk" else "already paired") + " (see below)")
+            extra += faketandem.agent_notes(rd)
         # whether trio-test-e2e included the watch (asked for, or decided by --devices auto)
         try:
             watch = bool(json.loads((rd / "run.json").read_text()).get("watch"))
@@ -462,6 +484,10 @@ def run_job(job: Job) -> None:
         # the later stages still run (continue-on-error, as in CI), and the job then reads failed
         job.stage("agent", "passed" if arc == 0 else "failed")
         agent_failed = arc != 0
+
+    if inp.get("pump") == "faketandem":
+        # the pump's side of the run (state, history, request log, log) into the run, as in CI
+        job.sh(["./trio-test-harness", "faketandem", "stop", *(["--save", "--run", str(rd)] if rd else [])], env)
 
     # --- highlights: a separate pass with no memory of the session picks the relevant screenshots ---
     # Without an agent nothing was tested beyond launch/setup, so there is nothing to pick (the comment has no shots).

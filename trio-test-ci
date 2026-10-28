@@ -6,6 +6,8 @@
     ./trio-test-ci 1234 --model opus
     ./trio-test-ci feat/tandem -s TandemKit@my-branch --instructions "check the bolus sheet"
     ./trio-test-ci upstream:feat/tandem-closed-beta -c nightscout/Trio#1580   # a dev PR on the tandem branch
+    ./trio-test-ci feat/tandem-closed-beta -s jwoglom/TandemKit#609 --pump faketandem --pump-setup walk \
+        --pump-scenario recent-doses          # TandemKit's setup walked against an emulated Mobi with 6 h of history
     ./trio-test-ci --attach 35955500012          # follow a run again after Ctrl-C
 
 Prints the run URL, then follows it with `gh run watch` (live step progress) and prints the job's
@@ -55,6 +57,14 @@ def parse_args(argv=None) -> argparse.Namespace:
     p.add_argument("--configuration", choices=["Debug", "Release"])
     p.add_argument("--walk-onboarding", action="store_true", help="tap through onboarding instead of skipping it")
     p.add_argument("--no-smoke", action="store_true", help="do not configure the simulated CGM + Pump Simulator")
+    p.add_argument("--pump", choices=["simulator", "faketandem"],
+                   help="simulator (default): the Pump Simulator; faketandem: a Tandem Mobi emulator, with TandemKit built "
+                        "on its virtual pump")
+    p.add_argument("--pump-setup", choices=["preseed", "walk"],
+                   help="faketandem: preseed (default; the app starts paired) or walk (the agent pairs it in the app)")
+    p.add_argument("--pump-scenario", metavar="NAME",
+                   help="faketandem: pump use before the app connects: recent-doses, basal-only (default none)")
+    p.add_argument("--faketandem-ref", metavar="REF", help="faketandem branch, tag or sha (default main)")
     p.add_argument("--devices", choices=["phone", "phone+watch", "auto"],
                    help="phone (default), phone+watch (the app's Watch app on a paired watch simulator), or auto (a small "
                         "model decides from the app's and submodules' PRs)")
@@ -93,6 +103,14 @@ def workflow_fields(a: argparse.Namespace) -> dict[str, str]:
         f["skip_onboarding"] = "false"
     if a.no_smoke:
         f["smoke"] = "false"
+    if a.pump:
+        f["pump"] = a.pump
+    if a.pump_setup:
+        f["pump_setup"] = a.pump_setup
+    if a.pump_scenario:
+        f["pump_scenario"] = a.pump_scenario
+    if a.faketandem_ref:
+        f["faketandem_ref"] = a.faketandem_ref
     if a.devices:
         f["devices"] = a.devices
     if a.watch_model:

@@ -115,7 +115,10 @@ class SimulatorDriver(Driver):
     def launch(self, bundle_id: str, *, terminate_first: bool = True) -> None:
         if terminate_first:
             self._simctl(["terminate", self.udid, bundle_id], check=False, quiet=True)
-        self._simctl(["launch", self.udid, bundle_id])
+        # simctl passes SIMCTL_CHILD_* on to the app without the prefix: a virtual-pump build finds faketandem there
+        from . import faketandem
+        child = {f"SIMCTL_CHILD_{k}": v for k, v in faketandem.launch_env().items()}
+        run(["xcrun", "simctl", "launch", self.udid, bundle_id], env={**self._env, **child})
 
     def terminate(self, bundle_id: str) -> None:
         self._simctl(["terminate", self.udid, bundle_id], check=False)
@@ -152,6 +155,22 @@ class SimulatorDriver(Driver):
         if not killed:
             log(f"found no cfprefsd under launchd_sim for {self.udid}: preferences written as files may not be read")
         return killed
+
+    # The simulator's BiometricKit answers these notifications (Features ▸ Face ID in Simulator.app).
+    FACE_ID = {"enroll": ("com.apple.BiometricKit.enrollmentChanged", "1"),
+               "unenroll": ("com.apple.BiometricKit.enrollmentChanged", "0"),
+               "match": ("com.apple.BiometricKit_Sim.pearl.match", None),
+               "nomatch": ("com.apple.BiometricKit_Sim.pearl.nomatch", None)}
+
+    def face_id(self, action: str) -> None:
+        """Enroll a face, or answer a Face ID prompt with a matching or a non-matching one. Without an enrolled face,
+        an app's deviceOwnerAuthentication (Trio's and Loop's bolus) asks for a passcode the simulator never takes."""
+        if action not in self.FACE_ID:
+            raise HarnessError(f"face_id: {action!r} ({' | '.join(self.FACE_ID)})")
+        name, state = self.FACE_ID[action]
+        if state is not None:
+            self._simctl(["spawn", self.udid, "notifyutil", "-s", name, state], quiet=True)
+        self._simctl(["spawn", self.udid, "notifyutil", "-p", name], quiet=True)
 
     def defaults_write(self, bundle_id: str, key: str, value: str, vtype: str = "-string") -> None:
         self._simctl(["spawn", self.udid, "defaults", "write", bundle_id, key, vtype, value])

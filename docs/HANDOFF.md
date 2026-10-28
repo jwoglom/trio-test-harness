@@ -162,6 +162,63 @@ macOS iPhone Mirroring using phone-harness; driver written and window capture ve
   like a dead agent (now its own thread). `home` through the agent verified here too (it was listed as verified on
   2026-10-18 without having run).
 
+## Tandem pump on faketandem (`--pump faketandem`, 2026-10-25)
+The app's TandemKit built on its virtual pump (`TANDEMKIT_VIRTUAL_PUMP`), against faketandem, a Tandem Mobi emulator
+(README "Tandem pump on faketandem"; `harness/faketandem.py`). It has two setups: `preseed` starts the app paired,
+and `walk` leaves the pump for the agent to add, following `ci/agent-faketandem-walk.md`. `--pump-scenario` gives the
+pump hours of use first, through faketandem's scenarios (jwoglom/faketandem branch `claude/beautiful-dirac-aoq7i7`
+until merged: pass `--faketandem-ref` until then).
+- Verified on Linux, without a simulator: building faketandem from a checkout, starting it for either setup with a
+  scenario, `th faketandem status|history|pairing|api|stop --save`, and the seeded `PumpManagerState.plist` (the key
+  faketandem holds, its peripheral id) and basal profile.
+- **Verified on the macOS workers, 2026-10-25** (Trio `feat/tandem-closed-beta` + jwoglom/TandemKit#609, scenario
+  `recent-doses`, faketandem from source with Go via `actions/setup-go`): the virtual-pump build (the TSan-free scheme
+  copy, `-virtualpump` DerivedData; build to launch in about 7 minutes). `walk` (run 40223372300): the agent added Tandem
+  from Trio's pump picker, went through insulin type and sounds, saw "Found the Tandem Mobi 123" at the double-press
+  step, ran `faketandem pairing PairStep2`, entered 123456 and paired. It then loaded the history on #609's Load Pump
+  History screen. Trio's treatments list carried the pump's four boluses (the stopped one at 1.2 U delivered) and its
+  two temp rates as reconciled basal, and Trio's IOB went from 0 to 2.88 U on its next determination (8.2 U of
+  boluses). The pump showed 3.1 U under its own model. `preseed` (run 40223375850): the seeded driver authenticated
+  with faketandem during the smoke stage, and Trio's pump screen showed the Tandem Mobi with faketandem's battery,
+  cartridge and 0.85 U/hr. The agent reached faketandem through the sim daemon in both runs.
+- A bolus from Trio in that run stopped at "Enter iPhone Passcode": with no enrolled face, Trio's
+  `.deviceOwnerAuthentication` falls back to a passcode the simulator never takes. `trio-test-e2e` now enrolls a face
+  at launch, and `th faceid match` answers the prompt. Verified in runs 40227024386 (`preseed`) and 40227028882
+  (`walk`): Trio's 0.5 U bolus asked for Face ID, `faceid match` answered it, the home screen showed "Bolusing 0.2 of
+  0.5 U", faketandem recorded the bolus delivered in full, and Trio finalized it at 0.5 U.
+- What the `walk` run 40227028882 found in TandemKit#609, and what came of it:
+  - The pump's 15-minute suspend in `recent-doses` did not reach Trio: the setup load reported boluses and basal
+    corrections but none of the pump's suspends and resumes from before pairing. TandemKit's
+    `DeliveryTransitionLedger` now reports them from the load's window on (`historySince`, on jwoglom/TandemKit
+    `claude/beautiful-dirac-aoq7i7`). Verified in run 40232151326 (#609 with that commit cherry-picked through
+    `submodule_cherry_pick`): Trio's treatments list PumpSuspend and PumpResume at the pump's times, with no basal
+    inside the suspend, alongside the four boluses and the basal corrections.
+  - Delete Pump, pair again and Load: Trio's own 0.5 U bolus came back from the pump's history under another
+    identifier and was stored twice. Fixed on TandemKit#609 (see below).
+  - A setup started from Settings ▸ Devices ends on the pump's settings rather than Setup Complete, whichever button
+    the Load Pump History step was given: Trio's pump screen swaps to the settings as soon as the manager is handed
+    over, which TandemKit does before Setup Complete. From the home screen's "Add pump", Setup Complete shows.
+  - The Load step's progress screen was never on screen: the driver had read the whole log right after pairing, and a
+    delay on `HistoryLogRequest` never fired. `ci/agent-faketandem.md` now says to delay `HistoryLogStatusRequest`;
+    with 8 s on it, run 40232151326 screenshotted the progress screen at 99% before Setup Complete.
+- In the first runs, `docs search` from the agent's sandbox failed with IncompleteRead on triodocs.org's search index
+  (not faketandem's doing). `harness/triodocs.py` now asks for gzip, completes a cut-short body with Range requests
+  (checked against a local server that cuts responses) and falls back to fetching through the harness daemon. Verified
+  from the sandbox in run 40232151326: `docs search "pump settings"` found Settings ▸ Devices ▸ Insulin Pump.
+- TandemKit#609's delete-and-re-pair fix. Run 40263901771 tested a first version at `047b40f`, which kept an archive of what
+  the deleted manager reported; it was reverted for identity-keyed reporting (every dose under an id the pump assigns, so a
+  second manager reports the same rows under the same ids). Run 40279063228 tested that at `14ba66c`: Trio set up the pump
+  and loaded history, bolused 0.5 U, suspended and resumed, deleted the pump and set it up again with the load; Trio's 19
+  stored pump events were unchanged although the second setup re-reported them all. It also found Trio's sheet left blank
+  after the first Delete Pump (TandemKit `80c7bee` fixes it) and the deleted pump back after a relaunch (Trio keeps its saved
+  pump manager; TandemKit's `TrioPumpDeletionTests` pins that). Run 40258291563 before them lost the simulator's display:
+  its agent shut the simulator down to free a hung WebDriverAgent, and from the sandbox the display never came back.
+  `ci/agent-prompt*.md` now forbid that.
+- `report pr --body` and the e2e workflow's `comment_on_run`/`comment_body`: verified by run 40267059203, which posted a
+  written comment on jwoglom/TandemKit#609 with 14 of run 40263901771's screenshots uploaded inline, and again by run
+  40289321649 for run 40279063228.
+- Not verified yet: `th faketandem seed` by hand; the web UI's pump fields; Loop with `--pump faketandem`.
+
 ## Still unverified
 - `th report pr` against a real PR (gh --attach inline uploads; ask before posting).
 - `th webui` with a real job: only tested with the stages stubbed (auth, validation, stage order, sandbox settings per

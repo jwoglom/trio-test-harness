@@ -14,7 +14,9 @@ https://loopkit.github.io/loopdocs/operation/features/).
 """
 from __future__ import annotations
 
+import gzip
 import html
+import http.client
 import json
 import re
 import time
@@ -60,18 +62,77 @@ def _get(path: str, *, ttl: int = TTL) -> str:
     if f.exists() and time.time() - f.stat().st_mtime < ttl:
         return f.read_text()
     try:
-        req = urllib.request.Request(url, headers={"User-Agent": "trio-test-harness docs"})
-        with urllib.request.urlopen(req, timeout=30) as r:
-            text = r.read().decode("utf-8", "replace")
-    except OSError as e:
-        if f.exists():
-            return f.read_text()
-        code = getattr(e, "code", None)
-        raise HarnessError(f"{url}: " + (f"HTTP {code}" if code else str(e))
-                           + (" (no such page; see `th docs toc`)" if code == 404 else "")) from None
+        text = fetch(url)
+    except (OSError, http.client.HTTPException) as e:
+        text = _fetch_through_daemon(url)
+        if text is None:
+            if f.exists():
+                return f.read_text()
+            code = getattr(e, "code", None)
+            raise HarnessError(f"{url}: " + (f"HTTP {code}" if code else f"{type(e).__name__}: {e}")
+                               + (" (no such page; see `th docs toc`)" if code == 404 else "")) from None
     cache.mkdir(parents=True, exist_ok=True)
     f.write_text(text)
     return text
+
+
+REMOTE = {"docs_fetch"}
+
+
+def fetch(url: str, attempts: int = 64) -> str:
+    """The page at url. Through the agent sandbox's network proxy, triodocs.org's 640 KB search index arrived cut short
+    (IncompleteRead), so it is asked for gzipped first, and a plain body cut short is completed with Range requests
+    (a range of a gzipped body need not line up with the first one's bytes)."""
+    try:
+        with _open(url, {"Accept-Encoding": "gzip"}) as r:
+            body = r.read()
+            if r.headers.get("Content-Encoding") == "gzip":
+                body = gzip.decompress(body)
+        return body.decode("utf-8", "replace")
+    except http.client.IncompleteRead:
+        pass
+    body = b""
+    for _ in range(attempts):
+        try:
+            with _open(url, {"Range": f"bytes={len(body)}-"} if body else {}) as r:
+                if body and r.status != 206:
+                    body = b""                         # the range was not honoured: this is the whole body again
+                body += r.read()
+            return body.decode("utf-8", "replace")
+        except http.client.IncompleteRead as e:
+            if not e.partial:
+                break                                  # no progress: another try would fare no better
+            body += e.partial
+    raise http.client.IncompleteRead(body)
+
+
+def _open(url: str, headers: dict):
+    req = urllib.request.Request(url, headers={"User-Agent": "trio-test-harness docs", **headers})
+    return urllib.request.urlopen(req, timeout=30)
+
+
+def docs_fetch(target: str, url: str) -> str:
+    """fetch() in the harness daemon (REMOTE), which runs outside the agent's sandbox."""
+    if urlparse(url).netloc not in {urlparse(a.docs_url).netloc for a in _apps()}:
+        raise HarnessError(f"{url}: not a docs site")
+    return fetch(url)
+
+
+def _apps():
+    from . import apps
+    return apps.APPS.values()
+
+
+def _fetch_through_daemon(url: str) -> str | None:
+    """The page fetched by a running harness daemon, None when none runs or it cannot either."""
+    from . import daemon as Dm
+    for target in ("sim", "rooted-vnc", "watch"):
+        if Dm.is_running(target):
+            try:
+                return Dm.RemoteDriver(target, timeout=120)._call("docs_fetch", url)
+            except HarnessError:
+                return None
+    return None
 
 
 def _strip(s: str) -> str:

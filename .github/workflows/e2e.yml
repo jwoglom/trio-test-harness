@@ -4,8 +4,15 @@
 # Manual only:
 #   gh workflow run e2e.yml -R jwoglom/trio-test-harness -f submodules=jwoglom/TandemKit#395 -f post_comment=true
 #   gh workflow run e2e.yml -R jwoglom/trio-test-harness -f app=loop -f submodules=jwoglom/TandemKit#395
+# pump=faketandem runs the app's TandemKit against faketandem, a Tandem Mobi emulator (harness/faketandem.py):
+#   gh workflow run e2e.yml -R jwoglom/trio-test-harness -f trio=feat/tandem-closed-beta -f pump=faketandem \
+#     -f pump_setup=walk -f pump_scenario=recent-doses
+# comment_on_run tests nothing: it posts comment_body, with an earlier run's screenshots, to the PR named in trio or
+# submodules (`trio-test-harness report pr --body`):
+#   gh workflow run e2e.yml -R jwoglom/trio-test-harness -f submodules=jwoglom/TandemKit#609 \
+#     -f comment_on_run=40232151326 -f comment_body="$(cat comment.md)"
 name: Trio e2e (simulator)
-run-name: "e2e${{ inputs.app == 'loop' && ' (Loop)' || '' }}: ${{ inputs.trio || (!inputs.submodules && 'dev') || '' }}${{ inputs.trio && inputs.submodules && ' + ' || '' }}${{ inputs.submodules }}"
+run-name: "${{ inputs.comment_on_run && format('comment from e2e run {0}: ', inputs.comment_on_run) || '' }}e2e${{ inputs.app == 'loop' && ' (Loop)' || '' }}: ${{ inputs.trio || (!inputs.submodules && 'dev') || '' }}${{ inputs.trio && inputs.submodules && ' + ' || '' }}${{ inputs.submodules }}${{ inputs.pump == 'faketandem' && format(' (faketandem, {0})', inputs.pump_setup) || '' }}"
 
 on:
   workflow_dispatch:
@@ -37,9 +44,25 @@ on:
         type: boolean
         default: true
       smoke:
-        description: "Configure the simulated CGM + Pump Simulator"
+        description: "After launch, add the fake CGM and the Pump Simulator (only the fake CGM when pump is faketandem). Off: stop at the home screen"
         type: boolean
         default: true
+      pump:
+        description: "Pump to test with: simulator (the app's built-in Pump Simulator) or faketandem (an emulated Tandem Mobi; Debug builds only)"
+        type: choice
+        options: [simulator, faketandem]
+        default: simulator
+      pump_setup:
+        description: "faketandem only: preseed (the app starts with the pump already paired) or walk (the agent pairs it in the app)"
+        type: choice
+        options: [preseed, walk]
+        default: preseed
+      pump_scenario:
+        description: "faketandem only: what the pump did in the hours before the app connects. recent-doses (boluses, temp basals, a suspend), scheduled-basal (basal only), or blank (no history)"
+        type: string
+      faketandem_ref:
+        description: "faketandem branch, tag or commit to build (blank: main)"
+        type: string
       devices:
         description: "Devices: phone (the iPhone app only), phone+watch (also the app's Watch app on a paired watch simulator), or auto (a small model decides from the app's and submodules' PRs)"
         type: choice
@@ -65,6 +88,12 @@ on:
         description: "Post PR comment"
         type: boolean
         default: false
+      comment_on_run:
+        description: "Run ID of an earlier run. Tests nothing: posts comment_body, with that run's screenshots, to the PR named in trio or submodules"
+        type: string
+      comment_body:
+        description: "Markdown comment for comment_on_run to post. ![caption](./screenshots/NNN.png) embeds one of that run's screenshots"
+        type: string
       sim_device:
         description: "Simulator device"
         type: string
@@ -82,11 +111,12 @@ permissions:
   contents: read
 
 concurrency:
-  group: e2e-${{ inputs.app }}-${{ inputs.trio }}-${{ inputs.submodules }}
+  group: e2e-${{ inputs.app }}-${{ inputs.trio }}-${{ inputs.submodules }}-${{ inputs.pump }}-${{ inputs.pump_setup }}
   cancel-in-progress: false
 
 jobs:
   e2e:
+    if: ${{ !inputs.comment_on_run }}
     runs-on: [self-hosted, macOS, worker]
     timeout-minutes: 150
     env:
@@ -102,6 +132,10 @@ jobs:
       IN_SKIP_ONBOARDING: ${{ inputs.skip_onboarding }}
       IN_SMOKE: ${{ inputs.smoke }}
       IN_DEVICES: ${{ inputs.devices || 'phone' }}
+      IN_PUMP: ${{ inputs.pump || 'simulator' }}
+      IN_PUMP_SETUP: ${{ inputs.pump_setup || 'preseed' }}
+      IN_PUMP_SCENARIO: ${{ inputs.pump_scenario }}
+      IN_FAKETANDEM_REF: ${{ inputs.faketandem_ref }}
       IN_WATCH_MODEL: ${{ inputs.watch_model || 'default' }}
       IN_AGENT_INSTRUCTIONS: ${{ inputs.agent_instructions }}
       TH_XCODE_APP: /Applications/Xcode_${{ inputs.xcode }}.app
@@ -140,6 +174,14 @@ jobs:
           uv venv --quiet .venv
           uv pip install --quiet --python .venv/bin/python -r requirements.txt
 
+      # faketandem is built from source (TH_FAKETANDEM_REF) with Go.
+      - name: Set up Go
+        if: inputs.pump == 'faketandem'
+        uses: actions/setup-go@v5
+        with:
+          go-version: stable
+          cache: false
+
       - name: Build, install, launch, smoke (trio-test-e2e)
         id: e2e
         env:
@@ -160,6 +202,11 @@ jobs:
           if [ "$IN_SMOKE" = true ]; then args+=(--hide-setup-screenshots); fi
           args+=(--devices "$IN_DEVICES")
           if [ "$IN_WATCH_MODEL" != default ]; then args+=(--watch-model "$IN_WATCH_MODEL"); fi
+          if [ "$IN_PUMP" = faketandem ]; then
+            args+=(--pump faketandem --pump-setup "$IN_PUMP_SETUP")
+            [ -z "$IN_PUMP_SCENARIO" ] || args+=(--pump-scenario "$IN_PUMP_SCENARIO")
+            [ -z "$IN_FAKETANDEM_REF" ] || args+=(--faketandem-ref "$IN_FAKETANDEM_REF")
+          fi
           # The runner's bash has -e; keep going so the run dir is recorded even when the run fails.
           rc=0
           ./trio-test-e2e "${args[@]}" || rc=$?
@@ -181,8 +228,14 @@ jobs:
           set -euo pipefail
           if [ "$IN_APP" = loop ]; then cgm="CGM Simulator" prompt_file=ci/agent-prompt-loop.md
           else cgm="Glucose Simulator" prompt_file=ci/agent-prompt.md; fi
-          smoke_note=$([ "$IN_SMOKE" = true ] && echo ", with the $cgm and Pump Simulator configured" || true)
+          pump="Pump Simulator"
+          if [ "$IN_PUMP" = faketandem ]; then
+            pump="Tandem pump on faketandem ($([ "$IN_PUMP_SETUP" = walk ] && echo "not set up yet: you walk its setup" || echo "already paired"); see below)"
+          fi
+          smoke_note=$([ "$IN_SMOKE" = true ] && echo ", with the $cgm and the $pump" || true)
           extra=$([ -n "$IN_AGENT_INSTRUCTIONS" ] && printf '\nFocus from the person who started this run:\n%s\n' "$IN_AGENT_INSTRUCTIONS" || true)
+          # the faketandem pump: what it is, its commands and how this run set it up (ci/agent-faketandem*.md)
+          extra="$extra$(RUN_DIR="$RUN_DIR" .venv/bin/python -c 'import os; from harness import faketandem; print(faketandem.agent_notes(os.environ["RUN_DIR"]))')"
           # whether trio-test-e2e included the watch (asked for, or decided by --devices auto)
           watch=$(RUN_DIR="$RUN_DIR" .venv/bin/python -c 'import json, os, pathlib; print(str(json.loads((pathlib.Path(os.environ["RUN_DIR"]) / "run.json").read_text()).get("watch", False)).lower())')
           if [ "$watch" = true ]; then extra="$extra"$'\n'"$(cat ci/agent-watch.md)"; fi
@@ -215,6 +268,15 @@ jobs:
           # crash reports from the agent's session into the run (trio-test-e2e saved those before it)
           ./trio-test-harness --target sim crashes --save --run "$RUN_DIR" || true
           ./trio-test-harness report html --run "$RUN_DIR" >/dev/null
+
+      # The pump's side of the run (its state, history log, request log and log) goes into the run directory.
+      - name: Stop faketandem
+        if: always() && inputs.pump == 'faketandem'
+        env:
+          RUN_DIR: ${{ steps.e2e.outputs.run_dir }}
+        run: |
+          if [ -n "$RUN_DIR" ]; then ./trio-test-harness faketandem stop --save --run "$RUN_DIR"
+          else ./trio-test-harness faketandem stop; fi
 
       # A separate Claude pass, with no memory of the test session, reads the whole run (PR, steps, notes, the
       # tester's findings), looks at the screenshots and picks only the relevant ones; report.html and the PR
@@ -337,3 +399,64 @@ jobs:
             echo "::error::The agent step failed before the agent started: the harness could not set up the sandbox or its daemons (see the step's log)."
           fi
           exit 1
+
+  comment:
+    if: ${{ inputs.comment_on_run }}
+    runs-on: [self-hosted, macOS, worker]
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      actions: read
+    env:
+      IN_APP: ${{ inputs.app || 'trio' }}
+      IN_TRIO: ${{ inputs.trio }}
+      IN_SUBMODULES: ${{ inputs.submodules }}
+      IN_CHERRY_PICK: ${{ inputs.cherry_pick }}
+      IN_SUBMODULE_CHERRY_PICK: ${{ inputs.submodule_cherry_pick }}
+      IN_RUN_ID: ${{ inputs.comment_on_run }}
+      IN_BODY: ${{ inputs.comment_body }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate inputs
+        id: v
+        run: |
+          [[ $IN_RUN_ID =~ ^[0-9]+$ ]] || { echo "::error::comment_on_run must be a workflow run id"; exit 1; }
+          [ -n "$IN_BODY" ] || { echo "::error::comment_body is empty"; exit 1; }
+          python3 ci/inputs.py "$RUNNER_TEMP/e2e-args" >> "$GITHUB_OUTPUT"
+
+      - name: GitHub App token (PR owner)
+        id: token
+        if: steps.v.outputs.pr != ''
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ secrets.TRIO_E2E_APP_ID }}
+          private-key: ${{ secrets.TRIO_E2E_APP_KEY }}
+          owner: ${{ steps.v.outputs.pr_owner }}
+
+      - name: Download the run
+        uses: actions/download-artifact@v4
+        with:
+          name: trio-e2e-${{ inputs.comment_on_run }}
+          run-id: ${{ inputs.comment_on_run }}
+          github-token: ${{ github.token }}
+          path: ${{ runner.temp }}/run
+
+      - name: Python environment
+        run: |
+          set -euo pipefail
+          uv venv --quiet .venv
+          uv pip install --quiet --python .venv/bin/python -r requirements.txt
+
+      - name: PR comment
+        env:
+          GH_TOKEN: ${{ steps.token.outputs.token }}
+          PR: ${{ steps.v.outputs.pr }}
+          # As for the e2e job's comment: only PRs in jwoglom's repos get the screenshots inline.
+          TH_UPLOAD_TOKEN: ${{ steps.v.outputs.pr_owner == 'jwoglom' && secrets.TRIO_TEST_HARNESS_USER_PAT || '' }}
+          TH_UPLOAD_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          [ -n "$PR" ] || { echo "::error::trio, submodules or cherry_pick must name the PR to comment on"; exit 1; }
+          printf '%s\n' "$IN_BODY" > "$RUNNER_TEMP/comment.md"
+          ./trio-test-harness report pr "$PR" --run "$RUNNER_TEMP/run" --body "$RUNNER_TEMP/comment.md"

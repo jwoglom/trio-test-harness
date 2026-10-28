@@ -10,6 +10,7 @@ Device builds either:
 """
 from __future__ import annotations
 
+import getpass
 import json
 import os
 import plistlib
@@ -99,6 +100,11 @@ class BuildInfo:
     xcode: str = ""
     scheme: str = ""
     app: str = "trio"
+    conditions: list = field(default_factory=list)   # extra Swift compilation conditions, e.g. TANDEMKIT_VIRTUAL_PUMP
+
+    @property
+    def virtual_pump(self) -> bool:
+        return VIRTUAL_PUMP in self.conditions
 
     def save(self) -> None:
         path = apps.get(self.app).last_build
@@ -906,7 +912,8 @@ PACKAGES_RERESOLVED = ("Package.resolved did not match the checkout's package de
                        "PR that adds a package), so packages were resolved fresh instead of from the lockfile")
 
 
-def resolve_packages(src: Path, scheme: str, app: "str | apps.App | None" = None) -> str | None:
+def resolve_packages(src: Path, scheme: str, app: "str | apps.App | None" = None,
+                     derived_data: Path | None = None) -> str | None:
     """Resolve SwiftPM packages from Package.resolved, as Trio CI does.
 
     If the lockfile is only out of date, resolve again without it and return a note saying so;
@@ -914,7 +921,7 @@ def resolve_packages(src: Path, scheme: str, app: "str | apps.App | None" = None
     """
     a = _app(app)
     base = ["xcodebuild", "-resolvePackageDependencies", "-workspace", a.workspace,
-            "-scheme", scheme, "-derivedDataPath", str(a.derived_data)]
+            "-scheme", scheme, "-derivedDataPath", str(derived_data or a.derived_data)]
     env = {**xcode.developer_env(), "CI": "true"}
     try:
         run([*base, "-onlyUsePackageVersionsFromResolvedFile"], cwd=src, env=env, timeout=1800)
@@ -925,6 +932,33 @@ def resolve_packages(src: Path, scheme: str, app: "str | apps.App | None" = None
     log(f"WARNING: {PACKAGES_RERESOLVED}")
     run(base, cwd=src, env=env, timeout=1800, capture=False)
     return PACKAGES_RERESOLVED
+
+
+VIRTUAL_PUMP = "TANDEMKIT_VIRTUAL_PUMP"
+
+
+def virtual_pump_build_settings(src: Path, app: "str | apps.App | None" = None) -> dict:
+    """build()'s `derived_data` and `scheme` for a virtual-pump build (TandemKit against faketandem): its own
+    DerivedData, since the condition reaches every Swift target and switching would rebuild them all, and for Trio a
+    copy of its scheme without ThreadSanitizer, which its Run action turns on and `xcodebuild build` follows; TSan
+    reporting a race in the driver can freeze Trio (TandemKit scripts/trio-test.sh builds the same copy)."""
+    a = _app(app)
+    out: dict = {"derived_data": a.derived_data.with_name(a.derived_data.name + "-virtualpump")}
+    shared = src / "Trio.xcodeproj" / "xcshareddata" / "xcschemes" / f"{a.scheme}.xcscheme"
+    if a.key == "trio" and shared.is_file():
+        name = f"{a.scheme}WithoutThreadSanitizer"
+        user = src / "Trio.xcodeproj" / "xcuserdata" / f"{getpass.getuser()}.xcuserdatad" / "xcschemes"
+        user.mkdir(parents=True, exist_ok=True)
+        (user / f"{name}.xcscheme").write_text(
+            shared.read_text().replace('enableThreadSanitizer = "YES"', 'enableThreadSanitizer = "NO"'))
+        out["scheme"] = name
+    return out
+
+
+def links_thread_sanitizer(app_path: Path) -> bool:
+    cp = run(["sh", "-c", 'find "$1" -type f \\( -perm -0100 -o -name "*.dylib" \\) -exec otool -L {} + 2>/dev/null', "sh",
+              str(app_path)], check=False, quiet=True)
+    return "libclang_rt.tsan" in cp.stdout
 
 
 # `path:line:col: error: …`, `xcodebuild: error: …`, `error: …`; not a quoted source line such as `var error: Error?`.
@@ -944,15 +978,16 @@ SANITIZER_SETTINGS = {"thread": {"ENABLE_THREAD_SANITIZER[sdk=iphonesimulator*]"
 def build(src: Path, target: str, *, configuration: str = "Debug", clean: bool = False,
           git_info: dict | None = None, log_path: Path | None = None, trollstore: bool = False,
           conditions: tuple[str, ...] = (), sanitizer: str | None = None, save: bool = True,
-          timeout: float | None = None, app: "str | apps.App | None" = None) -> BuildInfo:
+          timeout: float | None = None, app: "str | apps.App | None" = None,
+          derived_data: Path | None = None, scheme: str | None = None) -> BuildInfo:
     """`conditions` are extra Swift compilation conditions (e.g. TANDEMKIT_VIRTUAL_PUMP), `sanitizer` is thread or
     address, `save=False` leaves the app's last-build JSON (what `th install` installs) alone, and `timeout` (seconds)
     stops xcodebuild with BuildTimeout instead of letting a CI job's limit kill it without a report. Each app has its
-    own scheme, workspace and DerivedData (harness/apps.py)."""
+    own scheme, workspace and DerivedData (harness/apps.py); `derived_data` and `scheme` replace them."""
     a = _app(app)
-    scheme = a.scheme
+    scheme = scheme or a.scheme
     workspace = a.workspace
-    dd = a.derived_data
+    dd = derived_data or a.derived_data
     env = {**xcode.developer_env(), "CI": "true"}  # CI=true skips SwiftFormat + Crashlytics phases
     if clean and dd.exists():
         shutil.rmtree(dd)
@@ -961,7 +996,7 @@ def build(src: Path, target: str, *, configuration: str = "Debug", clean: bool =
     xcconfig, team = harness_xcconfig(src, "device" if (target == "device" and not trollstore) else "sim",
                                       conditions=conditions, settings=SANITIZER_SETTINGS.get(sanitizer or ""), app=a)
     if not (dd / "SourcePackages").exists():
-        note = resolve_packages(src, scheme, a)
+        note = resolve_packages(src, scheme, a, dd)
         if note:
             git_info = {**(git_info or {}), "packages_note": note}
     if target == "sim":
@@ -1032,7 +1067,8 @@ def build(src: Path, target: str, *, configuration: str = "Debug", clean: bool =
     bi = BuildInfo(target="device-trollstore" if trollstore else target, configuration=configuration,
                    source_dir=str(src), app_path=str(app_path), bundle_id=_bundle_id_from_app(app_path),
                    ipa_path=str(ipa) if ipa else None, git=git_info or {},
-                   xcode=xcode.xcode_version(xcode.find_xcode()), scheme=scheme, app=a.key)
+                   xcode=xcode.xcode_version(xcode.find_xcode()), scheme=scheme, app=a.key,
+                   conditions=list(conditions))
     if save:
         bi.save()
     log(f"built {bi.bundle_id} at {app_path}")

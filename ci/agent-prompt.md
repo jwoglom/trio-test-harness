@@ -16,6 +16,8 @@ The simulator can show everything a phone would, including the Lock Screen and L
   next glucose update (the Glucose Simulator produces one every few minutes; `sleep` while waiting).
 - Lock Screen: `./trio-test-harness --target sim lock`, then `shot`; `./trio-test-harness --target sim unlock` afterwards.
 - Dynamic Island: `./trio-test-harness --target sim home` (Trio in the background), then `shot`.
+- Face ID: Trio asks for it before a bolus. The simulator has a face enrolled. Once the Face ID prompt shows, answer it
+  with `./trio-test-harness faceid match`, or with `faceid nomatch` to test a refused one.
 Only genuinely hardware-bound behavior (Bluetooth pumps and sensors, real pairing) is out of reach.
 
 Rules:
@@ -23,6 +25,9 @@ Rules:
 - Do not publish Artifacts, post PR comments, push, or change the Trio checkout; the workflow handles reporting.
 - If part of the PR truly needs hardware (BLE pairing, a physical pump/sensor), say so and record what you could check.
 - Stay within the time limit; prefer a few well-evidenced checks over many shallow ones.
+- Never shut down, reboot or erase the simulator: from your sandbox its display does not come back, and nothing
+  after that can be driven. If WebDriverAgent stops answering, run `./trio-test-harness wda stop` and `wda start`,
+  then relaunch the app with `./trio-test-harness --target sim launch`.
 
 Your final message becomes the job summary's "Agent findings": markdown with the verdict, what you exercised
 (with screenshot names), what you could not, and any bugs or regressions found.

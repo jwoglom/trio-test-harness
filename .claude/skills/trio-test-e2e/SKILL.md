@@ -18,6 +18,8 @@ they say where it is in the app and what it does.
    ./trio-test-e2e --mode simulator --pr <PR> --watch      # + the app's Watch app on a paired watch simulator (--target watch)
    ./trio-test-e2e --mode rooted-vnc --skip-build --skip-install   # reuse the last build
    ./trio-test-e2e --app loop --mode simulator --pr <TandemKit, LoopKit/Loop or LoopWorkspace PR>   # Loop instead of Trio
+   ./trio-test-e2e --mode simulator --pr <TandemKit PR> --pump faketandem [--pump-setup walk] [--pump-scenario recent-doses]
+                                                            # TandemKit against an emulated Mobi (trio-fake-devices skill)
    ```
    `--app loop` tests Loop built from LoopKit/LoopWorkspace (`feat/tandem-closed-beta` has TandemKit) through the same
    stages; the agent hand-off sets `TH_APP=loop`, so every `th` command then acts on Loop and `th docs` reads LoopDocs.

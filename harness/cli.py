@@ -319,6 +319,82 @@ def cmd_launch(args):
     return 0
 
 
+def cmd_faketandem(args):
+    from . import faketandem as FT
+    if args.sub == "start":
+        state = FT.start(setup=args.setup, scenario=args.scenario, ref=args.ref)
+        if args.seed:
+            _seed_faketandem_pump(state)
+        print(json.dumps({k: v for k, v in state.items() if k != "long_term_key"}, indent=2))
+        for line in FT.summary():
+            print(line)
+        return 0
+    if args.sub == "stop":
+        save = Path(_run(args).path) if args.save else None
+        print("stopped" if FT.stop(save_to=save) else "not running")
+        return 0
+    if args.sub == "seed":
+        state = FT.current()
+        if not state:
+            raise HarnessError("no faketandem is running; `th faketandem start --setup preseed` first")
+        _seed_faketandem_pump(state)
+        return 0
+    state = FT.current()
+    if not state:
+        raise HarnessError("no faketandem is running (`th faketandem start`, or trio-test-e2e --pump faketandem)")
+    if args.sub == "status":
+        snapshot = FT.api("GET", "/api/state")
+        if args.json:
+            print(json.dumps(snapshot, indent=2))
+            return 0
+        print(f"faketandem {state.get('sha') or state.get('source')}: {state['setup']}"
+              + (f", scenario {state['scenario']}" if state.get("scenario") else "")
+              + f"; GATT {state['gatt']}, API {state['api']}, log {state['log']}")
+        for line in FT.summary(snapshot):
+            print(line)
+        return 0
+    if args.sub == "pairing":
+        print(FT.set_pairing_state(args.state) if args.state else FT.api("GET", "/api/bluetooth/pairingstate")["pairingState"])
+        return 0
+    if args.sub == "history":
+        if args.all:
+            print(json.dumps(FT.api("GET", f"/api/history?limit={args.limit}"), indent=2))
+        else:
+            print("\n".join(FT.history_doses(args.limit)))
+        return 0
+    if args.sub == "scenario":
+        body = json.loads(Path(args.scenario).read_text()) if Path(args.scenario).is_file() else {"preset": args.scenario}
+        result = FT.api("POST", "/api/state/scenario", body)
+        print(json.dumps(result.get("scenario"), indent=2))
+        return 0
+    if args.sub == "api":
+        body = json.loads(args.body) if args.body else None
+        print(json.dumps(FT.api(args.method, args.path, body), indent=2))
+        return 0
+    raise HarnessError(f"unknown faketandem command {args.sub}")
+
+
+def cmd_faceid(args):
+    if _target(args) != "sim":
+        raise HarnessError("faceid is for the simulator (--target sim)")
+    get_driver("sim").face_id(args.action)
+    print(args.action)
+    return 0
+
+
+def _seed_faketandem_pump(state: dict) -> None:
+    """The installed app (simulator) with the pump already paired with this faketandem; `th launch` afterwards."""
+    from . import faketandem as FT
+    from .build import BuildInfo
+    bi = BuildInfo.load()
+    if not bi:
+        raise HarnessError("no build to seed; `th build` first")
+    drv = get_driver("sim")
+    drv.terminate(bi.bundle_id)
+    paths = _app().flows.preseed_virtual_pump(drv, bi.bundle_id, FT.paired_pump_manager_state(state), onboarding=False)
+    log(f"seeded {[str(p) for p in paths]}; launch with `th launch`")
+
+
 # ---------------- sim / device utilities -----------------
 
 def cmd_busy(args):
@@ -928,8 +1004,9 @@ def cmd_report(args):
     if args.sub == "html":
         print(render_html(r, Path(args.out) if args.out else None))
     elif args.sub == "pr":
+        body = Path(args.body).read_text() if args.body else None
         print(post_to_pr(r, args.pr, mode=args.mode, columns=args.columns, max_shots=args.max_shots,
-                         artifact_url=args.artifact_url))
+                         artifact_url=args.artifact_url, body=body))
     elif args.sub == "markdown":
         from .report import render_markdown
         md, files = render_markdown(r, columns=args.columns, max_shots=args.max_shots, artifact_url=args.artifact_url)
@@ -1079,6 +1156,40 @@ def build_parser() -> argparse.ArgumentParser:
     l.add_argument("--via", choices=["auto", "ssh", "vnc", "devicectl"], default="auto")
     l.add_argument("--app-name", help="the name Spotlight finds it by (default: Trio / Loop)")
     l.set_defaults(fn=cmd_launch)
+
+    ft = sp.add_parser("faketandem", help="the Tandem Mobi emulator a --pump faketandem build talks to: start/stop it, "
+                                          "read what the pump holds, make it act (harness/faketandem.py)")
+    fts = ft.add_subparsers(dest="sub", required=True)
+    fst = fts.add_parser("start", help="start one for this checkout (stopping any running one)")
+    fst.add_argument("--setup", choices=["preseed", "walk"], default="preseed",
+                     help="preseed: holds a long-term key, for an app seeded as paired (--seed); walk: waits to be "
+                          "paired, at the double-tap step")
+    fst.add_argument("--scenario", metavar="NAME|FILE", help="pump use replayed before the app connects: recent-doses, "
+                                                             "scheduled-basal, or a scenario JSON file")
+    fst.add_argument("--ref", help="faketandem branch/tag/sha to build (default $TH_FAKETANDEM_REF, else main)")
+    fst.add_argument("--seed", action="store_true", help="with --setup preseed: seed the installed app as paired")
+    fsp = fts.add_parser("stop"); fsp.add_argument("--save", action="store_true",
+                                                   help="first keep its state, history, request log and log in the run")
+    fsp.add_argument("--run")
+    fts.add_parser("seed", help="seed the installed app (simulator) as paired with the running faketandem")
+    fss2 = fts.add_parser("status", help="what the pump holds: pairing, basal, IOB, last bolus, reservoir")
+    fss2.add_argument("--json", action="store_true", help="faketandem's whole state snapshot")
+    fpa = fts.add_parser("pairing", help="print the pairing state, or set it: PairStep1 = the double-tap step, "
+                                         "PairStep2 = the pump shows its code, NotDiscoverable")
+    fpa.add_argument("state", nargs="?", choices=["NotDiscoverable", "PairStep1", "PairStep2"])
+    fhi = fts.add_parser("history", help="the pump's history log: dose records, or --all")
+    fhi.add_argument("--all", action="store_true"); fhi.add_argument("--limit", type=int, default=5000)
+    fsc = fts.add_parser("scenario", help="replay pump use over its past (refused while the app is connected)")
+    fsc.add_argument("scenario", metavar="NAME|FILE")
+    fap = fts.add_parser("api", help="any request to faketandem's HTTP API, e.g. POST /api/state/bolus/start "
+                                     "'{\"units\": 1.5}' (see faketandem's README)")
+    fap.add_argument("method", choices=["GET", "POST", "PUT", "PATCH", "DELETE", "get", "post", "put", "patch", "delete"])
+    fap.add_argument("path"); fap.add_argument("body", nargs="?")
+    ft.set_defaults(fn=cmd_faketandem)
+
+    fi = sp.add_parser("faceid", help="simulator Face ID: enroll a face (trio-test-e2e does at launch), then answer an "
+                                      "app's Face ID prompt (a bolus) with match or nomatch")
+    fi.add_argument("action", choices=["enroll", "unenroll", "match", "nomatch"]); fi.set_defaults(fn=cmd_faceid)
 
     dc = sp.add_parser("docs", help="search / browse the app's docs (triodocs.org; with --app loop, LoopDocs) as text: "
                                     "search, toc, page",
@@ -1254,6 +1365,8 @@ def build_parser() -> argparse.ArgumentParser:
     rpr = rps.add_parser("pr"); rpr.add_argument("pr"); rpr.add_argument("--run"); rpr.add_argument("--mode", choices=["comment", "description"], default="comment")
     rpr.add_argument("--columns", type=int, default=3); rpr.add_argument("--max-shots", type=int)
     rpr.add_argument("--artifact-url", help="claude.ai artifact link to include in the comment")
+    rpr.add_argument("--body", metavar="FILE", help="post this markdown instead of the generated summary; the run's "
+                     "screenshots it shows as ![caption](./screenshots/NNN.png) are attached")
     rm = rps.add_parser("markdown", help="preview the PR comment body"); rm.add_argument("--run"); rm.add_argument("--columns", type=int, default=3)
     rm.add_argument("--max-shots", type=int); rm.add_argument("--artifact-url")
     rp.set_defaults(fn=cmd_report)

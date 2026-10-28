@@ -114,6 +114,24 @@ button.small{padding:2px 9px;font-size:12px;margin-top:8px;display:block}
     <label class="check"><input type="checkbox" name="skip_onboarding" checked>Skip onboarding</label>
     <label class="check"><input type="checkbox" name="cgm_sim" checked><span id="cgmlabel">Use Glucose Simulator</span></label>
     <label class="check"><input type="checkbox" name="pump_sim" checked>Use Pump Simulator</label>
+    <fieldset id="pumpfields">
+      <div class="row">
+        <div><label for="pump">Pump (simulator)</label>
+          <select id="pump" name="pump" title="faketandem: a Tandem Mobi emulator; TandemKit is built on its virtual pump (Debug only)">
+            <option value="simulator" selected>Pump Simulator</option><option value="faketandem">Tandem on faketandem</option></select></div>
+        <div><label for="pump_setup">Tandem setup</label>
+          <select id="pump_setup" name="pump_setup" title="preseed: the app starts with the pump paired. walk: the agent adds and pairs it in the app">
+            <option value="preseed" selected>already paired</option><option value="walk">agent walks the setup</option></select></div>
+      </div>
+      <div class="row">
+        <div><label for="pump_scenario">Pump history</label>
+          <input type="text" id="pump_scenario" name="pump_scenario" list="pump_scenarios" placeholder="none"
+                 title="pump use replayed before the app connects: history, IOB, last bolus, a running temp basal">
+          <datalist id="pump_scenarios"><option value="recent-doses"><option value="scheduled-basal"></datalist></div>
+        <div><label for="faketandem_ref">faketandem ref</label>
+          <input type="text" id="faketandem_ref" name="faketandem_ref" placeholder="main"></div>
+      </div>
+    </fieldset>
     <fieldset id="devfields">
       <label for="devices">Devices (simulator)</label>
       <select id="devices" name="devices" title="phone + watch: the app's Watch app on a watch simulator paired with the phone. auto: a small model decides from the app's and submodules' PRs whether the watch is needed">
@@ -224,6 +242,7 @@ function syncTarget() {
   const sim = form.target.value === "simulator";
   $("#simfields").disabled = !sim;
   $("#devfields").disabled = !sim;
+  $("#pumpfields").disabled = !sim;
   if (sim) $("#simbox").open = true;
   $("#phonetoggle").hidden = sim;
 }

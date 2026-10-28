@@ -18,9 +18,13 @@ Facts (Trio dev, v0.8.4.x) these flows rely on:
     (accessibility id devicePickerItem-simulator).
   * Settings -> Devices -> Insulin Pump -> Add Pump -> "Pump Simulator"
     (accessibility id devicePickerItem-MockPumpManager).
+  * Trio (feat/tandem-closed-beta) lists TandemKit's pump as "Tandem" in the same picker (DeviceCatalog.swift); its
+    setup is TandemKit's own flow. Trio restores its pump manager from Documents/PumpManagerState.plist and reads its
+    basal profile from Documents/settings/basal_profile.json (else its bundled 0.1 U/hr default).
 """
 from __future__ import annotations
 
+import json
 import plistlib
 import time
 from pathlib import Path
@@ -35,6 +39,7 @@ from ..util import tmp_path, HarnessError, log
 NAME = "Trio"
 CGM_SIMULATOR = "Glucose Simulator"
 PUMP_SIMULATOR = "Pump Simulator"
+TANDEM_PUMP = "Tandem"
 ADD_CGM = "Add CGM"
 ADD_PUMP = "Add pump"
 PROMPTS_AFTER_PRESEED = False      # a pre-seeded Trio opens on its home screen
@@ -79,6 +84,21 @@ def preseed_onboarding(container: Path) -> list[Path]:
 
 def reset_after_install(drv: Driver, bundle_id: str) -> None:
     """Trio's state is in its data container, which a new install starts empty."""
+
+
+def preseed_virtual_pump(drv: Driver, bundle_id: str, pump_state: dict | None, *, onboarding: bool = True) -> list[Path]:
+    """Trio on faketandem (simulator): its basal profile at the pump's rate, and with `pump_state` (a
+    PumpManagerState.plist, harness/faketandem.py) the Tandem pump already paired. A walked onboarding writes its own
+    profile over this one."""
+    from .. import faketandem
+    container = drv.app_data_container(bundle_id)
+    profile = container / "Documents" / "settings" / "basal_profile.json"
+    profile.parent.mkdir(parents=True, exist_ok=True)
+    profile.write_text(json.dumps([{"start": "00:00:00", "minutes": 0, "rate": faketandem.PUMP_BASAL_RATE}], indent=2))
+    written = [profile]
+    if pump_state:
+        written.append(faketandem.write_pump_manager_state(container, pump_state))
+    return written
 
 
 def preseed_simulator(drv: Driver, bundle_id: str) -> list[Path]:

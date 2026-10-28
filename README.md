@@ -98,6 +98,38 @@ What the phone did with a Watch request is in `th logs trio --grep WatchManager`
 `th logs watch` only when the watch flushes it to the phone (every 3 minutes or 100 entries). The Trio Watch facts the
 agent relies on are in the `trio-ui-drive` skill.
 
+## Tandem pump on faketandem (`--pump faketandem`)
+
+To test TandemKit without a pump, the app's pump can be a Tandem Mobi emulated by
+[faketandem](https://github.com/jwoglom/faketandem). This is the setup TandemKit's own `TrioIntegrationTests` use. The
+app is built with `TANDEMKIT_VIRTUAL_PUMP`, so TandemKit's stand-in for CoreBluetooth reaches the pump over a local
+socket instead of the radio. Pairing, TandemKit's setup and settings screens, and everything the driver exchanges with
+the pump then run for real, against the emulator.
+
+```
+./trio-test-e2e --mode simulator --branch feat/tandem-closed-beta --pump faketandem                      # pre-paired
+./trio-test-e2e --mode simulator --pr https://github.com/jwoglom/TandemKit/pull/609 --trio-branch feat/tandem-closed-beta \
+    --pump faketandem --pump-setup walk --pump-scenario recent-doses     # the agent walks the setup; 6 h of pump history
+./trio-test-ci feat/tandem-closed-beta -s jwoglom/TandemKit#609 --pump faketandem --pump-setup walk --pump-scenario recent-doses
+```
+
+| | |
+|---|---|
+| Build | `SWIFT_ACTIVE_COMPILATION_CONDITIONS += TANDEMKIT_VIRTUAL_PUMP` (Debug only), in its own DerivedData (`<TH_DERIVED_DATA>-virtualpump`), so switching does not rebuild the plain build's targets. Trio is built from a copy of its scheme without ThreadSanitizer, which Trio's Run action turns on: a race report can freeze the app (TandemKit `scripts/trio-test.sh` does the same) |
+| faketandem | built with Go from `TH_FAKETANDEM_REPO` (jwoglom/faketandem) at `--faketandem-ref` / `TH_FAKETANDEM_REF` (main), or `TH_FAKETANDEM_DIR` / `TH_FAKETANDEM_BIN`; without Go, the `latest` release binary. One runs per checkout in the background (`runs/.tmp/faketandem.json`), on free loopback ports, and outlives `trio-test-e2e` so the agent can use it |
+| Launch | every simulator launch (`th launch`, the daemon's, `db exec`'s relaunch) passes `TANDEMKIT_VIRTUAL_PUMP=<faketandem>` (`SIMCTL_CHILD_`). An app started any other way, such as from its icon after it was stopped, has no address and reports Bluetooth as unsupported |
+| `--pump-setup preseed` (default) | the app starts with the pump paired. faketandem holds a random long-term key, and the app's `Documents/PumpManagerState.plist` holds a `TandemPumpManager` after a pairing with it (the key, the peripheral id from faketandem's `hello`, the 0.85 U/hr schedule). The smoke stage waits up to 2 minutes for the driver to authenticate. As in TandemKit's `TrioClosedLoopTests` |
+| `--pump-setup walk` | the pump is left to be added in the app (Trio: Add pump ▸ Tandem). faketandem waits at the double-tap step (`PairStep1`). `th faketandem pairing PairStep2` makes it show its code, `123456`. The CI agent is told to walk the setup (`ci/agent-faketandem-walk.md`) |
+| `--pump-scenario` | faketandem's `-scenario`: hours of pump use replayed before the app connects, giving history, IOB, a last bolus and a running temp basal. `recent-doses` covers 6 h: boluses from the pump and from an app (the last one stopped short), a 0% temp, a suspend and resume, and a 150% temp still running, with about 3.2 U IOB on the pump. `scheduled-basal` is 6 h of the profile's basal alone. Both run on a 0.85 U/hr profile, with a BasalDelivery record every 5 minutes at the rate in force. A JSON file can be given instead |
+| App settings | the app's basal schedule is seeded at faketandem's 0.85 U/hr profile, so neither TandemKit's basal check nor its history reconciliation finds a difference the harness made |
+
+`th faketandem start|stop|status|seed|pairing|history|scenario|api` controls the emulator and reads what the pump
+holds (`th faketandem --help`). The CI agent reaches it through the sim daemon, because the agent's sandbox has no
+network. `stop --save` writes the pump's state, history log, request log and log into the run's `faketandem/`, and CI
+and the web UI do that at the end of a job. In CI: `pump`, `pump_setup`, `pump_scenario` and `faketandem_ref`, with
+Go set up by `actions/setup-go`. In the web UI: "Pump (simulator)". Only emulated values are used. faketandem's
+serial number, key and history are made up.
+
 ## How it works
 
 Three connection modes (`--mode` / `--target`):
@@ -195,7 +227,7 @@ Mode, and the phone unlocked while installing. Install only — driving the phon
 
 ## CLI overview (`./trio-test-harness --help`; `th` = short alias in `bin/`)
 `doctor` · `build` · `install` · `launch` · `sim {list,runtimes,install-runtime,boot,shutdown,erase,container,defaults,openurl}` ·
-`device {list,vnc-check,serve-ipa,wake,ssh,diag,vnc-restart,kill,apps}` · `daemon {start,stop,status,restart}` · `wda {build,start,stop,status}` · `watch {pair,status,agent}` · `shot` · `tap` · `swipe` · `drag` · `scroll` · `type` · `key` · `home` · `crown` · `tap-text` · `find` ·
+`device {list,vnc-check,serve-ipa,wake,ssh,diag,vnc-restart,kill,apps}` · `faketandem {start,stop,seed,status,pairing,history,scenario,api}` · `faceid {enroll,match,nomatch}` · `daemon {start,stop,status,restart}` · `wda {build,start,stop,status}` · `watch {pair,status,agent}` · `shot` · `tap` · `swipe` · `drag` · `scroll` · `type` · `key` · `home` · `crown` · `tap-text` · `find` ·
 `tree` · `wait-text` · `ocr` · `logs [trio|tandem|watch|all]` · `db {stores,tables,schema,query,exec}` · `oslog` · `crashes` · `files {ls,cat}` · `perf` · `run {new,current,use,note,finish,list,steps}` · `report {html,pr,markdown}` ·
 `flow {onboarding-walk,add-cgm-sim,add-pump-sim,back-home,dismiss,at-home}` · `test smoke`
 
@@ -206,6 +238,9 @@ text: search runs over the site's own search index (every section's title and te
 lists all pages as a tree (from the sitemap), `page` prints a page's article (headings, lists, tables, admonitions,
 links) or one section. Pages are cached for a day in `runs/.tmp/triodocs/`. The web UI/CI agent's sandbox allows
 `triodocs.org` (and nothing else) for it, and the agents are told to look settings up there before navigating.
+Through the sandbox's network proxy the 640 KB search index arrived cut short (IncompleteRead), so pages are fetched
+gzipped, a plain body cut short is completed with Range requests, and failing that a running harness daemon, outside
+the sandbox, fetches it.
 
 `th logs` reads the installed app's log files: Trio's `Documents/logs/log.txt`, TandemKit's
 `Documents/tandem/tandem_log.txt` (info and above; debug goes to OSLog only) and the watch log, plus each one's `*_prev`
@@ -242,6 +277,10 @@ More debugging (`harness/appdebug.py`; simulator and rooted-vnc, through the dae
 `./trio-test-harness report pr <PR> [--artifact-url <link>] [--max-shots N]` posts a comment whose screenshots are uploaded
 *into* the comment with `gh pr comment --attach` (gh ≥ 2.99; up to 50 files, evenly thinned when a run has more). No extra
 repo or hosting. `--mode description` maintains a `<!-- trio-test-harness -->` section in the PR body instead.
+`--body FILE` posts a comment written for the run in place of the generated one; each screenshot it shows as
+`![caption](./screenshots/NNN.png)` is attached the same way. In CI, the e2e workflow's `comment_on_run` (a run id) and
+`comment_body` do this for an earlier run on the PR the run's inputs name, and test nothing:
+`gh workflow run e2e.yml -f submodules=jwoglom/TandemKit#609 -f comment_on_run=<run id> -f comment_body="$(cat comment.md)"`.
 
 ## CI (GitHub Actions)
 `.github/workflows/e2e.yml` runs `trio-test-e2e --mode simulator` on the self-hosted macOS workers
@@ -273,7 +312,8 @@ gh workflow run e2e.yml -R jwoglom/trio-test-harness -f trio=feat/tandem -f subm
 - **The run's PR** (read into `pr.md`, and where a comment goes) is the Trio PR, else the first submodule PR.
   `ci/inputs.py` has the mapping onto `trio-test-e2e` flags.
 - Also: build configuration, skip onboarding, fake CGM/pump, Claude model (`claude_model`, default `sonnet`), extra
-  agent focus, agent time limit, post PR comment, simulator device/runtime, Xcode.
+  agent focus, agent time limit, post PR comment, simulator device/runtime, Xcode, and the pump: `pump=faketandem`
+  with `pump_setup`, `pump_scenario` and `faketandem_ref` (see "Tandem pump on faketandem").
 - Every run then has Claude Code exercise what the PR describes (headless, sandboxed; prompt in `ci/agent-prompt.md`,
   live progress in its step log via `ci/agent-stream.py`), and a separate review pass pick the relevant screenshots.
 
