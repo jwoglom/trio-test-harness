@@ -7,8 +7,8 @@
 # pump=faketandem runs the app's TandemKit against faketandem, a Tandem Mobi emulator (harness/faketandem.py):
 #   gh workflow run e2e.yml -R jwoglom/trio-test-harness -f trio=feat/tandem-closed-beta -f pump=faketandem \
 #     -f pump_setup=walk -f pump_scenario=recent-doses
-# comment_on_run posts a comment written after an earlier run on the PR this run is about, with that run's
-# screenshots, and tests nothing (`trio-test-harness report pr --body`):
+# comment_on_run tests nothing: it posts comment_body, with an earlier run's screenshots, to the PR named in trio or
+# submodules (`trio-test-harness report pr --body`):
 #   gh workflow run e2e.yml -R jwoglom/trio-test-harness -f submodules=jwoglom/TandemKit#609 \
 #     -f comment_on_run=40232151326 -f comment_body="$(cat comment.md)"
 name: Trio e2e (simulator)
@@ -44,24 +44,24 @@ on:
         type: boolean
         default: true
       smoke:
-        description: "Configure the simulated CGM + Pump Simulator (with pump=faketandem: the simulated CGM)"
+        description: "After launch, add the fake CGM and the Pump Simulator (only the fake CGM when pump is faketandem). Off: stop at the home screen"
         type: boolean
         default: true
       pump:
-        description: "Pump: simulator (the app's Pump Simulator) or faketandem (a Tandem Mobi emulator; TandemKit built on its virtual pump; Debug only)"
+        description: "Pump to test with: simulator (the app's built-in Pump Simulator) or faketandem (an emulated Tandem Mobi; Debug builds only)"
         type: choice
         options: [simulator, faketandem]
         default: simulator
       pump_setup:
-        description: "faketandem: preseed (the app starts with the pump paired) or walk (the agent adds and pairs it in the app)"
+        description: "faketandem only: preseed (the app starts with the pump already paired) or walk (the agent pairs it in the app)"
         type: choice
         options: [preseed, walk]
         default: preseed
       pump_scenario:
-        description: "faketandem: pump use before the app connects (history, IOB, last bolus, temp basal): recent-doses, scheduled-basal, or blank for none"
+        description: "faketandem only: what the pump did in the hours before the app connects. recent-doses (boluses, temp basals, a suspend), scheduled-basal (basal only), or blank (no history)"
         type: string
       faketandem_ref:
-        description: "faketandem branch, tag or sha (blank: main)"
+        description: "faketandem branch, tag or commit to build (blank: main)"
         type: string
       devices:
         description: "Devices: phone (the iPhone app only), phone+watch (also the app's Watch app on a paired watch simulator), or auto (a small model decides from the app's and submodules' PRs)"
@@ -89,10 +89,10 @@ on:
         type: boolean
         default: false
       comment_on_run:
-        description: "Instead of testing: post comment_body on the PR with this earlier run's screenshots"
+        description: "Run ID of an earlier run. Tests nothing: posts comment_body, with that run's screenshots, to the PR named in trio or submodules"
         type: string
       comment_body:
-        description: "With comment_on_run: the comment (markdown); ![caption](./screenshots/NNN.png) shows a screenshot"
+        description: "Markdown comment for comment_on_run to post. ![caption](./screenshots/NNN.png) embeds one of that run's screenshots"
         type: string
       sim_device:
         description: "Simulator device"
