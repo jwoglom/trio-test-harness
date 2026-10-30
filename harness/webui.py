@@ -42,6 +42,7 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
 from .config import CONFIG, REPO_ROOT
+from .faketandem import SCENARIOS as FT_SCENARIOS
 from .util import HarnessError, lan_ip, log, read_json, write_json
 
 JOBS_DIR = CONFIG.runs_dir / ".webui"
@@ -319,9 +320,10 @@ class Manager:
         if pump == "faketandem" and (target != "simulator" or conf != "Debug"):
             raise ValueError("pump: faketandem runs on the simulator, in a Debug build")
         pump_scenario, faketandem_ref = text("pump_scenario", 200), text("faketandem_ref", 100)
-        for k, v in (("pump_scenario", pump_scenario), ("faketandem_ref", faketandem_ref)):
-            if v and not re.fullmatch(r"[\w./-]+", v):
-                raise ValueError(f"{k}: letters, digits and . / - _ only")
+        if pump_scenario and pump_scenario not in FT_SCENARIOS:
+            raise ValueError(f"pump_scenario: one of {', '.join(FT_SCENARIOS)}, or blank for none")
+        if faketandem_ref and not re.fullmatch(r"[\w./-]+", faketandem_ref):
+            raise ValueError("faketandem_ref: letters, digits and . / - _ only")
         return {"app": app, "target": target, "trio": text("trio"), "submodules": text("submodules", 1000),
                 "cherry_pick": text("cherry_pick", 1000), "submodule_cherry_pick": text("submodule_cherry_pick", 1000),
                 "configuration": conf, "skip_onboarding": bool(f.get("skip_onboarding", True)),
@@ -563,6 +565,7 @@ def options() -> dict:
     if _OPTIONS is None:
         from . import xcode as X
         o = {"xcodes": _xcodes(), "sim_devices": [], "sim_runtimes": [], "watch_models": [],
+             "pump_scenarios": [{"name": k, "summary": v} for k, v in FT_SCENARIOS.items()],
              "defaults": {"xcode": CONFIG.get("TH_XCODE_APP"), "sim_device": CONFIG.get("TH_SIM_DEVICE"),
                           "sim_runtime": CONFIG.get("TH_SIM_RUNTIME"), "watch_model": CONFIG.get("TH_WATCH_SIM_DEVICE")}}
         try:

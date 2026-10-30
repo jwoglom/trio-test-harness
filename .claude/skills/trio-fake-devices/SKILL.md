@@ -44,9 +44,12 @@ launch. CI: `pump`, `pump_setup`, `pump_scenario` and `faketandem_ref`; `trio-te
   With TandemKit#609, a **Load Pump History** step follows pairing.
 - `--pump-scenario recent-doses`: the pump has 6 hours of use before the app connects. That is boluses from its screen
   and from an app (the last one stopped at 1.2 of 2 U), a 0% temp, a suspend and resume, a 150% temp still running,
-  and about 3.2 U IOB on the pump. `scheduled-basal` gives 6 hours of the profile's basal alone. Both run on a
-  0.85 U/hr profile and write a BasalDelivery record every 5 minutes at the rate in force. A JSON file works too
-  (faketandem's README, "A pump already in use").
+  and about 3.2 U IOB on the pump. The other presets (README "Tandem pump on faketandem" describes each):
+  `scheduled-basal` (basal alone), `pump-boluses` (pump-screen boluses only), `app-doses` (another app's boluses and
+  temps, one still running), `suspended-now` (suspended when the app connects), `stopped-boluses` (the last bolus
+  stopped at 0 U), `control-iq` (Control-IQ on; walk setup), `pump-profile-differs` (the pump's profile is not the
+  app's) and `day-of-use` (24 hours). They write a BasalDelivery record every 5 minutes at the rate in force. A JSON
+  file works too (faketandem's README, "A pump already in use").
 - `th faketandem status` shows what the pump holds. `history` lists its dose records. `pairing [STATE]` reads or sets
   the pairing step. `api METHOD PATH ['JSON']` makes the pump act on its own, for example
   `POST /api/state/bolus/start '{"units":1}'`. `stop --save` keeps its state, history and logs in the run. These work

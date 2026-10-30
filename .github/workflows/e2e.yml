@@ -57,9 +57,12 @@ on:
         type: choice
         options: [preseed, walk]
         default: preseed
+      # The presets are faketandem's; keep these in step with SCENARIOS in harness/faketandem.py, which describes each.
       pump_scenario:
-        description: "faketandem only: what the pump did in the hours before the app connects. recent-doses (boluses, temp basals, a suspend), scheduled-basal (basal only), or blank (no history)"
-        type: string
+        description: "faketandem only: what the pump did in the hours before the app connects (none: no history). Each preset is described in the README's faketandem section"
+        type: choice
+        options: [none, recent-doses, scheduled-basal, pump-boluses, app-doses, suspended-now, stopped-boluses, control-iq, pump-profile-differs, day-of-use]
+        default: none
       faketandem_ref:
         description: "faketandem branch, tag or commit to build (blank: main)"
         type: string
@@ -204,7 +207,7 @@ jobs:
           if [ "$IN_WATCH_MODEL" != default ]; then args+=(--watch-model "$IN_WATCH_MODEL"); fi
           if [ "$IN_PUMP" = faketandem ]; then
             args+=(--pump faketandem --pump-setup "$IN_PUMP_SETUP")
-            [ -z "$IN_PUMP_SCENARIO" ] || args+=(--pump-scenario "$IN_PUMP_SCENARIO")
+            [ -z "$IN_PUMP_SCENARIO" ] || [ "$IN_PUMP_SCENARIO" = none ] || args+=(--pump-scenario "$IN_PUMP_SCENARIO")
             [ -z "$IN_FAKETANDEM_REF" ] || args+=(--faketandem-ref "$IN_FAKETANDEM_REF")
           fi
           # The runner's bash has -e; keep going so the run dir is recorded even when the run fails.

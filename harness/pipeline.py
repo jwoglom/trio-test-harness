@@ -447,6 +447,7 @@ def run_stages(args):
 
 def main(argv=None) -> int:
     from . import apps
+    from .faketandem import SCENARIOS
     p = argparse.ArgumentParser(prog="trio-test-e2e", description="End-to-end Trio or Loop test: checkout → build → install → smoke → report")
     p.add_argument("--app", choices=sorted(apps.APPS),
                    help="the app under test: trio (nightscout/Trio) or loop (LoopKit/LoopWorkspace); default $TH_APP, else trio")
@@ -488,7 +489,7 @@ def main(argv=None) -> int:
                         "leaves it to be added and paired in the app (the agent walks TandemKit's setup)")
     p.add_argument("--pump-scenario", metavar="NAME|FILE",
                    help="with --pump faketandem: hours of pump use replayed before the app connects (faketandem "
-                        "-scenario): a preset such as recent-doses or scheduled-basal, or a scenario JSON file")
+                        "-scenario): a preset (" + ", ".join(SCENARIOS) + ") or a scenario JSON file")
     p.add_argument("--faketandem-ref", metavar="REF",
                    help="faketandem branch, tag or sha to build (default $TH_FAKETANDEM_REF, else main)")
     p.add_argument("--skip-build", action="store_true", help="reuse build/last-build.json")
@@ -526,6 +527,9 @@ def main(argv=None) -> int:
                            "CoreBluetooth only in a Debug build, and faketandem is reached over the Mac's loopback")
     if args.pump != "faketandem" and (args.pump_scenario or args.pump_setup != "preseed"):
         raise HarnessError("--pump-setup and --pump-scenario are for --pump faketandem")
+    if args.pump_scenario:
+        from .faketandem import check_scenario
+        check_scenario(args.pump_scenario)       # a typo fails now, not after the build
     if args.watch_model and args.target == "sim":
         from . import watch as WT
         args.watch_model = WT.resolve_model(args.watch_model)    # a typo fails now, not after the build

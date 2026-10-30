@@ -168,6 +168,11 @@ The app's TandemKit built on its virtual pump (`TANDEMKIT_VIRTUAL_PUMP`), agains
 and `walk` leaves the pump for the agent to add, following `ci/agent-faketandem-walk.md`. `--pump-scenario` gives the
 pump hours of use first, through faketandem's scenarios (jwoglom/faketandem branch `claude/beautiful-dirac-aoq7i7`
 until merged: pass `--faketandem-ref` until then).
+- 2026-10-30: seven more presets (`pump-boluses`, `app-doses`, `suspended-now`, `stopped-boluses`, `control-iq`,
+  `pump-profile-differs`, `day-of-use`; README table), on jwoglom/faketandem branch `ccr-94a0e62d-5vkr9t` until merged,
+  and `pump_scenario` is a dropdown of them in the web UI and the e2e workflow (`SCENARIOS` in `harness/faketandem.py`,
+  which the workflow's option list mirrors). Verified with faketandem's own tests and by starting the binary with each;
+  **not yet run against the app**: none of the new presets has been through a `trio-test-e2e` run.
 - Verified on Linux, without a simulator: building faketandem from a checkout, starting it for either setup with a
   scenario, `th faketandem status|history|pairing|api|stop --save`, and the seeded `PumpManagerState.plist` (the key
   faketandem holds, its peripheral id) and basal profile.

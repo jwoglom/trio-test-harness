@@ -1103,6 +1103,7 @@ def cmd_test(args):
 
 def build_parser() -> argparse.ArgumentParser:
     from . import apps
+    from .faketandem import SCENARIOS
     p = argparse.ArgumentParser(prog="trio-test-harness", description="Trio / Loop test harness toolbox (short alias: th)")
     p.add_argument("--target", help="sim | rooted-vnc | iphone-usb | watch (aliases: device=rooted-vnc, mirror=iphone-usb; default $TH_TARGET or sim)")
     p.add_argument("--app", choices=sorted(apps.APPS),
@@ -1164,8 +1165,8 @@ def build_parser() -> argparse.ArgumentParser:
     fst.add_argument("--setup", choices=["preseed", "walk"], default="preseed",
                      help="preseed: holds a long-term key, for an app seeded as paired (--seed); walk: waits to be "
                           "paired, at the double-tap step")
-    fst.add_argument("--scenario", metavar="NAME|FILE", help="pump use replayed before the app connects: recent-doses, "
-                                                             "scheduled-basal, or a scenario JSON file")
+    fst.add_argument("--scenario", metavar="NAME|FILE", help="pump use replayed before the app connects: a preset ("
+                                                             + ", ".join(SCENARIOS) + ") or a scenario JSON file")
     fst.add_argument("--ref", help="faketandem branch/tag/sha to build (default $TH_FAKETANDEM_REF, else main)")
     fst.add_argument("--seed", action="store_true", help="with --setup preseed: seed the installed app as paired")
     fsp = fts.add_parser("stop"); fsp.add_argument("--save", action="store_true",
@@ -1180,7 +1181,7 @@ def build_parser() -> argparse.ArgumentParser:
     fhi = fts.add_parser("history", help="the pump's history log: dose records, or --all")
     fhi.add_argument("--all", action="store_true"); fhi.add_argument("--limit", type=int, default=5000)
     fsc = fts.add_parser("scenario", help="replay pump use over its past (refused while the app is connected)")
-    fsc.add_argument("scenario", metavar="NAME|FILE")
+    fsc.add_argument("scenario", metavar="NAME|FILE", help="a preset (" + ", ".join(SCENARIOS) + ") or a scenario JSON file")
     fap = fts.add_parser("api", help="any request to faketandem's HTTP API, e.g. POST /api/state/bolus/start "
                                      "'{\"units\": 1.5}' (see faketandem's README)")
     fap.add_argument("method", choices=["GET", "POST", "PUT", "PATCH", "DELETE", "get", "post", "put", "patch", "delete"])
