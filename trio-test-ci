@@ -63,7 +63,8 @@ def parse_args(argv=None) -> argparse.Namespace:
     p.add_argument("--pump-setup", choices=["preseed", "walk"],
                    help="faketandem: preseed (default; the app starts paired) or walk (the agent pairs it in the app)")
     p.add_argument("--pump-scenario", metavar="NAME",
-                   help="faketandem: pump use before the app connects: recent-doses, basal-only (default none)")
+                   help="faketandem: pump use before the app connects, one of the workflow's pump_scenario presets "
+                        "(SCENARIOS in harness/faketandem.py: recent-doses, pump-boluses, suspended-now, ...; default none)")
     p.add_argument("--faketandem-ref", metavar="REF", help="faketandem branch, tag or sha (default main)")
     p.add_argument("--devices", choices=["phone", "phone+watch", "auto"],
                    help="phone (default), phone+watch (the app's Watch app on a paired watch simulator), or auto (a small "

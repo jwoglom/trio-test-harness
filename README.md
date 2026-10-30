@@ -120,8 +120,26 @@ the pump then run for real, against the emulator.
 | Launch | every simulator launch (`th launch`, the daemon's, `db exec`'s relaunch) passes `TANDEMKIT_VIRTUAL_PUMP=<faketandem>` (`SIMCTL_CHILD_`). An app started any other way, such as from its icon after it was stopped, has no address and reports Bluetooth as unsupported |
 | `--pump-setup preseed` (default) | the app starts with the pump paired. faketandem holds a random long-term key, and the app's `Documents/PumpManagerState.plist` holds a `TandemPumpManager` after a pairing with it (the key, the peripheral id from faketandem's `hello`, the 0.85 U/hr schedule). The smoke stage waits up to 2 minutes for the driver to authenticate. As in TandemKit's `TrioClosedLoopTests` |
 | `--pump-setup walk` | the pump is left to be added in the app (Trio: Add pump ▸ Tandem). faketandem waits at the double-tap step (`PairStep1`). `th faketandem pairing PairStep2` makes it show its code, `123456`. The CI agent is told to walk the setup (`ci/agent-faketandem-walk.md`) |
-| `--pump-scenario` | faketandem's `-scenario`: hours of pump use replayed before the app connects, giving history, IOB, a last bolus and a running temp basal. `recent-doses` covers 6 h: boluses from the pump and from an app (the last one stopped short), a 0% temp, a suspend and resume, and a 150% temp still running, with about 3.2 U IOB on the pump. `scheduled-basal` is 6 h of the profile's basal alone. Both run on a 0.85 U/hr profile, with a BasalDelivery record every 5 minutes at the rate in force. A JSON file can be given instead |
+| `--pump-scenario` | faketandem's `-scenario`: hours of pump use replayed before the app connects, giving history, IOB, a last bolus and perhaps a running temp basal, with a BasalDelivery record every 5 minutes at the rate in force. A preset (below; a dropdown in the web UI and the CI workflow) or a JSON file |
 | App settings | the app's basal schedule is seeded at faketandem's 0.85 U/hr profile, so neither TandemKit's basal check nor its history reconciliation finds a difference the harness made |
+
+The presets (`SCENARIOS` in `harness/faketandem.py`; each is a file in faketandem's `pkg/harness/scenarios`, whose
+README describes it in full). All but `pump-profile-differs` run on the app's 0.85 U/hr profile. IOB is the pump's
+own figure with Control-IQ off.
+
+| Preset | What the pump did before the app connects |
+|---|---|
+| `recent-doses` | 6 h: boluses from the pump and from an app (the last stopped at 1.2 of 2 U), a 0% temp, a suspend and resume, a 150% temp still running; about 3.2 U IOB |
+| `scheduled-basal` | 6 h of the profile's basal alone; no bolus, no IOB |
+| `pump-boluses` | 6 h: four boluses from the pump's screen only, the last 15 minutes ago; about 4.9 U IOB, none from an app |
+| `app-doses` | 6 h driven by another app over Bluetooth: app boluses and app temps (with their `SetTempRateResponse` records), one temp stopped early, a 50% temp still running; about 1.5 U IOB |
+| `suspended-now` | 6 h: two pump boluses, then suspended from the pump's screen 45 minutes ago and still suspended; about 2.0 U IOB |
+| `stopped-boluses` | 6 h: boluses stopped part-way, the last stopped before it delivered anything (`LastBolusStatus` reads 0 U); about 2.7 U IOB |
+| `control-iq` | 6 h with Control-IQ on and still on: its rate moving between 0 and 1.4 U/hr, two automatic boluses and one from the pump; TandemKit's setup turns Control-IQ off, so use it with `--pump-setup walk` |
+| `pump-profile-differs` | 6 h on a six-segment pump profile (0.6–1.1 U/hr) that is not the app's: TandemKit writes the app's schedule over it, and a setup history load finds basal the app did not count |
+| `day-of-use` | 24 h of boluses, temps and a suspend: four times the 6 h a setup history load reads |
+
+The presets past `scheduled-basal` need a faketandem that has them (`--faketandem-ref` until they are on its `main`).
 
 `th faketandem start|stop|status|seed|pairing|history|scenario|api` controls the emulator and reads what the pump
 holds (`th faketandem --help`). The CI agent reaches it through the sim daemon, because the agent's sandbox has no

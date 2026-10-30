@@ -125,9 +125,10 @@ button.small{padding:2px 9px;font-size:12px;margin-top:8px;display:block}
       </div>
       <div class="row">
         <div><label for="pump_scenario">Pump history</label>
-          <input type="text" id="pump_scenario" name="pump_scenario" list="pump_scenarios" placeholder="none"
-                 title="pump use replayed before the app connects: history, IOB, last bolus, a running temp basal">
-          <datalist id="pump_scenarios"><option value="recent-doses"><option value="scheduled-basal"></datalist></div>
+          <select id="pump_scenario" name="pump_scenario"
+                  title="what the pump did in the hours before the app connects: history, IOB, last bolus, a running temp basal">
+            <option value="" selected>none</option></select>
+          <div class="hint" id="pump_scenario_hint"></div></div>
         <div><label for="faketandem_ref">faketandem ref</label>
           <input type="text" id="faketandem_ref" name="faketandem_ref" placeholder="main"></div>
       </div>
@@ -261,6 +262,11 @@ api("/api/options").then(o => {
   $("#sim_device").placeholder = o.defaults.sim_device || "iPhone 16";
   $("#watch_models").innerHTML = (o.watch_models || []).map(d => `<option value="${esc(d)}">`).join("");
   $("#watch_model").placeholder = o.defaults.watch_model || "Apple Watch Series 11 (46mm)";
+  const scenarios = o.pump_scenarios || [];
+  $("#pump_scenario").insertAdjacentHTML("beforeend", scenarios.map(x => `<option value="${esc(x.name)}">${esc(x.name)}</option>`).join(""));
+  const hint = () => { const x = scenarios.find(x => x.name === $("#pump_scenario").value);
+    $("#pump_scenario_hint").textContent = x ? x.summary : "no history: a pump that has done nothing yet"; };
+  $("#pump_scenario").onchange = hint; hint();
 }).catch(() => {});
 // "Add cherry-pick" / "Add submodule override": one field per item, each with its own label and a remove button
 let addSeq = 0;

@@ -15,7 +15,7 @@ Two ways to begin:
            moves it on to show its code (`th faketandem pairing PairStep2`) and enters PAIRING_CODE.
   preseed  the pump is already paired: faketandem holds a long-term key and the app's PumpManagerState.plist holds
            the driver's state after a pairing with it, as TandemKit's TrioClosedLoopTests seed it.
-A scenario (faketandem's -scenario: a preset such as recent-doses, or a JSON file) gives the pump hours of use before
+A scenario (faketandem's -scenario: a preset in SCENARIOS, or a JSON file) gives the pump hours of use before
 the app first connects: history, IOB, a last bolus, a running temp basal.
 
 faketandem's HTTP API (state, pump-side actions, history, faults) is reached with `th faketandem api`, through the sim
@@ -53,6 +53,21 @@ PAIRED_PAIRING_STATE = "PairStep2"
 PUMP_BASAL_RATE = 0.85
 MAX_BASAL = 2.0
 MAX_BOLUS = 10.0
+# faketandem's built-in -scenario presets (its pkg/harness/scenarios), in the order the web UI and the e2e workflow's
+# pump_scenario choice list them. A faketandem ref older than a preset refuses it at start.
+SCENARIOS = {
+    "recent-doses": "6 h: pump and app boluses (one stopped short), 0% temp, suspend and resume, a 150% temp still "
+                    "running; about 3.2 U IOB",
+    "scheduled-basal": "6 h of the profile's basal alone; no bolus, no IOB",
+    "pump-boluses": "6 h: four boluses from the pump's screen only, the last 15 min ago; about 4.9 U IOB",
+    "app-doses": "6 h driven by another app: app boluses and app temps (one stopped early), a 50% temp still running; "
+                 "about 1.5 U IOB",
+    "suspended-now": "6 h: two pump boluses, then suspended 45 min ago and still suspended; about 2.0 U IOB",
+    "stopped-boluses": "6 h: boluses stopped part-way, the last one stopped at 0 U; about 2.7 U IOB",
+    "control-iq": "6 h with Control-IQ on and still on: its rate moving, two automatic boluses; for the walk setup",
+    "pump-profile-differs": "6 h on a six-segment pump profile that is not the app's flat 0.85 U/hr",
+    "day-of-use": "24 h of boluses, temps and a suspend: four times the setup history load's 6 h window",
+}
 TANDEM_PLUGIN_ID = "TandemPumpManager"
 REMOTE = {"faketandem_api"}
 
@@ -175,11 +190,17 @@ def read_hello(gatt: str, timeout: float = 5.0) -> dict:
     return hello
 
 
+def check_scenario(scenario: str | None) -> None:
+    if scenario and scenario not in SCENARIOS and not Path(scenario).is_file():
+        raise HarnessError(f"pump scenario {scenario!r} is neither a preset ({', '.join(SCENARIOS)}) nor a file")
+
+
 def start(*, setup: str = "preseed", scenario: str | None = None, ref: str | None = None,
           startup_timeout: float = 60.0) -> dict:
     """A new faketandem (any running one is stopped) for `setup`, with `scenario` replayed before anything connects."""
     if setup not in SETUPS:
         raise HarnessError(f"unknown pump setup {setup!r} ({' | '.join(SETUPS)})")
+    check_scenario(scenario)
     stop()
     path, info = binary(ref)
     gatt, api_port = f"{HOST}:{_free_port()}", _free_port()
