@@ -6,7 +6,8 @@ Two ways to drive a physical iPhone:
 
 Device (as of 2026-09-19): the user's test iPhone, iOS 18.6.1, **rootless jailbreak**, TrollVNC 3.2-272 installed
 (Settings ▸ TrollVNC). Framebuffer 828×1792. The Mac and phone are on the same Wi-Fi; the phone also connects over USB
-(usbmuxd sees it, and the user keeps `iproxy 2222:22` for SSH).
+(usbmuxd sees it). With `TH_VNC_HOST` blank/localhost both TrollVNC (5901) and SSH go over USB: the harness starts
+`iproxy 5901:5901` and `iproxy 2222:22` (`TH_SSH_LOCAL_PORT`) itself, so a changed LAN IP does not matter.
 
 ## Control: TrollVNC (works, verified)
 - Configure `.env` (gitignored) with `TH_VNC_HOST=<phone LAN IP>` (shown in Settings ▸ TrollVNC) and `TH_VNC_PASSWORD=<full-access password>`.

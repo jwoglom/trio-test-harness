@@ -56,7 +56,8 @@ DEFAULTS = {
     "TH_DEVICE_PASSCODE": "",         # phone passcode for `th device unlock` (put it in .env only; never commit)
     "TH_SSH_HOST": "",                # jailbroken phone SSH host; blank = TH_VNC_HOST
     "TH_SSH_USER": "mobile",
-    "TH_SSH_PORT": "22",
+    "TH_SSH_PORT": "22",              # sshd port on the phone
+    "TH_SSH_LOCAL_PORT": "2222",      # local port iproxy forwards to it when the phone is on USB (host blank/localhost)
     "TH_IPA_HTTP_PORT": "8765",       # local HTTP server used for TrollStore installs
     "TH_IPA_HTTP_HOST": "",           # IP/hostname the iPhone can reach; blank = auto (LAN IP)
     "TH_STABLE_MTIMES": "1",         # 0: leave file mtimes as git wrote them (every checkout then looks changed to Xcode)

@@ -6,6 +6,7 @@ import http.server
 import os
 import shutil
 import socketserver
+import subprocess
 import threading
 from pathlib import Path
 
@@ -184,10 +185,33 @@ def devicectl_open_url(udid: str, url: str) -> None:
 # ---------------- SSH to the jailbroken phone (diagnostics + recovery) -----------------
 
 def ssh_target() -> tuple[str, str, str]:
+    """A local host (blank/localhost) means the phone on USB, like TrollVNC: forward its sshd with iproxy to
+    TH_SSH_LOCAL_PORT (127.0.0.1:22 would be the Mac's own sshd)."""
     host = CONFIG.get("TH_SSH_HOST") or CONFIG.get("TH_VNC_HOST")
+    port = CONFIG.get("TH_SSH_PORT") or "22"
     if not host or host in ("localhost", "127.0.0.1"):
         host = "127.0.0.1"
-    return CONFIG.get("TH_SSH_USER") or "mobile", host, CONFIG.get("TH_SSH_PORT") or "22"
+        if CONFIG.bool("TH_VNC_VIA_USB"):
+            port = _ensure_ssh_iproxy(port)
+    return CONFIG.get("TH_SSH_USER") or "mobile", host, port
+
+
+def _ensure_ssh_iproxy(device_port: str) -> str:
+    """Start `iproxy TH_SSH_LOCAL_PORT:<device_port>` unless something already listens there; it is detached so
+    later commands reuse it."""
+    from .util import port_open, wait_for
+    local = int(CONFIG.get("TH_SSH_LOCAL_PORT") or "2222")
+    if port_open("127.0.0.1", local):
+        return str(local)
+    if not which("iproxy"):
+        raise HarnessError("iproxy missing (brew install libusbmuxd)")
+    cmd = ["iproxy", f"{local}:{device_port}"]
+    if CONFIG.get("TH_DEVICE_UDID"):
+        cmd += ["-u", CONFIG.get("TH_DEVICE_UDID")]
+    log(f"$ {' '.join(cmd)} (background)")
+    subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
+    wait_for(lambda: port_open("127.0.0.1", local), 10, what="iproxy SSH listener")
+    return str(local)
 
 
 def ssh_run(cmd: str, *, check: bool = True, timeout: int = 60, quiet: bool = True, mux: bool = False):
