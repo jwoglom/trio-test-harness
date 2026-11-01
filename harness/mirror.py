@@ -83,6 +83,14 @@ class MirrorDriver(Driver):
             self.mirror.tap(gx, gy)
         time.sleep(0.2)
 
+    def multi_tap(self, x: int, y: int, count: int = 2, *, interval: float = 0.1) -> None:
+        gx, gy = self._to_screen(x, y)
+        for i in range(count):
+            if i:
+                time.sleep(interval)
+            self.mirror.tap(gx, gy)
+        time.sleep(0.2)
+
     def swipe(self, x1: int, y1: int, x2: int, y2: int, *, duration: float = 0.3) -> None:
         a = self._to_screen(x1, y1); b = self._to_screen(x2, y2)
         self.mirror.drag(a[0], a[1], b[0], b[1], duration=duration)

@@ -261,6 +261,9 @@ class RemoteDriver(Driver):
     def tap(self, x, y, *, duration: float = 0.0):
         return self._call("tap", x, y, duration=duration)
 
+    def multi_tap(self, x, y, count: int = 2, *, interval: float = 0.1):
+        return self._call("multi_tap", x, y, count, interval=interval)
+
     def swipe(self, x1, y1, x2, y2, *, duration: float = 0.3):
         return self._call("swipe", x1, y1, x2, y2, duration=duration)
 

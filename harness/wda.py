@@ -162,6 +162,17 @@ class WDAClient:
         except HarnessError:
             self._req("POST", "/wda/tap/0", {"x": x, "y": y})
 
+    def multi_tap(self, x: float, y: float, count: int, *, interval: float = 0.1, hold: float = 0.05) -> None:
+        """`count` taps at one point (points) as one W3C pointer action, so XCTest synthesizes them with exact timing."""
+        steps: list[dict] = [{"type": "pointerMove", "duration": 0, "x": x, "y": y}]
+        for i in range(count):
+            if i:
+                steps.append({"type": "pause", "duration": int(interval * 1000)})
+            steps += [{"type": "pointerDown", "button": 0}, {"type": "pause", "duration": int(hold * 1000)},
+                      {"type": "pointerUp", "button": 0}]
+        self._req("POST", "/actions", {"actions": [
+            {"type": "pointer", "id": "finger1", "parameters": {"pointerType": "touch"}, "actions": steps}]})
+
     def touch_and_hold(self, x: float, y: float, duration: float) -> None:
         self._req("POST", "/wda/touchAndHold", {"x": x, "y": y, "duration": duration})
 

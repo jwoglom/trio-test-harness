@@ -225,6 +225,12 @@ until merged: pass `--faketandem-ref` until then).
 - Not verified yet: `th faketandem seed` by hand; the web UI's pump fields; Loop with `--pump faketandem`.
 
 ## Still unverified
+- `th tap --count N` / `Driver.multi_tap` and `th flow tandem-feature-flag[s]` (`harness/flows/tandemkit.py`, added
+  2026-11-01 after CI run 41275701186 could not reach TandemKit's Feature Flags list: three `th tap` calls landed ~1.5 s
+  apart, too slow for `onTapGesture(count: 3)`). Checked only against fake drivers, not yet on a Mac: WDA's `/actions`
+  triple tap, the image point (its accessibility node, else 60 pt above "No feature flags changed."), the Toggle's
+  switch point and its state (tree value; on the phone, a tinted switch in the screenshot), and Loop's
+  `open_pump_settings`.
 - `th report pr` against a real PR (gh --attach inline uploads; ask before posting).
 - `th webui` with a real job: only tested with the stages stubbed (auth, validation, stage order, sandbox settings per
   target, comment gating). Unverified: the sandboxed agent on rooted-vnc (daemon socket `daemon-rooted-vnc.sock`, `device

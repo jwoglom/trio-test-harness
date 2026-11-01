@@ -199,6 +199,11 @@ class SimulatorDriver(Driver):
             args += ["--duration", str(duration)]
         self._idb(args, quiet=True)
 
+    def multi_tap(self, x: int, y: int, count: int = 2, *, interval: float = 0.1) -> None:
+        # idb taps one per process, too slow for a multi-tap gesture, so this one needs WebDriverAgent.
+        wda = self.wda or self.ensure_wda()
+        wda.multi_tap(x / self.scale, y / self.scale, count, interval=interval)
+
     def swipe(self, x1: int, y1: int, x2: int, y2: int, *, duration: float = 0.3) -> None:
         self._need_input_backend()
         s = self.scale

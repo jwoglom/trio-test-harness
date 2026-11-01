@@ -247,7 +247,10 @@ Mode, and the phone unlocked while installing. Install only — driving the phon
 `doctor` · `build` · `install` · `launch` · `sim {list,runtimes,install-runtime,boot,shutdown,erase,container,defaults,openurl}` ·
 `device {list,vnc-check,serve-ipa,wake,ssh,diag,vnc-restart,kill,apps}` · `faketandem {start,stop,seed,status,pairing,history,scenario,api}` · `faceid {enroll,match,nomatch}` · `daemon {start,stop,status,restart}` · `wda {build,start,stop,status}` · `watch {pair,status,agent}` · `shot` · `tap` · `swipe` · `drag` · `scroll` · `type` · `key` · `home` · `crown` · `tap-text` · `find` ·
 `tree` · `wait-text` · `ocr` · `logs [trio|tandem|watch|all]` · `db {stores,tables,schema,query,exec}` · `oslog` · `crashes` · `files {ls,cat}` · `perf` · `run {new,current,use,note,finish,list,steps}` · `report {html,pr,markdown}` ·
-`flow {onboarding-walk,add-cgm-sim,add-pump-sim,back-home,dismiss,at-home}` · `test smoke`
+`flow {onboarding-walk,add-cgm-sim,add-pump-sim,back-home,dismiss,at-home,tandem-feature-flags,tandem-feature-flag}` · `test smoke`
+
+`tap X Y --count 3` sends a triple tap as one gesture (WebDriverAgent's W3C actions on the simulator, one RFB burst over
+TrollVNC); `th flow tandem-feature-flag controlIQSupport` uses it to reveal TandemKit's hidden feature flag list and turn one on.
 
 Runs live in `runs/<timestamp>-<name>/` (`screenshots/`, `steps.jsonl`, `run.json`, `report.html`).
 

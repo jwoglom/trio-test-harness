@@ -54,6 +54,8 @@ launch. CI: `pump`, `pump_setup`, `pump_scenario` and `faketandem_ref`; `trio-te
   the pairing step. `api METHOD PATH ['JSON']` makes the pump act on its own, for example
   `POST /api/state/bolus/start '{"units":1}'`. `stop --save` keeps its state, history and logs in the run. These work
   from the sandboxed CI agent, through the sim daemon.
+- TandemKit's feature flags (Control-IQ Support, off by default, gates its Control-IQ screens) are behind a triple tap
+  on the pump image of its Feature Flags screen: `th flow tandem-feature-flag controlIQSupport [--off]` (trio-ui-drive).
 - By hand: `th build --pr …` cannot make a virtual-pump build, so use `trio-test-e2e --pump faketandem`. Then
   `th faketandem start --setup preseed [--scenario …] --seed` and `th launch`.
 - Restart the app only with `th launch`. Started from its icon, it has no faketandem address and reports Bluetooth as
