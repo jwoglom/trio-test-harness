@@ -377,6 +377,16 @@ def cmd_faketandem(args):
 
 
 def _faketandem_cgm(FT, args):
+    try:
+        return _faketandem_cgm_action(FT, args)
+    except HarnessError as e:
+        if "/api/cgm" in str(e) and "404" in str(e) and "page not found" in str(e):
+            raise HarnessError("this faketandem has no /api/cgm; start one from jwoglom/faketandem branch "
+                               "claude/cool-johnson-11ylyq (or main once merged): th faketandem start --ref ...") from None
+        raise
+
+
+def _faketandem_cgm_action(FT, args):
     from .report import Run
     action = args.cgm_sub or "show"
     if action == "reset":
