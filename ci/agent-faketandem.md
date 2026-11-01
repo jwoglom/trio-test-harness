@@ -15,6 +15,14 @@ harness daemon:
   oldest first. `--all` gives every record as JSON, the BasalDelivery records written every 5 minutes included.
 - `./trio-test-harness faketandem pairing PairStep2`: the pump now shows its pairing code. This is the step after the
   user double-taps the pump's button.
+- `./trio-test-harness faketandem cgm`: the pump's CGM sensor session (G6 or G7), which TandemKit's CGM Settings
+  screen (the pump's settings ▸ CGM Settings) pairs, starts and stops. The pump starts with a G6 session a day old.
+  `cgm reset g7` leaves it with no session; the app's G7 code or G6 transmitter and start then move it through
+  `start_pending`, `warmup` and `active` on timers. `cgm set` sets fields (`--manual` turns the timers off,
+  `--warmup-seconds 60` shortens one, `--worn-g7-code 4321` makes a pairing with any other code never find the sensor,
+  `--refuse g7_code` makes the pump refuse the app's code, `--egv 65`). `cgm advance [PHASE] [--age-hours H]` moves it
+  on: the next phase, or `active`, `grace`, `signal_loss`, `expired`, `failed`, `not_found` and the rest, so screens
+  for a sensor about to expire, in its grace period, or failed can be reached without waiting days.
 - `./trio-test-harness faketandem api METHOD PATH ['JSON']`: anything else, done the way the pump does it on its own
   (see faketandem's README). Some examples:
   - `POST /api/state/bolus/start '{"units": 1.5}'`: a bolus from the pump's screen.

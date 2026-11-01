@@ -225,6 +225,10 @@ until merged: pass `--faketandem-ref` until then).
 - Not verified yet: `th faketandem seed` by hand; the web UI's pump fields; Loop with `--pump faketandem`.
 
 ## Still unverified
+- `th faketandem cgm` (2026-11-01) over faketandem's `/api/cgm` (jwoglom/faketandem branch `claude/cool-johnson-11ylyq`
+  until merged): run here against a faketandem binary on Linux (reset, set, advance, refusals, a wrong worn code ending
+  `not_found`, timers on the real clock). Not yet run on a Mac with the app: TandemKit's CGM Settings screen and its G6
+  and G7 wizards against it, and the CI agent using it through the sim daemon.
 - `th tap --count N` / `Driver.multi_tap` and `th flow tandem-feature-flag[s]` (`harness/flows/tandemkit.py`, added
   2026-11-01 after CI run 41275701186 could not reach TandemKit's Feature Flags list: three `th tap` calls landed ~1.5 s
   apart, too slow for `onTapGesture(count: 3)`). Checked only against fake drivers, not yet on a Mac: WDA's `/actions`

@@ -338,6 +338,74 @@ def set_pairing_state(state: str) -> str:
     return api("GET", "/api/bluetooth/pairingstate")["pairingState"]
 
 
+CGM_TARGETS = ["next", "start_pending", "warmup", "active", "grace", "signal_loss", "stop_pending", "stopped",
+               "expired", "failed", "not_found"]
+CGM_COMMANDS = ["sensor_type", "transmitter_id", "g6_start", "g7_code", "stop"]
+
+
+def _span(seconds: float) -> str:
+    seconds = int(seconds)
+    d, rem = divmod(seconds, 86400)
+    h, rem = divmod(rem, 3600)
+    m = rem // 60
+    return " ".join(f"{v}{u}" for v, u in ((d, "d"), (h, "h"), (m, "m")) if v) or f"{seconds}s"
+
+
+def cgm_summary(cgm: dict) -> str:
+    """The pump's CGM in one line. A faketandem from before /api/cgm reports no phase."""
+    if "phase" not in cgm:
+        return (f"CGM: sensor type {cgm.get('sensor_type')}, session {'on' if cgm.get('session_active') else 'off'}, "
+                f"{cgm.get('current_egv')} mg/dL (this faketandem predates /api/cgm)")
+    kind = (cgm.get("sensor_type_name") or "?").upper()
+    phase = cgm["phase"] + (f" ({cgm['end_reason']})" if cgm.get("end_reason") else "")
+    line = f"CGM: {kind} {phase}"
+    if cgm.get("g7_pairing_code") is not None and kind == "G7":
+        line += f", code {cgm['g7_pairing_code']:04d}"
+    if kind == "G6" and cgm.get("transmitter_id"):
+        line += f", transmitter {cgm['transmitter_id']}"
+    if cgm.get("session_start"):
+        line += f", {_span(cgm.get('session_remaining_seconds', 0))} left"
+    if cgm.get("egv_status") in (1, 2, 3):
+        line += f", {cgm.get('current_egv')} mg/dL"
+    if cgm.get("alerts"):
+        line += f"; alerts {', '.join(cgm['alerts'])}"
+    if not cgm.get("auto", True):
+        line += "; timers off"
+    return line
+
+
+def cgm_update(args) -> dict:
+    """PUT /api/cgm's body from `th faketandem cgm set`'s options."""
+    body: dict = json.loads(args.json) if getattr(args, "json", None) else {}
+    for key in ("sensor_type", "transmitter_id", "egv", "trend_rate", "transmitter_battery"):
+        if getattr(args, key, None) is not None:
+            body[key] = getattr(args, key)
+    if args.g7_code is not None:
+        body["g7_pairing_code"] = args.g7_code
+    if args.auto is not None:
+        body["auto"] = args.auto
+    timing = {k: getattr(args, k) for k in ("connect_seconds", "warmup_seconds", "lifetime_seconds", "grace_seconds",
+                                            "stop_seconds") if getattr(args, k, None) is not None}
+    if timing:
+        body["timing"] = timing
+    worn = {k: v for k, v in (("g7_code", args.worn_g7_code), ("transmitter_id", args.worn_transmitter)) if v is not None}
+    if worn:
+        body["body"] = worn
+    if args.refuse is not None:
+        refuse = {}
+        for item in args.refuse:
+            if not item:
+                continue
+            name, _, status = item.partition("=")
+            refuse[name] = int(status or 1)
+        body["refuse"] = refuse
+    if args.alerts is not None:
+        body["extra_alerts"] = args.alerts
+    if not body:
+        raise HarnessError("nothing to set; see `th faketandem cgm set --help`")
+    return body
+
+
 def summary(snapshot: dict | None = None) -> list[str]:
     """What the pump holds, as a person reading its screen would put it."""
     s = snapshot or api("GET", "/api/state")
@@ -362,6 +430,8 @@ def summary(snapshot: dict | None = None) -> list[str]:
                      f"(end reason {last.get('end_reason_id')}, source {last.get('source_id')})")
     lines.append(f"reservoir {insulin.get('reservoir_units', 0):.1f} U; history log {s.get('history', {}).get('count', 0)} "
                  "records")
+    if s.get("cgm"):
+        lines.append(cgm_summary(s["cgm"]))
     return lines
 
 

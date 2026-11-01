@@ -54,6 +54,12 @@ launch. CI: `pump`, `pump_setup`, `pump_scenario` and `faketandem_ref`; `trio-te
   the pairing step. `api METHOD PATH ['JSON']` makes the pump act on its own, for example
   `POST /api/state/bolus/start '{"units":1}'`. `stop --save` keeps its state, history and logs in the run. These work
   from the sandboxed CI agent, through the sim daemon.
+- The pump's CGM sensor session (TandemKit's CGM Settings screen pairs a G6 or G7 through it): `th faketandem cgm`
+  shows it, `cgm reset g6|g7` leaves no session, `cgm set` (codes, `--worn-g7-code`/`--worn-transmitter` for the sensor
+  actually worn, `--refuse`, timers, `--manual`, `--egv`) and `cgm advance [PHASE] [--age-hours H]` drive it through
+  start_pending, warmup, active, grace (G7), signal_loss, stop_pending and stopped (expired, failed, not_found). The app
+  reads it through CGMStatusV2/EGV/alert reads and gets CGM_CHANGE/CGM_ALERT for every change. Needs a faketandem with
+  /api/cgm (jwoglom/faketandem branch `claude/cool-johnson-11ylyq` until merged: `--faketandem-ref`).
 - TandemKit's feature flags (Control-IQ Support, off by default, gates its Control-IQ screens) are behind a triple tap
   on the pump image of its Feature Flags screen: `th flow tandem-feature-flag controlIQSupport [--off]` (trio-ui-drive).
 - By hand: `th build --pr …` cannot make a virtual-pump build, so use `trio-test-e2e --pump faketandem`. Then

@@ -141,8 +141,10 @@ own figure with Control-IQ off.
 
 The presets past `scheduled-basal` need a faketandem that has them (`--faketandem-ref` until they are on its `main`).
 
-`th faketandem start|stop|status|seed|pairing|history|scenario|api` controls the emulator and reads what the pump
-holds (`th faketandem --help`). The CI agent reaches it through the sim daemon, because the agent's sandbox has no
+`th faketandem start|stop|status|seed|pairing|history|scenario|api|cgm` controls the emulator and reads what the pump
+holds (`th faketandem --help`). `th faketandem cgm` shows and drives the pump's G6/G7 sensor session (reset, set,
+advance through its phases), which TandemKit's CGM Settings screen pairs, starts and stops; it needs a faketandem with
+`/api/cgm` (branch `claude/cool-johnson-11ylyq` until merged). The CI agent reaches it through the sim daemon, because the agent's sandbox has no
 network. `stop --save` writes the pump's state, history log, request log and log into the run's `faketandem/`, and CI
 and the web UI do that at the end of a job. In CI: `pump`, `pump_setup`, `pump_scenario` and `faketandem_ref`, with
 Go set up by `actions/setup-go`. In the web UI: "Pump (simulator)". Only emulated values are used. faketandem's
@@ -245,7 +247,7 @@ Mode, and the phone unlocked while installing. Install only — driving the phon
 
 ## CLI overview (`./trio-test-harness --help`; `th` = short alias in `bin/`)
 `doctor` · `build` · `install` · `launch` · `sim {list,runtimes,install-runtime,boot,shutdown,erase,container,defaults,openurl}` ·
-`device {list,vnc-check,serve-ipa,wake,ssh,diag,vnc-restart,kill,apps}` · `faketandem {start,stop,seed,status,pairing,history,scenario,api}` · `faceid {enroll,match,nomatch}` · `daemon {start,stop,status,restart}` · `wda {build,start,stop,status}` · `watch {pair,status,agent}` · `shot` · `tap` · `swipe` · `drag` · `scroll` · `type` · `key` · `home` · `crown` · `tap-text` · `find` ·
+`device {list,vnc-check,serve-ipa,wake,ssh,diag,vnc-restart,kill,apps}` · `faketandem {start,stop,seed,status,pairing,history,scenario,api,cgm}` · `faceid {enroll,match,nomatch}` · `daemon {start,stop,status,restart}` · `wda {build,start,stop,status}` · `watch {pair,status,agent}` · `shot` · `tap` · `swipe` · `drag` · `scroll` · `type` · `key` · `home` · `crown` · `tap-text` · `find` ·
 `tree` · `wait-text` · `ocr` · `logs [trio|tandem|watch|all]` · `db {stores,tables,schema,query,exec}` · `oslog` · `crashes` · `files {ls,cat}` · `perf` · `run {new,current,use,note,finish,list,steps}` · `report {html,pr,markdown}` ·
 `flow {onboarding-walk,add-cgm-sim,add-pump-sim,back-home,dismiss,at-home,tandem-feature-flags,tandem-feature-flag}` · `test smoke`
 

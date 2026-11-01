@@ -371,7 +371,38 @@ def cmd_faketandem(args):
         body = json.loads(args.body) if args.body else None
         print(json.dumps(FT.api(args.method, args.path, body), indent=2))
         return 0
+    if args.sub == "cgm":
+        return _faketandem_cgm(FT, args)
     raise HarnessError(f"unknown faketandem command {args.sub}")
+
+
+def _faketandem_cgm(FT, args):
+    from .report import Run
+    action = args.cgm_sub or "show"
+    if action == "reset":
+        cgm = FT.api("POST", "/api/cgm/reset", {"sensor_type": args.sensor_type})
+    elif action == "advance":
+        body = {"to": args.to}
+        age = args.age_seconds if args.age_seconds is not None else (
+            args.age_hours * 3600 if args.age_hours is not None else None)
+        if age is not None:
+            body["session_age_seconds"] = age
+        cgm = FT.api("POST", "/api/cgm/advance", body)
+    elif action == "set":
+        cgm = FT.api("PUT", "/api/cgm", FT.cgm_update(args))["cgm"]
+    else:
+        cgm = FT.api("GET", "/api/cgm")
+    if getattr(args, "as_json", False):
+        print(json.dumps(cgm, indent=2))
+    else:
+        print(FT.cgm_summary(cgm))
+    if action != "show":
+        try:
+            r = Run.current(None)
+            r.log_step("note", f"faketandem CGM {action}: {FT.cgm_summary(cgm)}")
+        except HarnessError:
+            pass
+    return 0
 
 
 def cmd_faceid(args):
@@ -1121,7 +1152,7 @@ def cmd_test(args):
 
 def build_parser() -> argparse.ArgumentParser:
     from . import apps
-    from .faketandem import SCENARIOS
+    from .faketandem import SCENARIOS, CGM_TARGETS as FT_CGM_TARGETS, CGM_COMMANDS as FT_CGM_COMMANDS
     p = argparse.ArgumentParser(prog="trio-test-harness", description="Trio / Loop test harness toolbox (short alias: th)")
     p.add_argument("--target", help="sim | rooted-vnc | iphone-usb | watch (aliases: device=rooted-vnc, mirror=iphone-usb; default $TH_TARGET or sim)")
     p.add_argument("--app", choices=sorted(apps.APPS),
@@ -1204,6 +1235,40 @@ def build_parser() -> argparse.ArgumentParser:
                                      "'{\"units\": 1.5}' (see faketandem's README)")
     fap.add_argument("method", choices=["GET", "POST", "PUT", "PATCH", "DELETE", "get", "post", "put", "patch", "delete"])
     fap.add_argument("path"); fap.add_argument("body", nargs="?")
+    fcg = fts.add_parser("cgm", help="the pump's CGM sensor session (G6/G7): show it, or reset, advance or set it "
+                                     "(faketandem's /api/cgm; README \"CGM sensor session\")")
+    fcg.add_argument("--json", dest="as_json", action="store_true", help="faketandem's whole CGM view")
+    fcgs = fcg.add_subparsers(dest="cgm_sub")
+    fcr = fcgs.add_parser("reset", help="no session, timers and settings back to their defaults")
+    fcr.add_argument("sensor_type", nargs="?", default="none", choices=["none", "g6", "g7", "fsl2"])
+    fcr.add_argument("--json", dest="as_json", action="store_true")
+    fca = fcgs.add_parser("advance", help="move the session: the next phase, a phase, or an ending")
+    fca.add_argument("to", nargs="?", default="next", choices=FT_CGM_TARGETS)
+    age = fca.add_mutually_exclusive_group()
+    age.add_argument("--age-hours", type=float, help="date the session's start this far back (e.g. 236 = 4 h before a "
+                                                     "10-day sensor expires)")
+    age.add_argument("--age-seconds", type=float)
+    fca.add_argument("--json", dest="as_json", action="store_true")
+    fcs = fcgs.add_parser("set", help="set fields; moves no phase")
+    fcs.add_argument("--sensor-type", dest="sensor_type", choices=["none", "g6", "g7", "fsl2"])
+    fcs.add_argument("--transmitter", dest="transmitter_id", help="the G6 transmitter the pump holds")
+    fcs.add_argument("--g7-code", type=int, help="the G7 pairing code the pump holds (-1 for none)")
+    fcs.add_argument("--egv", type=int, help="glucose, mg/dL, while active or in grace")
+    fcs.add_argument("--trend-rate", dest="trend_rate", type=int)
+    fcs.add_argument("--battery", dest="transmitter_battery", choices=["unavailable", "error", "expired", "ok", "out_of_range"])
+    fcs.add_argument("--auto", dest="auto", action="store_true", default=None, help="timers move the phases (default)")
+    fcs.add_argument("--manual", dest="auto", action="store_false", help="only commands and `advance` move them")
+    for name in ("connect", "warmup", "lifetime", "grace", "stop"):
+        fcs.add_argument(f"--{name}-seconds", dest=f"{name}_seconds", type=float)
+    fcs.add_argument("--worn-g7-code", help="the G7 sensor actually worn: a pairing with another code is never found "
+                                            "('' = any)")
+    fcs.add_argument("--worn-transmitter", help="the G6 transmitter actually worn ('' = any)")
+    fcs.add_argument("--refuse", nargs="*", metavar="CMD[=STATUS]",
+                     help="the pump answers these commands with STATUS (default 1): " + ", ".join(FT_CGM_COMMANDS)
+                          + "; with none, clears them")
+    fcs.add_argument("--alerts", type=int, nargs="*", metavar="BIT", help="CGM alert bits raised on top of the lifecycle's")
+    fcs.add_argument("--json", dest="json", metavar="BODY", help="a PUT /api/cgm body, merged under the options")
+    fcs.add_argument("--print-json", dest="as_json", action="store_true")
     ft.set_defaults(fn=cmd_faketandem)
 
     fi = sp.add_parser("faceid", help="simulator Face ID: enroll a face (trio-test-e2e does at launch), then answer an "
