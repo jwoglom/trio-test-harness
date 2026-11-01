@@ -434,3 +434,15 @@ def add_cgm_simulator(drv: Driver, run: Run | None = None, attempts: int = 2) ->
 
 def add_pump_simulator(drv: Driver, run: Run | None = None, attempts: int = 2) -> None:
     _add_device(drv, run, "pump", ADD_PUMP, PUMP_SIMULATOR, attempts)
+
+
+def open_pump_settings(drv: Driver, run: Run | None = None) -> None:
+    """Settings ▸ the pump's row (its localizedTitle, "Tandem Mobi"): its manager's own settings screen."""
+    reset_to_home(drv, run)
+    open_settings(drv)
+    step(run, drv, "settings", "Settings")
+    # the HUD stays in the tree behind the sheet; Settings' row is the lower one
+    nodes = sorted((n for n in drv.find(TANDEM_PUMP) if n.w > 0), key=lambda n: n.y)
+    drv.tap(*nodes[-1].center) if nodes else drv.tap_text(TANDEM_PUMP)
+    time.sleep(2.5)
+    step(run, drv, "pump-settings", "the pump's settings")

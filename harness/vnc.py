@@ -166,6 +166,13 @@ class VNCDriver(Driver):
         self._press(int(x), int(y), LEFT, duration or 0.08)
         time.sleep(0.2)
 
+    def multi_tap(self, x: int, y: int, count: int = 2, *, interval: float = 0.1) -> None:
+        for i in range(count):
+            if i:
+                time.sleep(interval)
+            self._press(int(x), int(y), LEFT, 0.05)
+        time.sleep(0.2)
+
     def long_press(self, x: int, y: int, duration: float = 1.0) -> None:
         self._press(int(x), int(y), LEFT, duration)
 

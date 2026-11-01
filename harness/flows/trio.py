@@ -469,3 +469,14 @@ def back_to_home(drv: Driver, hops: int = 4) -> None:
         drv.tap_text("Main", exact=True)
     except LookupError:
         pass
+
+
+def open_pump_settings(drv: Driver, run: Run | None = None) -> None:
+    """Settings ▸ Devices ▸ Insulin Pump ▸ the pump's button: its manager's own settings screen (TandemKit's for a
+    Tandem pump, titled with its localizedTitle, "Tandem Mobi"; PumpConfigRootView.swift)."""
+    reset_to_home(drv, run)
+    open_settings(drv)
+    _tap_seq(drv, run, ["Devices", "Insulin Pump"])
+    drv.tap_text(TANDEM_PUMP)
+    time.sleep(2.5)
+    step(run, drv, "pump-settings", "the pump's settings")

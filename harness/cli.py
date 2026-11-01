@@ -819,7 +819,14 @@ def cmd_shot(args):
 
 
 def cmd_tap(args):
-    get_driver(_target(args)).tap(args.x, args.y, duration=args.duration); return 0
+    drv = get_driver(_target(args))
+    if args.count > 1:
+        if args.duration:
+            raise HarnessError("tap: --count and --duration do not go together")
+        drv.multi_tap(args.x, args.y, args.count, interval=args.interval)
+    else:
+        drv.tap(args.x, args.y, duration=args.duration)
+    return 0
 
 
 def cmd_swipe(args):
@@ -1043,6 +1050,17 @@ def cmd_flow(args):
         print(F.settle(drv, r))
     elif args.sub == "at-home":
         ok = F.at_home(drv); print("home" if ok else "not home"); return 0 if ok else 1
+    elif args.sub in ("tandem-feature-flags", "tandem-feature-flag"):
+        from .flows import tandemkit as TK
+        if not args.here:
+            if not args.from_pump_settings:
+                F.open_pump_settings(drv, r)
+            TK.open_feature_flags(drv, r)
+        if args.sub == "tandem-feature-flags":
+            TK.reveal_feature_flags(drv, r)
+        else:
+            changed = TK.set_feature_flag(drv, r, args.flag, not args.off)
+            print(f"{TK.flag_title(args.flag)}: {'off' if args.off else 'on'}{'' if changed else ' (already)'}")
     return 0
 
 
@@ -1306,7 +1324,11 @@ def build_parser() -> argparse.ArgumentParser:
     sh = sp.add_parser("shot", help="screenshot into the current run"); sh.add_argument("--name"); sh.add_argument("--note")
     sh.add_argument("--out"); sh.add_argument("--run"); sh.add_argument("--ocr", action="store_true"); sh.set_defaults(fn=cmd_shot)
 
-    t = sp.add_parser("tap"); t.add_argument("x", type=int); t.add_argument("y", type=int); t.add_argument("--duration", type=float, default=0); t.set_defaults(fn=cmd_tap)
+    t = sp.add_parser("tap", help="tap at screenshot pixels; --count 2/3 for a double/triple tap, sent as one gesture")
+    t.add_argument("x", type=int); t.add_argument("y", type=int); t.add_argument("--duration", type=float, default=0)
+    t.add_argument("--count", type=int, default=1, help="taps in one gesture (2 = double tap, 3 = triple tap)")
+    t.add_argument("--interval", type=float, default=0.1, help="seconds between the taps of a --count gesture")
+    t.set_defaults(fn=cmd_tap)
     sw = sp.add_parser("swipe"); [sw.add_argument(n, type=int) for n in ("x1", "y1", "x2", "y2")]; sw.add_argument("--duration", type=float, default=0.3); sw.set_defaults(fn=cmd_swipe)
     dg = sp.add_parser("drag", help="long-press then move (SwiftUI drag & drop / reorder)"); [dg.add_argument(n, type=int) for n in ("x1", "y1", "x2", "y2")]
     dg.add_argument("--hold", type=float, default=0.8); dg.add_argument("--duration", type=float, default=0.8); dg.add_argument("--settle", type=float, default=0.5); dg.set_defaults(fn=cmd_drag)
@@ -1384,6 +1406,17 @@ def build_parser() -> argparse.ArgumentParser:
     fl = sp.add_parser("flow", help="the app's UI flows (harness/flows/trio.py, loop.py)"); fls = fl.add_subparsers(dest="sub", required=True)
     for name in ("onboarding-walk", "add-cgm-sim", "add-pump-sim", "back-home", "dismiss", "settle", "at-home"):
         x = fls.add_parser(name); x.add_argument("--run")
+    tk_help = {"tandem-feature-flags": "open TandemKit's Feature Flags screen and triple-tap the pump image to list them",
+               "tandem-feature-flag": "turn one TandemKit feature flag on (or --off), revealing the list first"}
+    for name, help_ in tk_help.items():
+        x = fls.add_parser(name, help=help_); x.add_argument("--run")
+        if name == "tandem-feature-flag":
+            x.add_argument("flag", help="its title or rawValue (controlIQSupport, ...; FLAGS in harness/flows/tandemkit.py)")
+            x.add_argument("--off", action="store_true", help="turn it off instead")
+        where = x.add_mutually_exclusive_group()
+        where.add_argument("--here", action="store_true", help="the Feature Flags screen is already showing")
+        where.add_argument("--from-pump-settings", action="store_true",
+                           help="TandemKit's settings screen is already showing (skips Settings ▸ Devices ▸ Insulin Pump)")
     fl.set_defaults(fn=cmd_flow)
 
     te = sp.add_parser("test", help="end-to-end smoke test on the installed build")

@@ -18,7 +18,7 @@ phone over TrollVNC (tesseract OCR), or any iPhone through iPhone Mirroring (Vis
 3. Repeat. Wait with `th wait-text "<text>" --timeout 30` for slow transitions.
 
 ## Primitives
-`tap X Y [--duration s]` · `swipe X1 Y1 X2 Y2` · `drag X1 Y1 X2 Y2 [--hold 0.8 --duration 0.8 --settle 0.5]` (long-press then move: SwiftUI drag & drop) · `scroll down|up|left|right [--amount 0.5]` · `type "text"` (focus a field first) ·
+`tap X Y [--duration s]` · `tap X Y --count 3 [--interval 0.1]` (a double/triple tap sent as one gesture: separate `tap` calls are too far apart for `onTapGesture(count:)`; on the simulator it needs WebDriverAgent) · `swipe X1 Y1 X2 Y2` · `drag X1 Y1 X2 Y2 [--hold 0.8 --duration 0.8 --settle 0.5]` (long-press then move: SwiftUI drag & drop) · `scroll down|up|left|right [--amount 0.5]` · `type "text"` (focus a field first) ·
 `key return|backspace|tab|escape` · `home` · `tap-text "label" [--exact] [--index n]` · `tree [--filter t] [--all]` (sim only) ·
 `find "text"` · `wait-text "text"` · `ocr file.png [--find text]` · `logs [trio|tandem|all] [--grep RE -i] [--since 10m] [--level warning] [-n N] [--save]`
 (the app's own log files, to confirm what happened behind a screen; see `th logs --help`).
@@ -60,6 +60,11 @@ The phone driver cannot kill or launch by bundle id: use the App Switcher / Spot
   → double tap → code prompt), an alert to turn Control-IQ off if the pump runs it, Load Pump History (TandemKit#609),
   and setup complete. faketandem's side: `th faketandem status|history|pairing|api` (trio-fake-devices skill). Relaunch
   only with `th launch`.
+- **TandemKit feature flags** (Control-IQ Support is off by default): Settings ▸ Devices ▸ Insulin Pump ▸ Tandem Mobi ▸
+  View Debug Options ▸ Feature Flags. While every flag is at its default the screen shows only the pump image and "No
+  feature flags changed."; a triple tap on the image lists them. `th flow tandem-feature-flag controlIQSupport` goes there
+  and turns one on (`--off` turns it off; `--here` / `--from-pump-settings` start from that screen);
+  `th flow tandem-feature-flags` only reveals the list. By hand: `th tap X Y --count 3` on the image.
 - Glucose Simulator tuning lives in Settings ▸ Devices ▸ CGM (center value, amplitude, noise, scenario) and in UserDefaults
   keys `GlucoseSimulator_CenterValue`, `GlucoseSimulator_Amplitude`, `GlucoseSimulator.simulatedScenario` (sim: `th sim defaults`).
 - Settings root lists Devices, Therapy, Algorithm, Features, Notifications, Services and shows the branch/version at the bottom.
