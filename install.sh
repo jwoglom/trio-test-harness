@@ -28,7 +28,9 @@ echo "== Config"
 
 echo "== Claude Code skills"
 mkdir -p "$HOME/.claude/skills"
-for d in "$HERE"/.claude/skills/*/; do
+# host-skills/: skills for people's own sessions only (trio-test-ci starts CI jobs); kept out of .claude/skills/,
+# which a job's agent loads, so no job can be told how to start another
+for d in "$HERE"/.claude/skills/*/ "$HERE"/host-skills/*/; do
   name="$(basename "$d")"
   target="$HOME/.claude/skills/$name"
   if [ -L "$target" ] || [ ! -e "$target" ]; then ln -sfn "$d" "$target"; echo "  linked ~/.claude/skills/$name"; else echo "  ~/.claude/skills/$name exists (not a symlink) — left alone"; fi

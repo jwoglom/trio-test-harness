@@ -12,7 +12,16 @@ Start here, in order:
 3. `docs/phone-setup.md` — the iPhone: TrollVNC, AppSync Unified, installing/launching IPAs.
 4. `.claude/skills/*/SKILL.md` — the workflow skills: `trio-test-e2e` (runs `trio-test-e2e`), `trio-test` (the chain), and one
    skill per stage (sim-setup, phone-setup, checkout, build, install, launch, fake-devices, pr-plan, ui-drive, report).
-   `./install.sh` symlinks them into `~/.claude/skills`.
+   `host-skills/*/SKILL.md` — skills for people's own sessions only: `trio-test-ci` (runs the e2e workflow on GitHub
+   Actions). `./install.sh` symlinks both into `~/.claude/skills`.
+
+**No job starts a job.** A job (the e2e workflow, a web UI job) ends with a sandboxed `claude -p` agent that may run the
+harness CLI. The job marks that agent with `TH_JOB_AGENT=1` (`.github/workflows/e2e.yml`, `harness/webui.py`), and every
+entry point that starts a job refuses under it (`harness/jobguard.py`: `trio-test-e2e`, `trio-test-harness webui`;
+`trio-test-ci` checks it itself, and `GITHUB_ACTIONS`). So does anything that would replace what the job set up outside
+the sandbox (`watch agent start|stop|build`, `watch pair`). Skills that start jobs go in `host-skills/`, never
+`.claude/skills/`, which job agents load. Keep all three when adding a way to start runs; the sandbox
+(`ci/claude-sandbox.py`) blocks these too, but nothing here depends on it.
 
 Conventions:
 - Everything goes through `./trio-test-e2e` (whole pipeline, `harness/pipeline.py`) and `./trio-test-harness` (every stage and primitive,

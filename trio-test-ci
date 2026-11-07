@@ -200,8 +200,22 @@ def follow(repo: str, run_id: int, url: str, interval: float, compact: bool) -> 
     return gh_json("run", "view", str(run_id), "-R", repo, "--json", "conclusion")["conclusion"] or "unknown"
 
 
+def refuses_to_trigger() -> str | None:
+    """Why this process must not start a run, or None. No job may start another job: not the workflow's own steps
+    (GITHUB_ACTIONS) and not a job's agent, here or in the web UI (TH_JOB_AGENT, see harness/jobguard.py; this script
+    is standalone, so it checks the variable itself)."""
+    if os.environ.get("TH_JOB_AGENT") == "1":
+        return "this is a harness job's agent (TH_JOB_AGENT=1)"
+    if os.environ.get("GITHUB_ACTIONS") == "true":
+        return "this is a GitHub Actions job (GITHUB_ACTIONS=true)"
+    return None
+
+
 def main(argv=None) -> int:
     a = parse_args(argv)
+    if not a.attach and (why := refuses_to_trigger()):
+        print(f"trio-test-ci: refused: {why}, and a job must not start another job", file=sys.stderr)
+        return 2
     if subprocess.run(["gh", "--version"], capture_output=True).returncode != 0:
         sys.exit("the gh CLI is required (brew install gh; gh auth login)")
     run_id = a.attach or trigger(a)

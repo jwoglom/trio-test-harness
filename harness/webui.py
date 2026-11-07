@@ -455,7 +455,9 @@ def run_job(job: Job) -> None:
                          on_wait=lambda h: job.note(f"waiting for {target}: {busy.describe(h)}"),
                          cancelled=lambda: job.cancelled)
         lock.__enter__()
-        agent_env = {**env, "TH_RUN": str(rd), "PROMPT": prompt, "MODEL": inp["claude_model"], "SETTINGS": str(settings),
+        # TH_JOB_AGENT: the agent cannot start another job (harness/jobguard.py)
+        agent_env = {**env, "TH_JOB_AGENT": "1", "TH_RUN": str(rd), "PROMPT": prompt, "MODEL": inp["claude_model"],
+                     "SETTINGS": str(settings),
                      "SID": sid,
                      "LIMITS": (REPO_ROOT / "ci" / limits_file).read_text(), "OUT": str(rd / "agent-summary.md"), "PY": py}
         arc = -1
@@ -502,7 +504,7 @@ def run_job(job: Job) -> None:
             prompt = prompt.replace("on the iOS Simulator", "on a jailbroken test iPhone")
         settings = job.dir / "claude-settings-review.json"
         settings.write_text(json.dumps(_ci("claude-sandbox").settings(target), indent=1) + "\n")
-        hl_env = {**env, "PROMPT": prompt, "MODEL": inp["claude_model"], "SETTINGS": str(settings),
+        hl_env = {**env, "TH_JOB_AGENT": "1", "PROMPT": prompt, "MODEL": inp["claude_model"], "SETTINGS": str(settings),
                   "LIMITS": (REPO_ROOT / "ci" / "review-limits.md").read_text(), "OUT": str(rd / "highlights-raw.md"), "PY": py}
         hrc, _ = job.sh(["bash", "-c",
                          'set -o pipefail; claude -p "$PROMPT" --model "$MODEL" --output-format stream-json --verbose '

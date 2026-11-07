@@ -5,7 +5,9 @@ description: Chained end-to-end Trio test workflow — checkout (Trio or submodu
 
 # trio-test — the chain
 
-Fastest route: the `trio-test-e2e` skill (`./trio-test-e2e --mode simulator|rooted-vnc|iphone-usb --pr <URL>`) runs stages 1–6 in one go and
+**Local or CI?** When the user asks for the run on GitHub Actions / the workers / CI, or wants a simulator run without
+tying up this Mac, use the `trio-test-ci` skill instead (a person's own session only: a harness job never starts another).
+Fastest local route: the `trio-test-e2e` skill (`./trio-test-e2e --mode simulator|rooted-vnc|iphone-usb --pr <URL>`) runs stages 1–6 in one go and
 prints where the run is. Use the per-stage skills when the user wants only one part, when the script stops, or to redo a stage.
 **Is the device free?** `th busy` (the device lock) is the only answer: it names the run holding it, or says idle. Never judge from process lists; an idle `claude ./trio-test-e2e ...` session is not a run. `trio-test-e2e` waits for the lock itself.
 

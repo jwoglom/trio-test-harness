@@ -245,6 +245,11 @@ def _pid() -> int | None:
         pid = int(PID_FILE.read_text())
         os.kill(pid, 0)
         return pid
+    except PermissionError:
+        # EPERM: the process exists but this one may not signal it. A job's sandboxed agent gets this for the agent
+        # the job started outside the sandbox; reading it as "not running" made `watch agent start` quit that agent
+        # and try to start one inside the sandbox, which cannot work.
+        return pid
     except (OSError, ValueError):
         return None
 
