@@ -52,7 +52,8 @@ launch. CI: `pump`, `pump_setup`, `pump_scenario` and `faketandem_ref`; `trio-te
   file works too (faketandem's README, "A pump already in use").
 - `th faketandem status` shows what the pump holds. `history` lists its dose records. `pairing [STATE]` reads or sets
   the pairing step. `api METHOD PATH ['JSON']` makes the pump act on its own, for example
-  `POST /api/state/bolus/start '{"units":1}'`. `stop --save` keeps its state, history and logs in the run. These work
+  `POST /api/state/bolus/start '{"units":1}'`, or `POST /api/state/filltubing/button '{"hold_seconds":3}'` to hold the
+  pump's button at TandemKit's Fill Tubing step. `stop --save` keeps its state, history and logs in the run. These work
   from the sandboxed CI agent, through the sim daemon.
 - TandemKit's feature flags (Control-IQ Support, off by default, gates its Control-IQ screens) are behind a triple tap
   on the pump image of its Feature Flags screen: `th flow tandem-feature-flag controlIQSupport [--off]` (trio-ui-drive).
