@@ -112,7 +112,13 @@ phone session checks for the watch when it starts, and logs `📱 Phone isReacha
   `WatchDataManager`, in the system log only: `th --target sim oslog --grep WatchDataManager --since 10m`.
 - What the phone did (Trio): `th logs trio --grep "WatchManager"` (`📱 Received bolus request from watch`, `Enacted bolus via
   APS Manager`). The Watch app's own log reaches the phone's `th logs watch` only when the watch flushes it (every 3 min
-  or 100 entries).
+  or 100 entries). Current Trio (`dev` since its SQLite app log) keeps one log, `Documents/logs/AppLog.sqlite`, which
+  `th logs trio` reads (simulator only): `--grep "Watch"` finds the phone's `[Watch]` lines ("Watch requested bolus of
+  1.0 U") and the watch's own lines, categories `Watch/…` ("Bolus of 1 U requested").
+- **Away and back with the screen kept** (a wrist lower and raise): `th --target watch home`, then
+  `th --target watch launch --resume`. Plain `launch` restarts the Watch app, which always lands on its main screen.
+  The phone dropping out while the watch stays on a screen: `th --target sim launch` (restarts the phone app; the Watch
+  app sees the phone unreachable, then reachable). Waiting out a timeout: `th wait <seconds>` (≤ 280 per call).
 - Everything on the watch is a simulator and the bolus goes to the Pump Simulator; no real pump is ever involved.
 
 ## Tips

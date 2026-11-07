@@ -58,7 +58,12 @@ def settings(target: str = "sim", app: str | None = None) -> dict:
     return {
         # Read, Glob and Grep refuse paths outside the working directories in every mode (Claude Code >= 2.1.257);
         # without it, `-p` runs read outside them unasked.
-        "permissions": {"blockReadsOutsideWorkingDirectories": True},
+        # A job's agent is one `claude -p` session: once it stops to wait for a wakeup, a monitor or a cron, nothing
+        # resumes it and the run ends there. It waits with `./trio-test-harness wait N` instead.
+        "permissions": {"blockReadsOutsideWorkingDirectories": True,
+                        "deny": ["ScheduleWakeup", "Monitor", "CronCreate", "RemoteTrigger"]},
+        # `th wait` (at most WAIT_MAX in harness/cli.py) must finish inside one Bash call; the default is 2 minutes
+        "env": {"BASH_DEFAULT_TIMEOUT_MS": "300000"},
         "sandbox": {
             "enabled": True,
             "failIfUnavailable": True,          # a missing sandbox is an error, not an unsandboxed run
