@@ -263,7 +263,8 @@ jobs:
           fi
           # read by "Fail the job if the agent step failed": a failure before this line is the harness's, not the agent's
           echo "setup=ok" >> "$GITHUB_OUTPUT"
-          claude -p "$prompt" --model "$CLAUDE_MODEL" --output-format stream-json --verbose \
+          # TH_JOB_AGENT: nothing this agent runs may start another job (harness/jobguard.py, trio-test-ci)
+          TH_JOB_AGENT=1 claude -p "$prompt" --model "$CLAUDE_MODEL" --output-format stream-json --verbose \
             --permission-mode dontAsk --permission-prompts none --settings "$RUNNER_TEMP/claude-settings.json" \
             --append-system-prompt "$(cat ci/agent-limits.md)" \
             --allowedTools "Bash(./trio-test-harness:*)" "Bash(./bin/th:*)" "Bash(sleep:*)" Read Glob Grep \
@@ -301,7 +302,8 @@ jobs:
           t = pathlib.Path("ci/highlights-prompt.md").read_text()
           print(t.format(run_dir=os.environ["RUN_DIR"], extra=os.environ["EXTRA"]))')
           python3 ci/claude-sandbox.py "$RUNNER_TEMP/claude-settings.json"
-          claude -p "$prompt" --model "$CLAUDE_MODEL" --output-format stream-json --verbose \
+          # TH_JOB_AGENT: nothing this agent runs may start another job (harness/jobguard.py, trio-test-ci)
+          TH_JOB_AGENT=1 claude -p "$prompt" --model "$CLAUDE_MODEL" --output-format stream-json --verbose \
             --permission-mode dontAsk --permission-prompts none --settings "$RUNNER_TEMP/claude-settings.json" \
             --append-system-prompt "$(cat ci/review-limits.md)" \
             --allowedTools Read Glob Grep \

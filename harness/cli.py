@@ -864,6 +864,9 @@ def cmd_watch(args):
     from . import watch as W
     from . import xcode
     if args.sub == "pair":
+        from .jobguard import refuse_inside_job_agent
+        # another pair needs a watch agent started for it, which cannot happen inside the sandbox
+        refuse_inside_job_agent("watch pair (another watch needs its own watch agent, which a job's agent cannot start)")
         from .build import BuildInfo
         bi = BuildInfo.load()
         cur = W.current_pair()
@@ -896,6 +899,12 @@ def cmd_watch(args):
         print(f"all: {'; '.join(sorted(have))}")
         print('start one with: th watch pair --model "<model>"')
     elif args.sub == "agent":
+        if args.action != "status":
+            from .jobguard import refuse_inside_job_agent
+            # The job built and started the watch agent outside the sandbox; from inside it, stopping it works but
+            # building or starting one does not, so the only possible outcome is a watch that cannot be driven.
+            refuse_inside_job_agent(f"watch agent {args.action} (the job already started it; "
+                                    "if `watch agent status` says not running, report that)")
         udid = W.watch_udid()
         if args.action == "build":
             print(W.build(udid))
@@ -1022,6 +1031,8 @@ def cmd_report(args):
 
 
 def cmd_webui(args):
+    from .jobguard import refuse_inside_job_agent
+    refuse_inside_job_agent("trio-test-harness webui")
     from .webui import serve
     serve(args.host or CONFIG.get("TH_WEBUI_HOST") or "127.0.0.1",
           args.port or int(CONFIG.get("TH_WEBUI_PORT") or 8787), open_browser=args.open, token=args.token)

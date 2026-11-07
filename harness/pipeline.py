@@ -448,6 +448,8 @@ def run_stages(args):
 def main(argv=None) -> int:
     from . import apps
     from .faketandem import SCENARIOS
+    from .jobguard import refuse_inside_job_agent
+    refuse_inside_job_agent("trio-test-e2e")
     p = argparse.ArgumentParser(prog="trio-test-e2e", description="End-to-end Trio or Loop test: checkout → build → install → smoke → report")
     p.add_argument("--app", choices=sorted(apps.APPS),
                    help="the app under test: trio (nightscout/Trio) or loop (LoopKit/LoopWorkspace); default $TH_APP, else trio")
