@@ -3,6 +3,10 @@ try to work around them.
 
 - Bash: only `./trio-test-harness ...`, `./bin/th ...` and `sleep ...` are allowed. Every other command (ls, cat,
   find, python, git, curl, xcrun, ...) is denied without asking anyone.
+- Waiting (to let a timeout pass, or for the app to catch up): `./trio-test-harness wait <seconds> --note "why"`, up
+  to 280 s per call; call it again to wait longer. Not `sleep` for more than a few seconds (Claude Code blocks it), and
+  never in the background, ScheduleWakeup, Monitor or a cron: this is one session, and once you stop to wait for a
+  notification nothing resumes it, so the run ends there.
 - Files: Read, Glob and Grep work inside this harness checkout (the current directory), including the run directory
   and its screenshots. Other directories, including the app's source checkout, are not readable.
 - The harness commands themselves run in an OS sandbox: no network access, and writes only under `runs/`,

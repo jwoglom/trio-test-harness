@@ -8,7 +8,9 @@ TandemKit's is there.
     th logs all --save                                          # copy every log file into the current run's logs/
 
 Files, under the container's Documents/ (see Trio's SimpleLogReporter and TandemKit's TandemLogger):
-  trio    logs/log.txt          (+ logs/log_prev.txt, the previous day)
+  trio    logs/log.txt          (+ logs/log_prev.txt, the previous day), or in current Trio logs/AppLog.sqlite: a
+          Core Data store (AppLogStore), read as text in the same format, the last SQLITE_DAYS days; its watch lines
+          are in it too, with categories "Watch/…" (`logs trio --grep Watch/`). Simulator only.
   watch   logs/watch_log.txt    (+ logs/watch_log_prev.txt)
   tandem  tandem/tandem_log.txt (+ tandem/tandem_log_prev.txt); only info/warning/error reach the file, debug
           messages go to OSLog (subsystem com.jwoglom.TandemKit) only.
@@ -29,7 +31,7 @@ from pathlib import Path
 from .util import HarnessError
 
 FILES = {
-    "trio": ["logs/log_prev.txt", "logs/log.txt"],
+    "trio": ["logs/log_prev.txt", "logs/log.txt", "logs/AppLog.sqlite"],
     "tandem": ["tandem/tandem_log_prev.txt", "tandem/tandem_log.txt"],
     "watch": ["logs/watch_log_prev.txt", "logs/watch_log.txt"],
 }
@@ -47,6 +49,47 @@ ENTRY = re.compile(r"^\[?(\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d[+-]\d{4})(?: (INFO|WARN
 LEVELS = {"info": 0, "warning": 1, "error": 2}
 MARK = "@@th-logs@@"
 
+SQLITE_DAYS = 2
+CORE_DATA_EPOCH = 978307200          # 2001-01-01 UTC: Core Data stores dates as seconds since then
+# Trio's LogLevel raw values (Logger/Contracts/LogRecord.swift) -> the level words ENTRY reads
+SQLITE_LEVELS = {0: "DEBUG", 1: "INFO", 2: "DEFAULT", 3: "WARNING", 4: "ERROR", 5: "ERROR"}
+
+
+def render_app_log(path: Path, days: float = SQLITE_DAYS) -> str:
+    """Trio's logs/AppLog.sqlite as text, one entry per row, in a format ENTRY parses:
+    [2026-11-07T14:02:49-0500 INFO] [Watch] AppleWatchManager.swift - handleBolusRequest - 829 - message"""
+    import shutil
+    import sqlite3
+    import tempfile
+    import time
+    since = time.time() - days * 86400 - CORE_DATA_EPOCH
+    sql = ("SELECT ZTIMESTAMP, ZLEVEL, ZCATEGORY, ZFILE, ZFUNCTION, ZLINE, ZMESSAGE FROM ZAPPLOGENTRY "
+           "WHERE ZTIMESTAMP >= ? ORDER BY ZTIMESTAMP, Z_PK")
+
+    def rows_from(p: Path, uri: str) -> list[tuple]:
+        con = sqlite3.connect(uri, uri=True, timeout=5)
+        try:
+            return con.execute(sql, (since,)).fetchall()
+        finally:
+            con.close()
+
+    try:      # in place, read-only: the app keeps writing it (WAL), and nothing here may change it
+        rows = rows_from(path, f"file:{path}?mode=ro")
+    except sqlite3.Error:
+        # a reader that may not touch the -shm file: read a copy of the store and its WAL instead
+        with tempfile.TemporaryDirectory() as tmp:
+            for suffix in ("", "-wal", "-shm"):
+                src = Path(f"{path}{suffix}")
+                if src.exists():
+                    shutil.copy2(src, Path(tmp) / f"AppLog.sqlite{suffix}")
+            copy = Path(tmp) / "AppLog.sqlite"
+            rows = rows_from(copy, f"file:{copy}")
+    out = []
+    for ts, level, category, file, function, line, message in rows:
+        when = dt.datetime.fromtimestamp((ts or 0) + CORE_DATA_EPOCH).astimezone().strftime("%Y-%m-%dT%H:%M:%S%z")
+        out.append(f"[{when} {SQLITE_LEVELS.get(level, 'INFO')}] [{category}] {file} - {function} - {line} - {message}")
+    return "\n".join(out)
+
 
 def read_files(target: str, bundle_id: str, relpaths: list[str]) -> dict[str, str | None]:
     """relpath (under Documents/) -> contents, or None if the file does not exist. Runs where the device is reachable
@@ -61,11 +104,20 @@ def read_files(target: str, bundle_id: str, relpaths: list[str]) -> dict[str, st
         docs = Path(cp.stdout.strip()) / "Documents"
         for rel in relpaths:
             f = docs / rel
-            out[rel] = f.read_text(errors="replace") if f.is_file() else None
+            if not f.is_file():
+                out[rel] = None
+            elif f.suffix == ".sqlite":
+                out[rel] = render_app_log(f)
+            else:
+                out[rel] = f.read_text(errors="replace")
         return out
     if target == "rooted-vnc":
         from . import devices as D
         container = D.ssh_app_container(bundle_id)
+        # the SQLite store would need sqlite3 on the phone; the text logs only (an older Trio) over SSH
+        for rel in [r for r in relpaths if r.endswith(".sqlite")]:
+            out[rel] = None
+        relpaths = [r for r in relpaths if not r.endswith(".sqlite")]
         script = "; ".join(
             f"echo {MARK}{shlex.quote(rel)}; p={shlex.quote(f'{container}/Documents/{rel}')}; "
             f"if [ -f \"$p\" ]; then cat \"$p\"; echo; else echo {MARK}-missing; fi" for rel in relpaths)
@@ -236,7 +288,7 @@ def save(texts: dict[str, dict[str, str | None]], dest: Path) -> list[Path]:
         for rel, text in files.items():
             if text is None:
                 continue
-            p = dest / f"{stamp}-{rel.replace('/', '-')}"
+            p = dest / f"{stamp}-{rel.replace('/', '-')}{'.txt' if rel.endswith('.sqlite') else ''}"
             p.write_text(text)
             saved.append(p)
     return saved

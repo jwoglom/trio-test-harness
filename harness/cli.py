@@ -293,12 +293,13 @@ def cmd_launch(args):
                 raise HarnessError(f"{bundle} not installed on the simulator; run `th install` first")
             paths = F.preseed_simulator(drv, bundle)
             log(f"pre-seeded onboarding: {[str(p) for p in paths]}")
-        drv.launch(bundle)
+        drv.launch(bundle, terminate_first=not args.resume)
         return 0
     if target == "watch":
         drv = get_driver("watch"); drv.boot()
-        drv.launch(bundle)
-        log("Watch app launched; launch the phone app after it (`th launch`), or its WCSession may not see the watch")
+        drv.launch(bundle, terminate_first=not args.resume)
+        if not args.resume:
+            log("Watch app launched; launch the phone app after it (`th launch`), or its WCSession may not see the watch")
         return 0
     from . import devices as D
     if target == "iphone-usb":
@@ -1075,6 +1076,25 @@ def cmd_flow(args):
     return 0
 
 
+WAIT_MAX = 280      # under the job agent's 5 min Bash timeout (ci/claude-sandbox.py)
+
+
+def cmd_wait(args):
+    """Waits in the foreground, so a test can let a timeout pass. A job's agent must wait this way: Claude Code blocks a
+    long `sleep`, and a background wait ends its one-shot session."""
+    import time
+    secs = args.seconds
+    if not 0 < secs <= WAIT_MAX:
+        raise HarnessError(f"wait: 1 to {WAIT_MAX} seconds per call (call it again to wait longer)")
+    if args.note:
+        _run(args).log_step("note", f"waiting {secs:g} s: {args.note}")
+    end = time.monotonic() + secs
+    while (left := end - time.monotonic()) > 0:
+        time.sleep(min(30.0, left))
+        print(f"waited {secs - max(0.0, end - time.monotonic()):.0f} of {secs:g} s", flush=True)
+    return 0
+
+
 def cmd_test(args):
     """Smoke test: launch the app, get to the home screen, add fake CGM + pump, screenshot everything."""
     from .report import Run, render_html
@@ -1185,6 +1205,9 @@ def build_parser() -> argparse.ArgumentParser:
     l.add_argument("--bundle-id"); l.add_argument("--preseed-onboarding", action="store_true")
     l.add_argument("--via", choices=["auto", "ssh", "vnc", "devicectl"], default="auto")
     l.add_argument("--app-name", help="the name Spotlight finds it by (default: Trio / Loop)")
+    l.add_argument("--resume", action="store_true",
+                   help="sim/watch: bring the running app back to the front as it was, without restarting it "
+                        "(on the watch, like raising the wrist after `home`)")
     l.set_defaults(fn=cmd_launch)
 
     ft = sp.add_parser("faketandem", help="the Tandem Mobi emulator a --pump faketandem build talks to: start/stop it, "
@@ -1433,6 +1456,12 @@ def build_parser() -> argparse.ArgumentParser:
     te = sp.add_parser("test", help="end-to-end smoke test on the installed build")
     te.add_argument("kind", choices=["smoke"]); te.add_argument("--name"); te.add_argument("--no-preseed", dest="preseed", action="store_false")
     te.add_argument("--no-devices", dest="devices", action="store_false"); te.set_defaults(fn=cmd_test)
+
+    wt = sp.add_parser("wait", help=f"wait N seconds in the foreground (1-{WAIT_MAX}), e.g. to let a timeout pass; "
+                                    "how a job's agent waits")
+    wt.add_argument("seconds", type=float)
+    wt.add_argument("--note", help="also record why in the current run")
+    wt.set_defaults(fn=cmd_wait)
     return p
 
 

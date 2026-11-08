@@ -14,6 +14,13 @@ When the change could look different on another watch setting, also try it there
   extra-small … extra-extra-extra-large, accessibility-medium … accessibility-extra-extra-extra-large); the Watch app is
   relaunched to read them, the simulator keeps running. Say in your notes what you changed.
 Another watch size is chosen when the run starts (the `watch_model` input), not from inside it.
-What the phone did with a Watch request: Trio logs it in its own file (`./trio-test-harness --target sim logs trio --grep
-WatchManager`); Loop only to the system log (`./trio-test-harness --target sim oslog --grep WatchDataManager --since 10m`).
+Leaving and coming back without losing the screen (what a wrist lower and raise does):
+- `./trio-test-harness --target watch home`, then `./trio-test-harness --target watch launch --resume` brings the Watch
+  app back as it was. Plain `--target watch launch` restarts it, which always lands on its main screen and so cannot
+  show whether a screen kept its state.
+- The phone dropping out and coming back while the watch stays on a screen: `./trio-test-harness --target sim launch`
+  (restarts the phone app). The Watch app sees the phone become unreachable, then reachable again.
+What the phone did with a Watch request: Trio logs it (`./trio-test-harness --target sim logs trio --grep Watch --since
+10m`; current Trio's log also holds the watch's own lines, categories `Watch/…`); Loop only to the system log
+(`./trio-test-harness --target sim oslog --grep WatchDataManager --since 10m`).
 Screenshot the watch and the phone at each step that involves both.
