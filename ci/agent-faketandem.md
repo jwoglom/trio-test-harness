@@ -20,6 +20,10 @@ harness daemon:
   - `POST /api/state/bolus/start '{"units": 1.5}'`: a bolus from the pump's screen.
   - `POST /api/state/tempbasal/start '{"percent": 150, "duration_minutes": 30}'`: a temp rate set on the pump.
   - `POST /api/state/suspend` and `POST /api/state/resume`.
+  - `POST /api/state/filltubing/button '{"hold_seconds": 3}'`: a person holding the pump's button to fill the tubing,
+    which TandemKit's Fill Tubing step waits for ("Press and hold the button on your pump"). It works once the app
+    has put the pump in fill tubing mode (`workflow_mode` in `status --json`); `'{"down": true}'` and
+    `'{"down": false}'` press and release it separately, to see the screen while the button is held.
   - `GET /api/log`: the pump's record of every message the app sent it.
 - What the driver did is in TandemKit's log: `./trio-test-harness --target sim logs tandem --since 10m` (or `--grep`).
   For Trio, `logs trio` shows what Trio made of it.
