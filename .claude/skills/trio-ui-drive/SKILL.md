@@ -123,7 +123,7 @@ phone session checks for the watch when it starts, and logs `📱 Phone isReacha
 
 ## Tips
 - Simulator taps/tree need an input backend: run `th wda start` once per simulator boot (WebDriverAgent, built on first use
-  with `th wda build`; `th wda status` / `th wda stop`). idb is used automatically if installed instead.
+  with `th wda build`; `th wda status` / `th wda stop` / `th wda restart`, which a running daemon carries out). idb is used automatically if installed instead.
 - On the phone, TrollVNC's right mouse button is Home and middle is Power (`th home`, `th device wake`). Text input types HID
   keys, so tap the text field first. If the screen is black, the phone is asleep: `th device wake`.
 - Alerts from iOS (permissions) are ordinary taps: `th tap-text Allow`.

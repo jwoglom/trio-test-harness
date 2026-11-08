@@ -785,15 +785,26 @@ def cmd_daemon(args):
 
 def cmd_wda(args):
     from . import wda as W
+    from .daemon import RemoteDriver
     drv = get_driver("sim")
     if args.sub == "build":
         print(W.build(drv.udid))
-    elif args.sub == "start":
-        drv.boot(); W.start(drv.udid); print(f"WDA ready on :{W.PORT}")
-    elif args.sub == "stop":
-        W.stop(); print("stopped")
+        return 0
+    # The daemon owns the runner when one runs, and a sandboxed caller reaches neither its process nor its port.
+    remote = isinstance(drv, RemoteDriver)
+    if args.sub in ("stop", "restart"):
+        drv.stop_wda() if remote else W.stop()
+        if args.sub == "stop":
+            print("stopped")
+            return 0
+    if args.sub in ("start", "restart"):
+        drv.boot()
+        drv.start_wda() if remote else W.start(drv.udid)
+        print(f"WDA ready on :{W.PORT}")
     elif args.sub == "status":
-        print("running" if W.is_running() else "not running"); return 0 if W.is_running() else 1
+        running = drv.wda_running() if remote else W.is_running()
+        print("running" if running else "not running")
+        return 0 if running else 1
     return 0
 
 
@@ -1351,7 +1362,7 @@ def build_parser() -> argparse.ArgumentParser:
     dm.set_defaults(fn=cmd_daemon)
 
     wd = sp.add_parser("wda", help="WebDriverAgent runner for the simulator"); wds = wd.add_subparsers(dest="sub", required=True)
-    for name in ("build", "start", "stop", "status"):
+    for name in ("build", "start", "stop", "restart", "status"):
         wds.add_parser(name)
     wd.set_defaults(fn=cmd_wda)
 

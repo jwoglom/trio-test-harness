@@ -14,7 +14,8 @@ try to work around them.
   simulator (and the watch, when the run has one), the app and WebDriverAgent through the harness daemons, so driving
   the app works normally (`shot`, `tap`, `tap-text`, `find`, `tree`, `type`, `swipe`, `scroll`, `home`, `lock`,
   `unlock`, `flow ...`, `run ...`, `report ...`). Commands that build, install or manage the simulator or
-  WebDriverAgent (`build`, `install`, `sim erase`, `wda build/start`, ...) are expected to fail; you do not need them.
+  WebDriverAgent (`build`, `install`, `sim erase`, `wda build`, ...) are expected to fail; you do not need them.
+  `wda restart`, `wda start`, `wda stop` and `wda status` go through the daemon and work.
 - App logs: `./trio-test-harness --target sim logs [trio|tandem|all] [--grep REGEX -i] [--since 10m] [--level warning]
   [-n N]` reads Trio's and TandemKit's log files from the app through the daemon (`logs --help`; `logs all --save`
   copies them into the run's `logs/` for Read/Grep); Loop writes only TandemKit's (`tandem`). Use them to confirm

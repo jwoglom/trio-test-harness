@@ -219,6 +219,13 @@ until merged: pass `--faketandem-ref` until then).
   pump manager; TandemKit's `TrioPumpDeletionTests` pins that). Run 40258291563 before them lost the simulator's display:
   its agent shut the simulator down to free a hung WebDriverAgent, and from the sandbox the display never came back.
   `ci/agent-prompt*.md` now forbid that.
+- Recovering a hung WebDriverAgent from the sandbox. Run 42516563364 (TandemKit#640) lost taps on :8100 partway through,
+  and the recovery `ci/agent-prompt*.md` gave, `wda stop` + `wda start`, could not work in CI: those ran in the sandbox,
+  which reaches neither the runner nor its port, and `wda start` crashed at `UDID_FILE.write_text` because
+  `RemoteDriver.__getattr__` turned the `udid` property into a function. `th wda start|stop|restart|status` now go through
+  the daemon, the daemon's retry calls `SimulatorDriver.recover()` (restarts a runner that stopped answering), and
+  `wda.start` clears a hung runner still holding the port. Checked against fake drivers only, not yet on a Mac; why the
+  runner hung is unknown (the run's logs were not read).
 - `report pr --body` and the e2e workflow's `comment_on_run`/`comment_body`: verified by run 40267059203, which posted a
   written comment on jwoglom/TandemKit#609 with 14 of run 40263901771's screenshots uploaded inline, and again by run
   40289321649 for run 40279063228.
