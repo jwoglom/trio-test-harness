@@ -33,8 +33,10 @@ Rules:
 - If part of the PR truly needs hardware (BLE pairing, a physical pump/sensor), say so and record what you could check.
 - Stay within the time limit; prefer a few well-evidenced checks over many shallow ones.
 - Never shut down, reboot or erase the simulator: from your sandbox its display does not come back, and nothing
-  after that can be driven. If WebDriverAgent stops answering, run `./trio-test-harness wda restart` (it goes through the
-  daemon), then relaunch the app with `./trio-test-harness --target sim launch`.
+  after that can be driven. A command that WebDriverAgent leaves unanswered fails after 30 s, and the daemon restarts
+  WebDriverAgent itself, so the next command works; a tap or swipe that failed this way may still have reached the
+  app, so take a screenshot before repeating it. If commands keep failing, run `./trio-test-harness wda restart`, then
+  `./trio-test-harness daemon restart` (both restart in place). `daemon stop` and `daemon start` are refused here.
 
 Your final message becomes the job summary's "Agent findings": markdown with the verdict, what you exercised
 (with screenshot names), what you could not, and any bugs or regressions found.

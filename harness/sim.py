@@ -11,7 +11,7 @@ import time
 from pathlib import Path
 
 from .config import CONFIG
-from .driver import Driver, UINode
+from .driver import Driver, UINode, check_on_screen
 from .util import HarnessError, log, run, which
 from . import xcode
 
@@ -22,6 +22,7 @@ class SimulatorDriver(Driver):
     def __init__(self, udid: str | None = None):
         self._udid = udid or xcode.ensure_simulator()["udid"]
         self._scale: float | None = None
+        self._size: tuple[int, int] | None = None
         self._env = xcode.developer_env()
         self._wda = None
 
@@ -30,7 +31,7 @@ class SimulatorDriver(Driver):
         # follows `th watch pair` / `th watch model` from any process, a daemon's driver included
         f = xcode.SIM_CURRENT_FILE
         if f.exists() and (cur := f.read_text().strip()) and cur != self._udid:
-            self._udid, self._scale, self._wda = cur, None, None
+            self._udid, self._scale, self._size, self._wda = cur, None, None, None
         return self._udid
 
     # ---- backend: WebDriverAgent (preferred) or idb ----
@@ -66,15 +67,22 @@ class SimulatorDriver(Driver):
         from . import wda as W
         return W.is_running()
 
-    def recover(self) -> None:
-        """The daemon's reset before it retries a failed call. A runner that has stopped answering would time
-        out every call after it too, so it is restarted; one this driver never started is left to `th wda start`."""
+    def recover(self, error: BaseException | None = None, *, force: bool = False) -> bool:
+        """The daemon's reset after a failed call, and `th daemon restart`'s (`force`). Restarts the runner when it
+        has stopped answering or the call timed out: a runner still busy with one request answers /status but no other
+        request until it is done, so it would time out every call after it too. One this driver never started is left
+        to `th wda start`. Returns whether it restarted it."""
         from . import wda as W
         self._wda = None
-        if W.PID_FILE.exists() and not W.is_running():
-            log("WebDriverAgent stopped answering; restarting it")
+        if not W.PID_FILE.exists():
+            return False
+        if force or W.timed_out(error) or not W.is_running():
+            why = "asked to" if force else f"its request failed ({error})" if error else "it stopped answering"
+            log(f"restarting WebDriverAgent: {why}")
             W.stop()
-            W.start(self.udid)
+            W.start(self.udid, timeout=W.RESTART_TIMEOUT)
+            return True
+        return False
 
     # ---- lifecycle ----
     def boot(self) -> None:
@@ -119,6 +127,12 @@ class SimulatorDriver(Driver):
         return self._scale
 
     def screen_size(self) -> tuple[int, int]:
+        _ = self.udid       # follows another pair's phone, which drops the cached size
+        if self._size is None:
+            self._size = self._read_screen_size()
+        return self._size
+
+    def _read_screen_size(self) -> tuple[int, int]:
         if self.have_idb():
             try:
                 d = json.loads(self._idb(["describe", "--json"], quiet=True).stdout)["screen_dimensions"]
@@ -213,6 +227,7 @@ class SimulatorDriver(Driver):
             raise HarnessError("no input backend: run `th wda start` (WebDriverAgent) or install idb_companion")
 
     def tap(self, x: int, y: int, *, duration: float = 0.0) -> None:
+        check_on_screen(self.screen_size(), (x, y))
         self._need_input_backend()
         if self.wda:
             if duration:
@@ -227,10 +242,12 @@ class SimulatorDriver(Driver):
 
     def multi_tap(self, x: int, y: int, count: int = 2, *, interval: float = 0.1) -> None:
         # idb taps one per process, too slow for a multi-tap gesture, so this one needs WebDriverAgent.
+        check_on_screen(self.screen_size(), (x, y))
         wda = self.wda or self.ensure_wda()
         wda.multi_tap(x / self.scale, y / self.scale, count, interval=interval)
 
     def swipe(self, x1: int, y1: int, x2: int, y2: int, *, duration: float = 0.3) -> None:
+        check_on_screen(self.screen_size(), (x1, y1), (x2, y2))
         self._need_input_backend()
         s = self.scale
         if self.wda:
@@ -240,6 +257,7 @@ class SimulatorDriver(Driver):
                    "--duration", str(duration)], quiet=True)
 
     def drag(self, x1: int, y1: int, x2: int, y2: int, *, hold: float = 0.8, duration: float = 0.8, settle: float = 0.5) -> None:
+        check_on_screen(self.screen_size(), (x1, y1), (x2, y2))
         self._need_input_backend()
         s = self.scale
         if self.wda:

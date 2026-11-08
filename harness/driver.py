@@ -10,6 +10,27 @@ from .util import tmp_path
 from dataclasses import dataclass, asdict
 from pathlib import Path
 
+MIN_SCROLL_PIXELS = 50      # an amount from 1 up to this is neither a fraction nor a distance worth a swipe
+MAX_SWIPE_FRACTION = 0.7    # of the screen: a scroll's swipe starts at 75% (or 25%) of its height and ends on it
+
+
+def scroll_distance(amount: float, extent: int) -> int:
+    """Pixels to scroll: `amount` is a fraction of `extent` up to 1, else pixels."""
+    if 0 < amount <= 1:
+        return int(extent * amount)
+    if amount >= MIN_SCROLL_PIXELS:
+        return int(amount)
+    raise ValueError(f"scroll amount {amount:g}: give a fraction of the screen (0.5 is half of it) or pixels "
+                     f"({MIN_SCROLL_PIXELS} or more)")
+
+
+def check_on_screen(size: tuple[int, int], *points: tuple[float, float]) -> None:
+    """ValueError for a point off the screen, which a gesture must not reach."""
+    w, h = size
+    for x, y in points:
+        if not (0 <= x < w and 0 <= y < h):
+            raise ValueError(f"{x:g},{y:g} is off the screen, which is {w}x{h} pixels")
+
 
 @dataclass
 class UINode:
@@ -128,14 +149,22 @@ class Driver:
         return False
 
     def scroll(self, direction: str = "down", amount: float = 0.5) -> None:
+        """`amount`: how far up or down, as a fraction of the screen's height, or in pixels from MIN_SCROLL_PIXELS."""
         w, h = self.screen_size()
         cx = w // 2
-        dy = int(h * amount)
-        if direction == "down":      # reveal content below: drag finger up
-            self.swipe(cx, int(h * 0.75), cx, int(h * 0.75) - dy)
-        elif direction == "up":
-            self.swipe(cx, int(h * 0.25), cx, int(h * 0.25) + dy)
-        elif direction == "left":
+        dy = scroll_distance(amount, h)
+        # A swipe stays on the screen (WebDriverAgent hung for minutes on one dragged a thousand screens past its
+        # top), so a longer scroll is several swipes.
+        while direction in ("down", "up") and dy > 0:
+            step = min(dy, int(h * MAX_SWIPE_FRACTION))
+            if direction == "down":      # reveal content below: drag finger up
+                self.swipe(cx, int(h * 0.75), cx, int(h * 0.75) - step)
+            else:
+                self.swipe(cx, int(h * 0.25), cx, int(h * 0.25) + step)
+            dy -= step
+            if dy > 0:
+                time.sleep(0.6)
+        if direction == "left":
             self.swipe(int(w * 0.85), h // 2, int(w * 0.15), h // 2)
         elif direction == "right":
             self.swipe(int(w * 0.15), h // 2, int(w * 0.85), h // 2)
