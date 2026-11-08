@@ -50,6 +50,32 @@ class SimulatorDriver(Driver):
         self._wda = W.WDAClient()
         return self._wda
 
+    # `th wda start|stop|restart|status` go through these when a daemon runs: the agent's sandbox reaches only the
+    # daemon's socket, not the runner's process or its port.
+    def start_wda(self) -> None:
+        from . import wda as W
+        W.start(self.udid)
+        self._wda = None
+
+    def stop_wda(self) -> None:
+        from . import wda as W
+        W.stop()
+        self._wda = None
+
+    def wda_running(self) -> bool:
+        from . import wda as W
+        return W.is_running()
+
+    def recover(self) -> None:
+        """The daemon's reset before it retries a failed call. A runner that has stopped answering would time
+        out every call after it too, so it is restarted; one this driver never started is left to `th wda start`."""
+        from . import wda as W
+        self._wda = None
+        if W.PID_FILE.exists() and not W.is_running():
+            log("WebDriverAgent stopped answering; restarting it")
+            W.stop()
+            W.start(self.udid)
+
     # ---- lifecycle ----
     def boot(self) -> None:
         xcode.boot_simulator(self.udid)

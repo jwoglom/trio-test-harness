@@ -29,6 +29,7 @@ PID_FILE = REPO_ROOT / "runs" / ".tmp" / "wda.pid"
 UDID_FILE = REPO_ROOT / "runs" / ".tmp" / "wda-udid.txt"     # the simulator the runner is on
 LOG_FILE = REPO_ROOT / "runs" / ".tmp" / "wda.log"
 PORT = int(CONFIG.get("TH_WDA_PORT", "8100"))
+RUNNER_BUNDLE_ID = "com.facebook.WebDriverAgentRunner.xctrunner"
 
 
 def ensure_source() -> Path:
@@ -88,6 +89,10 @@ def start(udid: str, timeout: float = 600) -> None:
             return
         log("WebDriverAgent runs on another simulator; moving it")
         stop()
+    elif port_open("127.0.0.1", PORT, 0.5):
+        # A hung runner keeps the port, and a new one cannot bind it until it is gone.
+        log("WebDriverAgent holds its port but does not answer; restarting it")
+        stop()
     xr = xctestrun() or from_prebuilt() or build(udid)
     PID_FILE.parent.mkdir(parents=True, exist_ok=True)
     cmd = ["xcodebuild", "test-without-building", "-xctestrun", str(xr), "-destination", f"id={udid}",
@@ -112,6 +117,13 @@ def stop() -> None:
         except (ProcessLookupError, ValueError, PermissionError):
             pass
         PID_FILE.unlink()
+    # Ending xcodebuild can leave the runner app on the simulator, still holding the port.
+    if UDID_FILE.exists() and (udid := UDID_FILE.read_text().strip()):
+        xcode.xcrun(["simctl", "terminate", udid, RUNNER_BUNDLE_ID], check=False, quiet=True)
+    try:
+        wait_for(lambda: not port_open("127.0.0.1", PORT, 0.5), 30, 0.5, what="WebDriverAgent's port to close")
+    except HarnessError:
+        log(f"WebDriverAgent's port :{PORT} is still open after stopping it")
 
 
 class WDAClient:

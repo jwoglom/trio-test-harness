@@ -13,7 +13,7 @@ description: Prepare the iOS Simulator side of the Trio harness — check Xcode 
 - `th wda build` (once per Xcode/runtime) then `th wda start` (per boot) — WebDriverAgent on :8100 gives taps, typing,
   element search. If it fails with "Timed out waiting for AX loaded notification":
   `xcrun simctl spawn <udid> defaults write com.apple.Accessibility AccessibilityEnabled -bool true` (+ ApplicationAccessibilityEnabled),
-  `th sim shutdown && th sim boot`, retry.
+  `th sim shutdown && th sim boot`, retry. A runner that stops answering: `th wda restart` (through the daemon when one runs).
 - `th --target sim daemon start` — persistent driver; `th daemon status`.
 - Watch: `th watch pair [--model M]` gives the watch model (default `TH_WATCH_SIM_DEVICE`, Apple Watch Series 11 (46mm))
   its own pair, `TrioHarness (<model>)` + `TrioHarnessWatch (<model>)`, paired once at creation, boots both, and makes that

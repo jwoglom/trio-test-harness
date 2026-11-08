@@ -172,16 +172,22 @@ def _serve_connection(conn, drv, target, _shutdown) -> None:
                         if method.startswith("_") and method not in ALLOWED_PRIVATE:
                             raise HarnessError(f"method {method} not allowed")
                         fn = getattr(drv, method)
-                        try:
-                            result = fn(*args, **kwargs)
-                        except (OSError, HarnessError) as e:
-                            # connection probably died (phone slept, VNC restarted): reset and retry once
-                            log(f"daemon[{target}] {method} failed ({e}); reconnecting")
-                            close = getattr(drv, "close", None)
-                            if close:
-                                close()
-                            result = fn(*args, **kwargs)
-                        resp = {"ok": True, "result": _encode(result)}
+                        if not callable(fn):        # a property, such as SimulatorDriver.udid
+                            if args or kwargs:
+                                raise HarnessError(f"{method} is not a method")
+                            resp = {"ok": True, "result": _encode(fn)}
+                        else:
+                            try:
+                                result = fn(*args, **kwargs)
+                            except (OSError, HarnessError) as e:
+                                # connection probably died (phone slept, VNC restarted, WebDriverAgent hung): reset
+                                # and retry once
+                                log(f"daemon[{target}] {method} failed ({e}); reconnecting")
+                                reset = getattr(drv, "recover", None) or getattr(drv, "close", None)
+                                if reset:
+                                    reset()
+                                result = fn(*args, **kwargs)
+                            resp = {"ok": True, "result": _encode(result)}
                 except Exception as e:  # noqa: BLE001
                     resp = {"ok": False, "error": f"{type(e).__name__}: {e}", "trace": traceback.format_exc()[-2000:]}
                 f.write((json.dumps(resp) + "\n").encode()); f.flush()
@@ -225,6 +231,11 @@ class RemoteDriver(Driver):
 
     def ping(self) -> dict:
         return self._call("ping")
+
+    @property
+    def udid(self) -> str:
+        # `__getattr__` would hand back a function for this property of the drivers.
+        return self._call("udid")
 
     def __getattr__(self, name: str):
         if name.startswith("__"):
