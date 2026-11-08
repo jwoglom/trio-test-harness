@@ -224,8 +224,20 @@ until merged: pass `--faketandem-ref` until then).
   which reaches neither the runner nor its port, and `wda start` crashed at `UDID_FILE.write_text` because
   `RemoteDriver.__getattr__` turned the `udid` property into a function. `th wda start|stop|restart|status` now go through
   the daemon, the daemon's retry calls `SimulatorDriver.recover()` (restarts a runner that stopped answering), and
-  `wda.start` clears a hung runner still holding the port. Checked against fake drivers only, not yet on a Mac; why the
-  runner hung is unknown (the run's logs were not read).
+  `wda.start` clears a hung runner still holding the port.
+- Why it hung: in 42516563364 and in 42516779754 (TandemKit#644) the agent ran `scroll down --amount 600` (and 1200),
+  taking the amount for pixels; it is a fraction of the screen, so WebDriverAgent dragged hundreds of screens past the
+  top. That drag ran for minutes, every request after it queued behind it, and /status still answered, so the recovery
+  above never restarted the runner. Now `--amount` above 1 is pixels (from 50), a scroll stays on the screen (several
+  swipes past 70% of it), and the simulator refuses a tap or swipe off the screen. A request gets 30 s
+  (`wda.REQUEST_TIMEOUT`), and one that times out restarts the runner (`recover(error)`); a timed-out tap or swipe is
+  reported and not repeated, since it may have reached the app. In 42516779754 the agent also stopped the daemon and
+  started one inside the sandbox, which lost faketandem's port and screenshots for the rest of the run: in a job's
+  agent `daemon restart` now replaces the driver inside the running daemon (`daemon.restart_driver`), and `daemon
+  stop|start` and `faketandem start|stop` are refused. All of this is checked against fake drivers only.
+- TandemKit's feature flags: `ci/agent-tandemkit-flags.md` goes into every faketandem run's agent notes, with the
+  flags read from the build's TandemKit (`flows/tandemkit.py` `known_flags`), so a flag a PR adds is listed and
+  `flow tandem-feature-flag` takes it. 42516779754's agent never found Manual Temp Basal Support.
 - `report pr --body` and the e2e workflow's `comment_on_run`/`comment_body`: verified by run 40267059203, which posted a
   written comment on jwoglom/TandemKit#609 with 14 of run 40263901771's screenshots uploaded inline, and again by run
   40289321649 for run 40279063228.

@@ -322,6 +322,11 @@ def cmd_launch(args):
 
 def cmd_faketandem(args):
     from . import faketandem as FT
+    if args.sub in ("start", "stop"):
+        from .jobguard import refuse_inside_job_agent
+        # The job built and started faketandem outside the sandbox, which has no network to build it or port to serve it.
+        refuse_inside_job_agent(f"faketandem {args.sub}", "the job started faketandem outside this sandbox, where "
+                                "nothing started here can replace it; `faketandem api` changes what the pump does")
     if args.sub == "start":
         state = FT.start(setup=args.setup, scenario=args.scenario, ref=args.ref)
         if args.seed:
@@ -770,7 +775,22 @@ def cmd_device(args):
 
 def cmd_daemon(args):
     from . import daemon as D
+    from .jobguard import inside_job_agent, refuse_inside_job_agent
     t = _target(args)
+    if inside_job_agent() and args.sub != "status":
+        # The job started the daemon outside the sandbox. One started from inside it runs in the sandbox, without the
+        # simulator's tools or faketandem's port, so here a restart happens inside the running daemon and nothing
+        # stops it.
+        running = D.is_running(t)
+        if args.sub == "restart" and running:
+            D.restart_in_place(t); print(f"daemon[{t}] restarted in place: a new driver, and WebDriverAgent restarted")
+            return 0
+        if args.sub == "start" and running:
+            print(f"daemon[{t}] already running"); return 0
+        refuse_inside_job_agent(
+            f"daemon {args.sub}",
+            "the job started the daemon outside this sandbox, where nothing started here can replace it; "
+            + ("`daemon restart` restarts it in place" if running else "none is running, so report that"))
     if args.sub == "start":
         D.start(t, foreground=args.foreground); print(f"daemon[{t}] running" if not args.foreground else "")
     elif args.sub == "stop":
@@ -1083,7 +1103,7 @@ def cmd_flow(args):
             TK.reveal_feature_flags(drv, r)
         else:
             changed = TK.set_feature_flag(drv, r, args.flag, not args.off)
-            print(f"{TK.flag_title(args.flag)}: {'off' if args.off else 'on'}{'' if changed else ' (already)'}")
+            print(f"{TK.flag_title(args.flag, TK.known_flags(r))}: {'off' if args.off else 'on'}{'' if changed else ' (already)'}")
     return 0
 
 
@@ -1357,8 +1377,9 @@ def build_parser() -> argparse.ArgumentParser:
 
     dm = sp.add_parser("daemon", help="persistent driver connection reused by all commands"); dms = dm.add_subparsers(dest="sub", required=True)
     st = dms.add_parser("start"); st.add_argument("--foreground", action="store_true")
-    for name in ("stop", "status", "restart"):
-        dms.add_parser(name)
+    dms.add_parser("stop"); dms.add_parser("status")
+    dms.add_parser("restart", help="stop and start it; in a job's agent, a new driver (and WebDriverAgent restarted) "
+                                   "inside the running daemon, which stays up")
     dm.set_defaults(fn=cmd_daemon)
 
     wd = sp.add_parser("wda", help="WebDriverAgent runner for the simulator"); wds = wd.add_subparsers(dest="sub", required=True)
@@ -1377,7 +1398,11 @@ def build_parser() -> argparse.ArgumentParser:
     sw = sp.add_parser("swipe"); [sw.add_argument(n, type=int) for n in ("x1", "y1", "x2", "y2")]; sw.add_argument("--duration", type=float, default=0.3); sw.set_defaults(fn=cmd_swipe)
     dg = sp.add_parser("drag", help="long-press then move (SwiftUI drag & drop / reorder)"); [dg.add_argument(n, type=int) for n in ("x1", "y1", "x2", "y2")]
     dg.add_argument("--hold", type=float, default=0.8); dg.add_argument("--duration", type=float, default=0.8); dg.add_argument("--settle", type=float, default=0.5); dg.set_defaults(fn=cmd_drag)
-    sc = sp.add_parser("scroll"); sc.add_argument("direction", choices=["up", "down", "left", "right"]); sc.add_argument("--amount", type=float, default=0.5); sc.set_defaults(fn=cmd_scroll)
+    sc = sp.add_parser("scroll"); sc.add_argument("direction", choices=["up", "down", "left", "right"])
+    sc.add_argument("--amount", type=float, default=0.5,
+                    help="up/down: how far, as a fraction of the screen's height (default 0.5, half of it), or in "
+                         "pixels from 50; past 70%% of the screen it takes several swipes")
+    sc.set_defaults(fn=cmd_scroll)
     ty = sp.add_parser("type"); ty.add_argument("text"); ty.set_defaults(fn=cmd_type)
     k = sp.add_parser("key"); k.add_argument("name"); k.set_defaults(fn=cmd_key)
     sp.add_parser("home").set_defaults(fn=cmd_home)
@@ -1456,7 +1481,8 @@ def build_parser() -> argparse.ArgumentParser:
     for name, help_ in tk_help.items():
         x = fls.add_parser(name, help=help_); x.add_argument("--run")
         if name == "tandem-feature-flag":
-            x.add_argument("flag", help="its title or rawValue (controlIQSupport, ...; FLAGS in harness/flows/tandemkit.py)")
+            x.add_argument("flag", help="its title or rawValue (manualTempBasalSupport, ...: the build's TandemKit "
+                                        "lists them in Sources/TandemKit/State/TandemFeatureFlags.swift)")
             x.add_argument("--off", action="store_true", help="turn it off instead")
         where = x.add_mutually_exclusive_group()
         where.add_argument("--here", action="store_true", help="the Feature Flags screen is already showing")

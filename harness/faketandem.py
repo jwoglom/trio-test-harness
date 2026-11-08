@@ -426,5 +426,6 @@ def agent_notes(run_dir: Path) -> str:
     if pump.get("kind") != "faketandem":
         return ""
     ci = REPO_ROOT / "ci"
+    from .flows import tandemkit
     return "\n" + (ci / "agent-faketandem.md").read_text() + "\n" + \
-        (ci / f"agent-faketandem-{pump.get('setup') or 'preseed'}.md").read_text()
+        (ci / f"agent-faketandem-{pump.get('setup') or 'preseed'}.md").read_text() + tandemkit.agent_notes(run_dir)

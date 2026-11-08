@@ -30,6 +30,15 @@ UDID_FILE = REPO_ROOT / "runs" / ".tmp" / "wda-udid.txt"     # the simulator the
 LOG_FILE = REPO_ROOT / "runs" / ".tmp" / "wda.log"
 PORT = int(CONFIG.get("TH_WDA_PORT", "8100"))
 RUNNER_BUNDLE_ID = "com.facebook.WebDriverAgentRunner.xctrunner"
+# A gesture answers in seconds (WebDriverAgent waits at most 10 s for the app to idle). Past this the runner is stuck,
+# and the daemon restarts it: kept short so that and the retry fit in a job agent's 5 min command timeout.
+REQUEST_TIMEOUT = 30
+RESTART_TIMEOUT = 180
+
+
+def timed_out(error: BaseException | None) -> bool:
+    """Whether a request got no answer in time, as from a runner still busy with an earlier one."""
+    return isinstance(error, (requests.exceptions.Timeout, TimeoutError))
 
 
 def ensure_source() -> Path:
@@ -132,7 +141,8 @@ class WDAClient:
         self._sid: str | None = None
         self._scale: float | None = None
 
-    def _req(self, method: str, path: str, body: dict | None = None, session: bool = True, timeout: float = 60):
+    def _req(self, method: str, path: str, body: dict | None = None, session: bool = True,
+             timeout: float = REQUEST_TIMEOUT):
         url = self.base + (f"/session/{self.sid}" if session else "") + path
         r = requests.request(method, url, json=body, timeout=timeout)
         try:
@@ -186,11 +196,11 @@ class WDAClient:
             {"type": "pointer", "id": "finger1", "parameters": {"pointerType": "touch"}, "actions": steps}]})
 
     def touch_and_hold(self, x: float, y: float, duration: float) -> None:
-        self._req("POST", "/wda/touchAndHold", {"x": x, "y": y, "duration": duration})
+        self._req("POST", "/wda/touchAndHold", {"x": x, "y": y, "duration": duration}, timeout=REQUEST_TIMEOUT + duration)
 
     def drag(self, x1: float, y1: float, x2: float, y2: float, duration: float = 0.3) -> None:
         self._req("POST", "/wda/dragfromtoforduration",
-                  {"fromX": x1, "fromY": y1, "toX": x2, "toY": y2, "duration": duration})
+                  {"fromX": x1, "fromY": y1, "toX": x2, "toY": y2, "duration": duration}, timeout=REQUEST_TIMEOUT + duration)
 
     def keys(self, text: str) -> None:
         self._req("POST", "/wda/keys", {"value": list(text)})
@@ -234,7 +244,8 @@ class WDAClient:
     def click(self, name: str) -> bool:
         """Tap the first element named or labelled `name` as an element (XCUITest's own tap), not at a coordinate."""
         esc = name.replace("'", "\\'")
-        els = self._req("POST", "/elements", {"using": "predicate string", "value": f"name == '{esc}' OR label == '{esc}'"})
+        els = self._req("POST", "/elements", {"using": "predicate string", "value": f"name == '{esc}' OR label == '{esc}'"},
+                        timeout=90)
         if not els:
             return False
         eid = els[0].get("ELEMENT") or next(iter(els[0].values()))

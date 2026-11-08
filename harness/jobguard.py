@@ -20,9 +20,8 @@ def inside_job_agent() -> bool:
     return os.environ.get(ENV) == "1"
 
 
-def refuse_inside_job_agent(what: str) -> None:
+def refuse_inside_job_agent(what: str, reason: str = "a job must not start another job") -> None:
     """Exits with status 2 when running under a job's agent."""
     if inside_job_agent():
-        print(f"{what}: refused: this is a harness job's agent ({ENV}=1), and a job must not start another job",
-              file=sys.stderr)
+        print(f"{what}: refused: this is a harness job's agent ({ENV}=1), and {reason}", file=sys.stderr)
         raise SystemExit(2)

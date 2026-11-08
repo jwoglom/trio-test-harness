@@ -15,7 +15,11 @@ try to work around them.
   the app works normally (`shot`, `tap`, `tap-text`, `find`, `tree`, `type`, `swipe`, `scroll`, `home`, `lock`,
   `unlock`, `flow ...`, `run ...`, `report ...`). Commands that build, install or manage the simulator or
   WebDriverAgent (`build`, `install`, `sim erase`, `wda build`, ...) are expected to fail; you do not need them.
-  `wda restart`, `wda start`, `wda stop` and `wda status` go through the daemon and work.
+  `wda restart`, `wda start`, `wda stop` and `wda status` go through the daemon and work, and `daemon restart` gives
+  the running daemon a new driver; `daemon stop|start` and `faketandem start|stop` are refused, because nothing started
+  in this sandbox could replace what the job started outside it.
+- Coordinates are screenshot pixels, and a tap or swipe must stay on the screen. `scroll up|down --amount` is a
+  fraction of the screen's height (0.5 is half), or pixels from 50.
 - App logs: `./trio-test-harness --target sim logs [trio|tandem|all] [--grep REGEX -i] [--since 10m] [--level warning]
   [-n N]` reads Trio's and TandemKit's log files from the app through the daemon (`logs --help`; `logs all --save`
   copies them into the run's `logs/` for Read/Grep); Loop writes only TandemKit's (`tandem`). Use them to confirm

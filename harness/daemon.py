@@ -33,6 +33,10 @@ ALLOWED_PRIVATE = {"unlock", "is_dark", "status", "spotlight", "open_app_via_spo
                    "terminate", "install", "uninstall", "is_installed", "open_url", "app_data_container",
                    "app_group_containers",
                    "defaults_write", "ensure_wda", "describe_point"}
+# Calls that act on the app. One that timed out may still have happened (a tap reached the app although its answer
+# never came), so it is not repeated: a second tap could press whatever the first one opened.
+INPUT_METHODS = {"tap", "multi_tap", "swipe", "drag", "scroll", "type_text", "key", "home", "tap_text", "tap_element",
+                 "long_press", "lock", "unlock", "paste_text", "press_button", "crown"}
 
 
 def sock_path(target: str) -> Path:
@@ -137,14 +141,48 @@ def serve(target: str) -> None:
         except OSError as e:
             log(f"daemon[{target}] accept failed: {e}"); time.sleep(0.2); continue
         try:
-            _serve_connection(conn, drv, target, _shutdown)
+            drv = _serve_connection(conn, drv, target, _shutdown)
         except (BrokenPipeError, ConnectionResetError, OSError) as e:
             log(f"daemon[{target}] client connection dropped: {e}")   # a killed CLI must not kill the daemon
         except SystemExit:
             raise
 
 
-def _serve_connection(conn, drv, target, _shutdown) -> None:
+def _timed_out(e: BaseException) -> bool:
+    from .wda import timed_out
+    return timed_out(e)
+
+
+def _reset(drv, e: BaseException) -> bool:
+    """The driver's reset after a failed call: `recover` (the simulator restarts a stuck WebDriverAgent), else `close`.
+    Returns whether it restarted something."""
+    recover = getattr(drv, "recover", None)
+    if recover:
+        return bool(recover(e))
+    close = getattr(drv, "close", None)
+    if close:
+        close()
+    return False
+
+
+def restart_driver(drv, target: str):
+    """`th daemon restart` from a job's sandbox: a new driver, and the simulator's WebDriverAgent restarted, in this
+    process. A daemon stopped from the sandbox cannot be started again there (its new process runs in the sandbox,
+    without the simulator's tools or faketandem's port), so the daemon itself never stops. The old driver is kept if
+    the new one fails."""
+    recover = getattr(drv, "recover", None)
+    if recover:
+        recover(None, force=True)
+    close = getattr(drv, "close", None)
+    if close:
+        close()
+    new = _make_driver(target)
+    log(f"daemon[{target}] restarted its driver")
+    return new
+
+
+def _serve_connection(conn, drv, target, _shutdown):
+    """Answers one client's requests; returns the driver, a new one after a `restart` request."""
     if True:
         with conn, conn.makefile("rwb") as f:
             for line in f:
@@ -152,6 +190,9 @@ def _serve_connection(conn, drv, target, _shutdown) -> None:
                     req = json.loads(line)
                     method, args, kwargs = req["method"], _decode(req.get("args", [])), _decode(req.get("kwargs", {}))
                     if method == "ping":
+                        resp = {"ok": True, "result": {"target": target, "pid": os.getpid(), "kind": drv.kind}}
+                    elif method == "restart":
+                        drv = restart_driver(drv, target)
                         resp = {"ok": True, "result": {"target": target, "pid": os.getpid(), "kind": drv.kind}}
                     elif method == "app_files":      # `th logs` from a sandbox that can reach only this socket
                         from .applogs import read_files
@@ -183,14 +224,20 @@ def _serve_connection(conn, drv, target, _shutdown) -> None:
                                 # connection probably died (phone slept, VNC restarted, WebDriverAgent hung): reset
                                 # and retry once
                                 log(f"daemon[{target}] {method} failed ({e}); reconnecting")
-                                reset = getattr(drv, "recover", None) or getattr(drv, "close", None)
-                                if reset:
-                                    reset()
+                                restarted = _reset(drv, e)
+                                if _timed_out(e) and method in INPUT_METHODS:
+                                    raise HarnessError(
+                                        f"{method} got no answer in time ({e})."
+                                        + (" WebDriverAgent was stuck and has been restarted, so the next command "
+                                           "should work." if restarted else "")
+                                        + f" The {method} may still have reached the app: take a screenshot before "
+                                        "repeating it.") from e
                                 result = fn(*args, **kwargs)
                             resp = {"ok": True, "result": _encode(result)}
                 except Exception as e:  # noqa: BLE001
                     resp = {"ok": False, "error": f"{type(e).__name__}: {e}", "trace": traceback.format_exc()[-2000:]}
                 f.write((json.dumps(resp) + "\n").encode()); f.flush()
+    return drv
 
 
 # ---------------- client -----------------
@@ -330,6 +377,11 @@ def start(target: str, foreground: bool = False) -> None:
         time.sleep(0.5)
     tail = log_path(target).read_text()[-1200:] if log_path(target).exists() else ""
     raise HarnessError(f"daemon[{target}] failed to start\n{tail}")
+
+
+def restart_in_place(target: str) -> dict:
+    """Has the running daemon replace its driver (`restart_driver`), the process staying up."""
+    return RemoteDriver(target)._call("restart")
 
 
 def stop(target: str) -> None:
