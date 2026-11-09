@@ -9,7 +9,9 @@
 with Loop's checkout, scheme and UI flows (harness/flows/loop.py).
 
 Stages (each also available on its own via `./trio-test-harness ...` and as a Claude skill):
-  checkout -> build -> install -> launch (+onboarding) -> smoke (home + fake CGM/pump) -> report -> [PR comment]
+  checkout -> build -> install -> launch -> home (+onboarding) -> smoke (fake CGM/pump) -> report -> [PR comment]
+A failure up to the launch ends the run (exit 1). One in home or smoke, which only drive the app, is recorded in
+run.json's `setup_problems` and the run goes on as `partial` (exit 0), so a job's agent still tests, told what to finish.
 The exploratory part — reading the PR description and exercising what it changes — is done by Claude with the
 `trio-test-e2e` skill; this script prepares everything, writes runs/<run>/pr.md with the PR description and a test-plan
 stub, and can hand off to Claude with --agent.
@@ -167,7 +169,8 @@ def stage_install(args, bi):
 
 
 def stage_launch(args, bi, run):
-    """Launch the app with onboarding pre-seeded (or not), clear what it shows first, confirm the home screen."""
+    """Launch the app with onboarding pre-seeded (or not), and faketandem, the watch and WebDriverAgent it needs.
+    `stage_home` then gets it to its home screen."""
     from .cli import get_driver
     app = _app()
     F = app.flows
@@ -213,6 +216,13 @@ def stage_launch(args, bi, run):
             args.onboarding = "walk"
     time.sleep(6)
     F.step(run, drv, "launch", f"{app.name} launched")
+    return drv
+
+
+def stage_home(args, drv, run) -> None:
+    """Clear what the launched app shows first (its onboarding, when walked) and confirm the home screen."""
+    app = _app()
+    F = app.flows
     F.settle(drv, run)
     if (args.onboarding == "walk" or F.PROMPTS_AFTER_PRESEED) and not F.at_home(drv):
         F.walk_onboarding(drv, run)
@@ -222,8 +232,31 @@ def stage_launch(args, bi, run):
         raise HarnessError(f"{app.name} did not reach the home screen; see the run screenshots")
     F.step(run, drv, "home", "Home screen")
     if getattr(args, "watch", False):
+        from .cli import get_driver
         F.step(run, get_driver("watch"), "watch-home", "Watch app on the paired watch simulator")
-    return drv
+
+
+def setup_problem(run, drv, problems: list[dict], what: str, e: BaseException) -> None:
+    """Records a setup step that failed once the app was running: a job's agent can finish it, so the run goes on."""
+    log(f"SETUP INCOMPLETE: {what}: {type(e).__name__}: {e}")
+    problems.append({"what": what, "error": f"{type(e).__name__}: {e}"})
+    run.update_meta(setup_problems=problems)
+    try:
+        _app().flows.step(run, drv, "setup-incomplete", f"{what} did not finish: {type(e).__name__}: {e}")
+    except Exception as shot:  # noqa: BLE001 - the screenshot is a courtesy; the problem is already recorded
+        log(f"no screenshot of the setup problem: {shot}")
+
+
+def setup_notes(run_dir) -> str:
+    """ci/agent-setup-incomplete.md with what run_dir's setup left undone; empty when it finished."""
+    try:
+        problems = json.loads((Path(run_dir) / "run.json").read_text()).get("setup_problems") or []
+    except (OSError, ValueError):
+        return ""
+    if not problems:
+        return ""
+    lines = "\n".join(f"- {p['what']}: {p['error']}" for p in problems)
+    return (REPO_ROOT / "ci" / "agent-setup-incomplete.md").read_text().replace("{problems}", lines)
 
 
 def stage_faketandem(args, drv, bi, run) -> dict:
@@ -271,9 +304,11 @@ def _pump_connected(timeout: float = 120) -> bool:
     return False
 
 
-def stage_smoke(args, drv, run, bi=None):
+def stage_smoke(args, drv, run, bi=None, problems: list[dict] | None = None):
+    """Adds the simulated devices. Each one that fails is recorded (`setup_problem`) and the others still go on."""
     app = _app()
     F = app.flows
+    problems = [] if problems is None else problems
     want = smoke_devices(args)
     log(f"== stage: smoke ({' + '.join(want)})")
     F.settle(drv, run)
@@ -282,15 +317,28 @@ def stage_smoke(args, drv, run, bi=None):
         F.step(run, drv, "home-with-devices", "Home with devices already configured")
         _watch_with_data(args, run)
         return
-    if F.CGM_SIMULATOR in want and F.offers(drv, F.ADD_CGM):
+
+    def add_cgm():
         F.add_cgm_simulator(drv, run)
         time.sleep(1.5)
         if args.target == "sim" and bi and F.give_cgm_glucose(drv, bi.bundle_id):
             run.log_step("cgm-glucose", f"gave the {F.CGM_SIMULATOR} a sine-curve glucose model and relaunched {app.name}")
             time.sleep(6)
             F.settle(drv, run)
-    if F.PUMP_SIMULATOR in want and F.offers(drv, F.ADD_PUMP):
-        F.add_pump_simulator(drv, run)
+
+    for name, add, shortcut in ((F.CGM_SIMULATOR, add_cgm, F.ADD_CGM),
+                                (F.PUMP_SIMULATOR, lambda: F.add_pump_simulator(drv, run), F.ADD_PUMP)):
+        if name not in want:
+            continue
+        try:
+            if F.offers(drv, shortcut):
+                add()
+        except Exception as e:  # noqa: BLE001
+            setup_problem(run, drv, problems, f"adding the {name}", e)
+            try:
+                F.back_to_home(drv)
+            except Exception as back:  # noqa: BLE001
+                log(f"could not get back to the home screen: {back}")
     pump_note = ""
     if args.pump == "faketandem" and args.pump_setup == "preseed":
         connected = _pump_connected()
@@ -323,11 +371,16 @@ def _watch_with_data(args, run) -> None:
     F.step(run, w, "watch-with-data", "Watch app after the phone's fake CGM and pump are set up")
 
 
-def stage_report(args, run) -> Path:
+def stage_report(args, run) -> Path | None:
+    """The run's report.html, best effort: the agent and the workflow's later steps render it again."""
     from .report import render_html
     log("== stage: report")
     collect_crashes(args, run)
-    return render_html(run)
+    try:
+        return render_html(run)
+    except Exception as e:  # noqa: BLE001 - a report that fails to render must not keep the agent from running
+        log(f"report.html did not render: {type(e).__name__}: {e}")
+        return None
 
 
 def collect_crashes(args, run) -> None:
@@ -416,6 +469,9 @@ def run_stages(args):
                                              "pr_url": pr_url})
     notes = write_pr_notes(run, info)
     print(f"\n--- {notes} ---\n" + notes.read_text() + "\n---\n")
+    # Up to a running app, a failure ends the run: nothing can be tested without it. After that, what fails is driving
+    # the app (reaching its home screen, adding the simulated devices), which a job's agent can finish itself, so it is
+    # recorded (`setup_problem`, `setup_notes`) and the run goes on to the agent.
     try:
         bi = BuildInfo.load() if args.skip_build else stage_build(args, src, info)
         if bi is None:
@@ -424,22 +480,35 @@ def run_stages(args):
         if not args.skip_install:
             stage_install(args, bi)
         drv = stage_launch(args, bi, run)
-        if smoke_devices(args):
-            first = len(run.steps())
-            stage_smoke(args, drv, run, bi)
-            if args.hide_setup_screenshots:
-                # Only the fake CGM/pump setup is hidden; launch, home and everything after stay in the report.
-                run.update_meta(hidden_steps=[first, len(run.steps())])
-        want = smoke_devices(args)
-        if args.pump == "faketandem" and args.pump_setup == "preseed" and want:
-            want.append("Tandem pump (faketandem)")
-        run.finish("passed", f"{app.name} launched, reached the home screen" + (f", {' + '.join(want)} configured" if want else "") + ".")
     except Exception as e:  # noqa: BLE001
         run.finish("failed", f"{type(e).__name__}: {e}")
         stage_report(args, run)
         log(f"FAILED: {e}")
         print(f"run: {run.path}")
         return 1, run, pr_url, notes
+    problems: list[dict] = []
+    try:
+        stage_home(args, drv, run)
+    except Exception as e:  # noqa: BLE001
+        setup_problem(run, drv, problems, f"reaching {app.name}'s home screen", e)
+    if smoke_devices(args):
+        first = len(run.steps())
+        try:
+            stage_smoke(args, drv, run, bi, problems)
+        except Exception as e:  # noqa: BLE001
+            setup_problem(run, drv, problems, "the smoke stage", e)
+        if args.hide_setup_screenshots:
+            # Only the fake CGM/pump setup is hidden; launch, home and everything after stay in the report.
+            run.update_meta(hidden_steps=[first, len(run.steps())])
+    want = smoke_devices(args)
+    if args.pump == "faketandem" and args.pump_setup == "preseed" and want:
+        want.append("Tandem pump (faketandem)")
+    if problems:
+        run.finish("partial", f"{app.name} launched, but its setup did not finish: "
+                   + "; ".join(f"{p['what']}: {p['error']}" for p in problems))
+    else:
+        run.finish("passed", f"{app.name} launched, reached the home screen"
+                   + (f", {' + '.join(want)} configured" if want else "") + ".")
     html = stage_report(args, run)
     print(f"\nrun:    {run.path}\nreport: {html}\npr.md:  {notes}")
     return 0, run, pr_url, notes
