@@ -243,16 +243,9 @@ until merged: pass `--faketandem-ref` until then).
   `stage_launch` (simulator, faketandem, the watch, WebDriverAgent, the app's launch) end the run. `stage_home` and
   each simulated device in `stage_smoke` are best effort: a failure is a `setup-incomplete` step with a screenshot and
   an entry in run.json's `setup_problems`, the run finishes `partial` with exit 0, and `ci/agent-setup-incomplete.md`
-  tells the agent what to finish (`pipeline.setup_notes`, in the workflow's and the web UI's prompt). Checked with
-  stubbed stages only.
-- No single failed call ends a run. Checkout, install and launch are tried three times and the build twice
-  (`util.retry`; not a build whose log has a compiler's error for a source file, `pipeline.compile_error`), and only a
-  stage that keeps failing ends the run. report.html renders best effort. In the workflow the Python environment, the
-  sandbox settings and each daemon's start are tried three times, Go's setup twice; the agent's notes are optional;
-  an agent session that ends with an error is resumed under its `--session-id` (`--resume`), up to twice within the
-  step's time, or started again when it never began (the web UI's `_run_agent` likewise); and the steps after it
-  (faketandem's stop, the PR comment, the job summary, the uploads) cannot fail the job. Checked against stubs and a
-  fake `claude` running the step's own shell; `claude -p --resume` with a known session id is not yet seen in a real run.
+  tells the agent what to finish (`pipeline.setup_notes`, in the workflow's and the web UI's prompt). report.html
+  renders best effort and the agent's notes are optional, so neither keeps the agent from running either. Checked
+  with stubbed stages only.
 - TandemKit's feature flags: `ci/agent-tandemkit-flags.md` goes into every faketandem run's agent notes, with the
   flags read from the build's TandemKit (`flows/tandemkit.py` `known_flags`), so a flag a PR adds is listed and
   `flow tandem-feature-flag` takes it. 42516779754's agent never found Manual Temp Basal Support.

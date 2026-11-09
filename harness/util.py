@@ -77,19 +77,6 @@ def port_open(host: str, port: int, timeout: float = 1.0) -> bool:
         return False
 
 
-def retry(what: str, fn, *, tries: int = 3, delay: float = 10.0, retry_if=None):
-    """`fn()`, again up to `tries` times in all when it raises and `retry_if(error)` (default: always) allows it: one
-    failed call must not end a run. The last failure is raised."""
-    for attempt in range(1, tries + 1):
-        try:
-            return fn()
-        except Exception as e:  # noqa: BLE001
-            if attempt == tries or (retry_if and not retry_if(e)):
-                raise
-            log(f"{what} failed ({type(e).__name__}: {str(e)[:300]}); trying again ({attempt + 1}/{tries}) in {delay:g}s")
-            time.sleep(delay)
-
-
 def wait_for(pred, timeout: float, interval: float = 0.5, what: str = "condition") -> None:
     deadline = time.time() + timeout
     while time.time() < deadline:

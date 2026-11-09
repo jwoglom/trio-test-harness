@@ -10,10 +10,8 @@ with Loop's checkout, scheme and UI flows (harness/flows/loop.py).
 
 Stages (each also available on its own via `./trio-test-harness ...` and as a Claude skill):
   checkout -> build -> install -> launch -> home (+onboarding) -> smoke (fake CGM/pump) -> report -> [PR comment]
-No single failed call ends a run. A stage up to the launch is tried again (`util.retry`; a build that fails to compile
-once is not), and only a stage that keeps failing ends the run (exit 1), since there is nothing to test without the
-app. A failure in home or smoke, which only drive the app, is recorded in run.json's `setup_problems` and the run goes
-on as `partial` (exit 0), so a job's agent still tests, told what to finish.
+A failure up to the launch ends the run (exit 1). One in home or smoke, which only drive the app, is recorded in
+run.json's `setup_problems` and the run goes on as `partial` (exit 0), so a job's agent still tests, told what to finish.
 The exploratory part — reading the PR description and exercising what it changes — is done by Claude with the
 `trio-test-e2e` skill; this script prepares everything, writes runs/<run>/pr.md with the PR description and a test-plan
 stub, and can hand off to Claude with --agent.
@@ -23,7 +21,6 @@ from __future__ import annotations
 import argparse
 import json
 import os
-import re
 import shutil
 import subprocess
 import sys
@@ -31,7 +28,7 @@ import time
 from pathlib import Path
 
 from .config import CONFIG, REPO_ROOT
-from .util import HarnessError, log, retry
+from .util import HarnessError, log
 
 MODES = {"simulator": "sim", "sim": "sim",
          "rooted-vnc": "rooted-vnc", "vnc": "rooted-vnc", "device": "rooted-vnc",
@@ -222,14 +219,6 @@ def stage_launch(args, bi, run):
     return drv
 
 
-# A compiler's diagnostic for a source file: the change does not build, and building it again cannot help.
-COMPILE_ERROR = re.compile(r"\.(?:swift|mm?|c|cc|cpp|h|hpp|metal|xib|storyboard|plist|xcconfig)(?::\d+){1,2}: error: ")
-
-
-def compile_error(e: BaseException) -> bool:
-    return bool(COMPILE_ERROR.search(str(e)))
-
-
 def stage_home(args, drv, run) -> None:
     """Clear what the launched app shows first (its onboarding, when walked) and confirm the home screen."""
     app = _app()
@@ -389,7 +378,7 @@ def stage_report(args, run) -> Path | None:
     collect_crashes(args, run)
     try:
         return render_html(run)
-    except Exception as e:  # noqa: BLE001 - a report that fails to render must not end the run
+    except Exception as e:  # noqa: BLE001 - a report that fails to render must not keep the agent from running
         log(f"report.html did not render: {type(e).__name__}: {e}")
         return None
 
@@ -452,7 +441,7 @@ def run_stages(args):
     """checkout -> build -> install -> launch -> smoke -> report. Returns (exit code, run, PR URL, pr.md)."""
     from .report import Run
     from .build import BuildInfo
-    src, info = retry("checkout", lambda: stage_checkout(args))
+    src, info = stage_checkout(args)
     pr_url = info.get("pr_url")
     # a branch with a cherry-picked PR on top is a test of that PR (its title, its comment)
     picked = next((c["pr"] for c in (info.get("cherry_picks") or []) + (info.get("submodule_cherry_picks") or [])
@@ -480,18 +469,17 @@ def run_stages(args):
                                              "pr_url": pr_url})
     notes = write_pr_notes(run, info)
     print(f"\n--- {notes} ---\n" + notes.read_text() + "\n---\n")
-    # Up to a running app, a stage that keeps failing ends the run: nothing can be tested without it. After that, what
-    # fails is driving the app (reaching its home screen, adding the simulated devices), which a job's agent can finish
-    # itself, so it is recorded (`setup_problem`, `setup_notes`) and the run goes on to the agent.
+    # Up to a running app, a failure ends the run: nothing can be tested without it. After that, what fails is driving
+    # the app (reaching its home screen, adding the simulated devices), which a job's agent can finish itself, so it is
+    # recorded (`setup_problem`, `setup_notes`) and the run goes on to the agent.
     try:
-        bi = BuildInfo.load() if args.skip_build else retry(
-            "build", lambda: stage_build(args, src, info), tries=2, retry_if=lambda e: not compile_error(e))
+        bi = BuildInfo.load() if args.skip_build else stage_build(args, src, info)
         if bi is None:
             raise HarnessError(f"--skip-build: no earlier {app.name} build ({app.last_build.name})")
         run.update_meta(build=bi.__dict__)
         if not args.skip_install:
-            retry("install", lambda: stage_install(args, bi))
-        drv = retry("launch", lambda: stage_launch(args, bi, run))
+            stage_install(args, bi)
+        drv = stage_launch(args, bi, run)
     except Exception as e:  # noqa: BLE001
         run.finish("failed", f"{type(e).__name__}: {e}")
         stage_report(args, run)
