@@ -270,8 +270,8 @@ until merged: pass `--faketandem-ref` until then).
   `tandem` when its file is missing. Read from synthetic stores only. On the phone a store and its WAL are mirrored
   (`_phone_store`: one `stat` probe over the shared SSH connection, scp only for what changed or was written in the
   last 3 s); the probe's `stat -c`/`stat -f` fallback and scp from the phone are untested there, as is the pane on a
-  real simulator. Each line shows once (`_collapse`, `_dedup`): a copy in another source within 2 s, by its text
-  without the source's framing, is dropped. That the device log stamps TandemKit's copy within 2 s of its file is
+  real simulator. A line read from two sources shows once (`_dedup`): a copy in another source within 2 s, by its
+  text without the source's framing, is dropped; repeats within one source all show. That the device log stamps TandemKit's copy within 2 s of its file is
   inferred from the code (the copy goes through the delegate queue), not measured.
 - `th tap --count N` / `Driver.multi_tap` and `th flow tandem-feature-flag[s]` (`harness/flows/tandemkit.py`, added
   2026-11-01 after CI run 41275701186 could not reach TandemKit's Feature Flags list: three `th tap` calls landed ~1.5 s
