@@ -10,8 +10,9 @@ TH_APP=loop is set, so every `./trio-test-harness` command acts on Loop. Follow 
 2. Exercise them with the trio-ui-drive skill using `./trio-test-harness --target rooted-vnc ...` (or
    `./bin/th --target rooted-vnc ...`), screenshotting every meaningful state into this run (`shot --name ... --note ...`)
    and recording observations with `./trio-test-harness run note "..."`. Look at each screenshot before tapping;
-   coordinates are screenshot pixels (the phone's native resolution). Loop writes no text log of its own; TandemKit's
-   is there: `./trio-test-harness --target rooted-vnc logs tandem --since 5m` (or `--grep`; see your limits).
+   coordinates are screenshot pixels (the phone's native resolution). Loop writes no log of its own; TandemKit's
+   is there: `./trio-test-harness --target rooted-vnc logs tandem --since 5m` (or `--grep`; see your limits), and
+   every pump and CGM manager's entries are in Loop's device log (`logs device`).
 3. Finish with `./trio-test-harness run finish passed|failed|partial --summary "..."` and `./trio-test-harness report html`.
 
 This run is `$TH_RUN`, so `shot`, `run note` and `run finish` go to it without `--run`.

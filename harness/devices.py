@@ -225,6 +225,13 @@ def ssh_run(cmd: str, *, check: bool = True, timeout: int = 60, quiet: bool = Tr
     return run(["ssh", *opts, "-p", port, f"{user}@{host}", cmd], check=check, timeout=timeout, quiet=quiet)
 
 
+def ssh_pull(remote_paths: list[str], dest: Path, *, timeout: int = 180) -> None:
+    """Copy files from the phone into the directory `dest` (scp)."""
+    user, host, port = ssh_target()
+    run(["scp", "-o", "BatchMode=yes", "-o", "ConnectTimeout=8", "-q", "-P", port,
+         *[f"{user}@{host}:{p}" for p in remote_paths], str(dest)], timeout=timeout, quiet=True)
+
+
 def ssh_ok() -> bool:
     return ssh_run("echo ok", check=False, timeout=20).returncode == 0
 

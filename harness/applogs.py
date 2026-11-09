@@ -1,20 +1,27 @@
-"""`th logs`: read Trio's and TandemKit's log files from the installed app's data container. Loop writes no text log
-of its own (its device log is the SQLite store Documents/DeviceLog/Storage.sqlite), so with --app loop only
-TandemKit's is there.
+"""`th logs`: read the installed app's logs from its data container: Trio's own, the device log (every pump and CGM
+manager's entries), TandemKit's and the watch's. Loop writes no log of its own, so with --app loop there are TandemKit's
+and Loop's device log.
 
     th --target rooted-vnc logs tandem --grep bolus           # today's TandemKit log, matching entries
     th logs trio --since 10m                                    # Trio's log, the last 10 minutes
+    th logs device --grep TandemPumpManager                     # the device log's TandemKit entries
     th logs tandem --level warning -n 0                         # every warning and error (today and yesterday)
-    th logs all --save                                          # copy every log file into the current run's logs/
+    th logs all --save                                          # copy every log into the current run's logs/
 
-Files, under the container's Documents/ (see Trio's SimpleLogReporter and TandemKit's TandemLogger):
-  trio    logs/log.txt          (+ logs/log_prev.txt, the previous day), or in current Trio logs/AppLog.sqlite: a
-          Core Data store (AppLogStore), read as text in the same format, the last SQLITE_DAYS days; its watch lines
-          are in it too, with categories "Watch/…" (`logs trio --grep Watch/`). Simulator only.
+Files, under the container's Documents/ (Trio's Logger/Store/AppLogStore and DeviceLog/DeviceLogStore, TandemKit's
+TandemLogger):
+  trio    logs/AppLog.sqlite: current Trio's own log, a Core Data store read as text, the last SQLITE_DAYS days, debug
+          lines included; its watch lines are in it too, with categories "Watch/…" (`logs trio --grep Watch/`). Older
+          Trio wrote logs/log.txt (+ logs/log_prev.txt, the previous day), which current Trio deletes after 7 days.
+  device  the host's device log, LoopKit's PersistentDeviceLog: Trio's logs/DeviceLog.sqlite, Loop's
+          DeviceLog/Storage.sqlite. Every pump and CGM manager's entries (sends, receives, connections), each tagged
+          [manager/type]; TandemKit sends its info/warning/error lines there too, as "delegate" entries.
   watch   logs/watch_log.txt    (+ logs/watch_log_prev.txt)
   tandem  tandem/tandem_log.txt (+ tandem/tandem_log_prev.txt); only info/warning/error reach the file, debug
-          messages go to OSLog (subsystem com.jwoglom.TandemKit) only.
-Each file starts at local midnight and is rotated to *_prev once a day; both are read, so the logs reach back to the
+          messages go to OSLog (subsystem com.jwoglom.TandemKit) only. Where the file is missing, TandemKit's lines
+          are taken from the device log instead (`tandem_from_device`).
+The SQLite stores are read in place on the simulator, and copied off the phone (scp, with their WAL) to be read here.
+Each text file starts at local midnight and is rotated to *_prev once a day; both are read, so the logs reach back to the
 start of the previous day at most. Output is the last -n entries (default 200) after the filters.
 
 Simulator: read straight from the simctl data container. Phone (rooted-vnc): over SSH. When the harness daemon for the
@@ -33,9 +40,11 @@ from .util import HarnessError
 FILES = {
     "trio": ["logs/log_prev.txt", "logs/log.txt", "logs/AppLog.sqlite"],
     "tandem": ["tandem/tandem_log_prev.txt", "tandem/tandem_log.txt"],
+    "device": ["logs/DeviceLog.sqlite", "DeviceLog/Storage.sqlite"],
     "watch": ["logs/watch_log_prev.txt", "logs/watch_log.txt"],
 }
-APP_FILES = {"trio": ("trio", "tandem", "watch"), "loop": ("tandem",)}
+APP_FILES = {"trio": ("trio", "tandem", "device", "watch"), "loop": ("tandem", "device")}
+TANDEM_MANAGER = re.compile(r"^\[[^\]]* [A-Z]+\] \[[^/\]]*tandem[^/\]]*/", re.I)
 
 
 def files_for(app: str) -> dict[str, list[str]]:
@@ -55,40 +64,106 @@ CORE_DATA_EPOCH = 978307200          # 2001-01-01 UTC: Core Data stores dates as
 SQLITE_LEVELS = {0: "DEBUG", 1: "INFO", 2: "DEFAULT", 3: "WARNING", 4: "ERROR", 5: "ERROR"}
 
 
-def render_app_log(path: Path, days: float = SQLITE_DAYS) -> str:
-    """Trio's logs/AppLog.sqlite as text, one entry per row, in a format ENTRY parses:
-    [2026-11-07T14:02:49-0500 INFO] [Watch] AppleWatchManager.swift - handleBolusRequest - 829 - message"""
+# Core Data tables of the two SQLite log stores: Trio's AppLogStore, and LoopKit's PersistentDeviceLog (entity Entry)
+STORE_TABLES = {
+    "app": ("ZAPPLOGENTRY", "ZTIMESTAMP, ZLEVEL, ZCATEGORY, ZFILE, ZFUNCTION, ZLINE, ZMESSAGE, Z_PK"),
+    "device": ("ZENTRY", "ZTIMESTAMP, ZTYPE, ZMANAGERIDENTIFIER, ZMESSAGE, Z_PK"),
+}
+LEVEL_PREFIX = re.compile(r"^\[(INFO|WARNING|ERROR)\] ")      # TandemKit's lines in the device log
+
+
+def _store_rows(path: Path, where: str, params: tuple, order: str = "ORDER BY ZTIMESTAMP, Z_PK", *,
+                private_copy: bool = False) -> tuple[str, list[tuple]]:
+    """("app" | "device", rows) of a SQLite log store. private_copy: `path` is a copy no app writes (one pulled from
+    the phone), opened as it is."""
     import shutil
     import sqlite3
     import tempfile
-    import time
-    since = time.time() - days * 86400 - CORE_DATA_EPOCH
-    sql = ("SELECT ZTIMESTAMP, ZLEVEL, ZCATEGORY, ZFILE, ZFUNCTION, ZLINE, ZMESSAGE FROM ZAPPLOGENTRY "
-           "WHERE ZTIMESTAMP >= ? ORDER BY ZTIMESTAMP, Z_PK")
 
-    def rows_from(p: Path, uri: str) -> list[tuple]:
+    def rows_from(uri: str) -> tuple[str, list[tuple]]:
         con = sqlite3.connect(uri, uri=True, timeout=5)
         try:
-            return con.execute(sql, (since,)).fetchall()
+            tables = {r[0] for r in con.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
+            kind = next((k for k, (t, _) in STORE_TABLES.items() if t in tables), None)
+            if not kind:
+                raise HarnessError(f"{path.name} is neither Trio's app log nor a device log")
+            table, columns = STORE_TABLES[kind]
+            return kind, con.execute(f"SELECT {columns} FROM {table} WHERE {where} {order}", params).fetchall()
         finally:
             con.close()
 
+    if private_copy:
+        return rows_from(f"file:{path}")
     try:      # in place, read-only: the app keeps writing it (WAL), and nothing here may change it
-        rows = rows_from(path, f"file:{path}?mode=ro")
+        return rows_from(f"file:{path}?mode=ro")
     except sqlite3.Error:
         # a reader that may not touch the -shm file: read a copy of the store and its WAL instead
         with tempfile.TemporaryDirectory() as tmp:
             for suffix in ("", "-wal", "-shm"):
                 src = Path(f"{path}{suffix}")
                 if src.exists():
-                    shutil.copy2(src, Path(tmp) / f"AppLog.sqlite{suffix}")
-            copy = Path(tmp) / "AppLog.sqlite"
-            rows = rows_from(copy, f"file:{copy}")
-    out = []
-    for ts, level, category, file, function, line, message in rows:
-        when = dt.datetime.fromtimestamp((ts or 0) + CORE_DATA_EPOCH).astimezone().strftime("%Y-%m-%dT%H:%M:%S%z")
-        out.append(f"[{when} {SQLITE_LEVELS.get(level, 'INFO')}] [{category}] {file} - {function} - {line} - {message}")
-    return "\n".join(out)
+                    shutil.copy2(src, Path(tmp) / f"store.sqlite{suffix}")
+            return rows_from(f"file:{Path(tmp) / 'store.sqlite'}")
+
+
+def _render_row(kind: str, row: tuple) -> str:
+    when = dt.datetime.fromtimestamp((row[0] or 0) + CORE_DATA_EPOCH).astimezone().strftime("%Y-%m-%dT%H:%M:%S%z")
+    if kind == "app":
+        _, level, category, file, function, line, message, _pk = row
+        return f"[{when} {SQLITE_LEVELS.get(level, 'INFO')}] [{category}] {file} - {function} - {line} - {message}"
+    # the device identifier (a pump's serial, a sensor's) is left out
+    _, entry_type, manager, message, _pk = row
+    m = LEVEL_PREFIX.match(message or "")
+    level = m.group(1) if m else "ERROR" if entry_type == "error" else "INFO"
+    return f"[{when} {level}] [{manager}/{entry_type}] {(message or '')[m.end() if m else 0:]}"
+
+
+def render_app_log(path: Path, days: float = SQLITE_DAYS, *, private_copy: bool = False) -> str:
+    """A SQLite log store as text, one entry per row, in a format ENTRY parses. Trio's logs/AppLog.sqlite:
+    [2026-11-07T14:02:49-0500 INFO] [Watch] AppleWatchManager.swift - handleBolusRequest - 829 - message
+    A device log, [manager/entry type], the level from a TandemKit line's own [LEVEL] prefix:
+    [2026-11-07T14:02:49-0500 INFO] [TandemPumpManager/delegate] TandemPumpManager.swift - enactTempBasal#1203: message"""
+    import time
+    since = time.time() - days * 86400 - CORE_DATA_EPOCH
+    kind, rows = _store_rows(path, "ZTIMESTAMP >= ?", (since,), private_copy=private_copy)
+    return "\n".join(_render_row(kind, r) for r in rows)
+
+
+def tail_app_log(path: Path, after: int | None, limit: int = 500) -> dict:
+    """read_tail() for a SQLite log store, by row (Z_PK) instead of byte: the rows after `after` (None: the last
+    `limit`), at most `limit`. "size" is the store's last row; reset when that is behind `after` (a new store)."""
+    _, last = _store_rows(path, "1", (), "ORDER BY Z_PK DESC LIMIT 1")
+    size = last[0][-1] if last else 0
+    reset = after is not None and after > size
+    if after is None or reset:
+        kind, rows = _store_rows(path, "1", (), f"ORDER BY Z_PK DESC LIMIT {int(limit)}")
+        rows.reverse()
+    else:
+        kind, rows = _store_rows(path, "Z_PK > ?", (after,), f"ORDER BY Z_PK LIMIT {int(limit)}")
+    text = "".join(_render_row(kind, r) + "\n" for r in rows)
+    return {"offset": rows[-1][-1] if rows else (0 if reset else after or size), "size": size, "text": text,
+            "reset": reset}
+
+
+def tandem_from_device(texts: dict[str, str | None]) -> str | None:
+    """TandemKit's entries in the device log text (`render_app_log`), for when tandem/tandem_log.txt is missing."""
+    lines = [e for t in texts.values() if t for _, _, e in _entries(t) if TANDEM_MANAGER.match(e)]
+    return "\n".join(lines) if lines else None
+
+
+def _pull_store(container: str, rel: str) -> str | None:
+    """A SQLite log store on the phone, copied here with its WAL (where the app's latest rows are) and read as text."""
+    import tempfile
+    from . import devices as D
+    p = f"{container}/Documents/{rel}"
+    probe = D.ssh_run(f"for f in {shlex.quote(p)} {shlex.quote(p + '-wal')}; do [ -f \"$f\" ] && echo \"$f\"; done; true",
+                      check=False, timeout=30)
+    present = [l.strip() for l in probe.stdout.splitlines() if l.strip()]
+    if p not in present:
+        return None
+    with tempfile.TemporaryDirectory() as tmp:
+        D.ssh_pull(present, Path(tmp))
+        return render_app_log(Path(tmp) / Path(rel).name, private_copy=True)
 
 
 def read_files(target: str, bundle_id: str, relpaths: list[str]) -> dict[str, str | None]:
@@ -114,10 +189,11 @@ def read_files(target: str, bundle_id: str, relpaths: list[str]) -> dict[str, st
     if target == "rooted-vnc":
         from . import devices as D
         container = D.ssh_app_container(bundle_id)
-        # the SQLite store would need sqlite3 on the phone; the text logs only (an older Trio) over SSH
         for rel in [r for r in relpaths if r.endswith(".sqlite")]:
-            out[rel] = None
+            out[rel] = _pull_store(container, rel)
         relpaths = [r for r in relpaths if not r.endswith(".sqlite")]
+        if not relpaths:
+            return out
         script = "; ".join(
             f"echo {MARK}{shlex.quote(rel)}; p={shlex.quote(f'{container}/Documents/{rel}')}; "
             f"if [ -f \"$p\" ]; then cat \"$p\"; echo; else echo {MARK}-missing; fi" for rel in relpaths)
@@ -151,7 +227,10 @@ _CONTAINERS: dict[tuple[str, str], str] = {}
 
 def read_tail(target: str, bundle_id: str, rel: str, offset: int | None, max_bytes: int = 256 * 1024) -> dict:
     """Bytes of Documents/<rel> after `offset` (None: the last 64 KB), at most max_bytes: {"offset", "size", "text",
-    "reset"}. reset=True when the file shrank (rotated at midnight) and reading restarted from the top."""
+    "reset"}. reset=True when the file shrank (rotated at midnight) and reading restarted from the top. A SQLite
+    store (simulator only) goes by row instead (`tail_app_log`)."""
+    if rel.endswith(".sqlite") and target != "sim":
+        raise HarnessError(f"{rel} is tailed on the simulator only; `th --target {target} logs` copies it whole")
     if target == "sim":
         from . import xcode
         key = (target, bundle_id)
@@ -164,6 +243,8 @@ def read_tail(target: str, bundle_id: str, rel: str, offset: int | None, max_byt
         f = Path(_CONTAINERS[key]) / "Documents" / rel
         if not f.is_file():
             return {"offset": 0, "size": None, "text": "", "reset": False}
+        if f.suffix == ".sqlite":
+            return tail_app_log(f, offset)
         size = f.stat().st_size
         start, reset = _start(offset, size)
         with open(f, "rb") as fh:
