@@ -27,10 +27,10 @@ try to work around them.
   next cycle Trio runs on its own; `oref --no-trigger` checks the latest one. Use it to show the closed loop works
   end to end, before and after the change under test. Trio only: with `--app loop` it refuses.
 - App logs: `./trio-test-harness --target sim logs [trio|tandem|device|all] [--grep REGEX -i] [--since 10m]
-  [--level warning] [-n N]` reads the app's logs through the daemon (`logs --help`; `logs all --save` copies them into
-  the run's `logs/` for Read/Grep): `trio`, Trio's own (current Trio keeps it in `logs/AppLog.sqlite`, read as text);
-  `tandem`, TandemKit's (`tandem/tandem_log.txt`, else its entries in the device log); `device`, the device log, every
-  pump and CGM manager's entries as `[manager/type] message`. Loop has `tandem` and `device` only. Use them to confirm
+  [--level warning] [-n N]` reads the app's logs by name through the daemon (`logs --help`; `logs all --save` writes
+  each one as text into the run's `logs/` for Read/Grep; `logs --summary` says how far back each goes): `trio`,
+  Trio's own; `tandem`, TandemKit's; `device`, the device log, every pump and CGM driver's entries as
+  `[driver/type] message`. Loop has `tandem` and `device` only. Use them to confirm
   what the app did behind a screen (a bolus recorded, a pump error, a history entry). Quote only the lines that
   matter, and leave out anything identifying (pump or sensor serial numbers, device names, IDs, tokens) from notes,
   the summary and screenshots' notes.

@@ -6,9 +6,7 @@ Loop app (`--app loop`), whose cycles this does not check.
     th --target sim oref --no-trigger    # check the latest cycle in the log, forcing nothing
     th --target sim oref --wait          # Open Loop: wait for Trio's next cycle and check it
 
-Where it reads (harness/applogs.py): Trio's lines from its log, logs/AppLog.sqlite in current Trio (log.txt in older
-Trio); TandemKit's, shown alongside, from tandem/tandem_log.txt, else from TandemKit's entries in the device log
-(logs/DeviceLog.sqlite). Both stores are copied from the phone over SSH.
+It reads Trio's log and TandemKit's as `th logs trio` and `th logs tandem` do, on the simulator or the phone.
 
 Facts (Trio feat/tandem-closed-beta and dev: Trio/Sources/APS/APSManager.swift, DeviceDataManager.swift,
 Modules/Home/View/HomeRootView+Refresh.swift, Config/Config.swift) this relies on:
@@ -77,12 +75,8 @@ def _from(rx: re.Pattern, text: str) -> str:
 
 
 def _entries(target: str, bundle: str, name: str = "trio") -> list[tuple[dt.datetime, str]]:
-    got = A.fetch(target, bundle, A.FILES[name])
-    texts = [got.get(rel) for rel in A.FILES[name]]
-    if name == "tandem" and not any(texts):
-        texts = [A.tandem_from_device(A.fetch(target, bundle, A.FILES["device"]))]
-    out = [(when, text) for t in texts for when, _, text in A._entries(t or "") if when]
-    return sorted(out, key=lambda e: e[0])
+    text = A.read_logs(target, bundle, [name])[name]
+    return sorted(((when, t) for when, _, t in A._entries(text or "") if when), key=lambda e: e[0])
 
 
 @dataclass

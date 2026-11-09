@@ -40,7 +40,7 @@ machine that tests Loop by default. What differs between the apps is in `harness
 | Skip onboarding, phone | flags over SSH | holding the welcome screen's logo for 2 s (LoopOnboarding's own skip, with the same mock settings) |
 | After onboarding | the home screen | prompts for notifications, Apple Health ("Turn On All", "Allow") and Bluetooth, which `walk_onboarding` answers |
 | Fake devices | Glucose Simulator + Pump Simulator, from the home header | CGM Simulator + Pump Simulator, from the HUD's "Add CGM" / "Add Pump" (else Settings); a new CGM Simulator has no glucose model, so on the simulator the smoke stage gives it a sine curve |
-| `th logs` | Trio, TandemKit, watch | TandemKit only: Loop's own device log is an SQLite store |
+| `th logs` | trio, tandem, device, watch | tandem, device |
 | `th docs` | https://triodocs.org | LoopDocs, https://loopkit.github.io/loopdocs/ |
 
 A PR on a LoopWorkspace submodule (TandemKit, or Loop itself, LoopKit/Loop) is found through `.gitmodules` of
@@ -263,21 +263,21 @@ Through the sandbox's network proxy the 640 KB search index arrived cut short (I
 gzipped, a plain body cut short is completed with Range requests, and failing that a running harness daemon, outside
 the sandbox, fetches it.
 
-`th logs` reads the installed app's logs, under its `Documents/`:
-- `trio`: current Trio's own log is the Core Data store `logs/AppLog.sqlite` (debug lines included, its watch lines
-  under categories `Watch/…`), read as text, the last two days; older Trio wrote `logs/log.txt`.
-- `device`: the device log, LoopKit's `PersistentDeviceLog` (Trio's `logs/DeviceLog.sqlite`, Loop's
-  `DeviceLog/Storage.sqlite`): every pump and CGM manager's entries, as `[manager/type] message`. TandemKit sends its
-  info, warning and error lines there as `delegate` entries; the pump's serial they are filed under is not printed.
-- `tandem`: `tandem/tandem_log.txt` (info and above; debug goes to OSLog only); without it, TandemKit's entries in the
-  device log.
-- `watch`: `logs/watch_log.txt`.
-Text files are read with their `*_prev` file for the previous day; the SQLite stores are copied off the phone over SSH
-(scp, with their WAL) and read on the Mac. It filters with `--grep REGEX [-i]`, `--since 10m|2h|<ISO time>` and `--level warning`
-(TandemKit), prints the last `-n` entries (default 200; multi-line entries stay whole, `all` merges by time), lists sizes
-with `--files`, and copies the files into the run's `logs/` with `--save`. It reads from the simctl container or over SSH,
-or through the target's daemon when one runs, so the sandboxed web UI/CI agent can use it (restart a daemon started
-before this command existed). Logs from the phone may hold real device data: keep them out of reports and PRs.
+`th logs` reads the installed app's logs by name, as entries; where and how the app keeps each one is
+`harness/applogs.py`'s business, and nothing that calls it deals with files or stores:
+- `trio`: Trio's own log, debug lines included, with the watch's lines under categories `Watch/…`.
+- `tandem`: TandemKit's info, warnings and errors (its debug lines go to the system log only: `th oslog`).
+- `device`: the device log, every pump and CGM driver's entries, as `[driver/type] message`. TandemKit's lines are in
+  it too; the pump's serial they are filed under is not printed.
+- `watch`: the Watch app's log, as far as the watch has sent it to the phone.
+
+Loop has `tandem` and `device`. Each log reaches back about two days. It filters with `--grep REGEX [-i]`,
+`--since 10m|2h|<ISO time>` and `--level warning`, prints the last `-n` entries (default 200; multi-line entries stay
+whole, `all` merges by time), gives each log's entry count and span with `--summary`, and writes each log as text into
+the run's `logs/` with `--save`. It works the same on the simulator and the phone, and through the target's daemon when
+one runs, so the sandboxed web UI/CI agent can use it (restart a daemon started before this command existed). The web
+UI's log pane follows the same logs live. Logs from the phone may hold real device data: keep them out of reports and
+PRs.
 
 `th oref` forces one Trio oref cycle (the home screen's pull-down: glucose, oref's determination, the enactment) and
 checks from Trio's log that it went all the way through, with TandemKit's lines of the same window alongside; exit 1
