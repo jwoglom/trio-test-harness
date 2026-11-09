@@ -435,28 +435,42 @@ _MINIMIZE = """mutation($id: ID!) { minimizeComment(input: {subjectId: $id, clas
   minimizedComment { isMinimized } } }"""
 
 
-def hide_earlier_comments(slug: str, number: int, posted_url: str) -> int:
-    """Hides the harness's earlier comments on the PR as outdated, with GitHub's own Hide (minimizeComment), once a
-    new one is posted: those by the new comment's author that carry COMMENT_MARKER or the footer. Their text is left
-    as it is. Returns how many it hid; a failure is only logged, since the new comment is already up."""
-    owner, name = slug.split("/")
+def _pr_comments(owner: str, name: str, number: int) -> list[dict]:
     comments: list[dict] = []
     after = None
-    try:
-        while True:
-            args = ["gh", "api", "graphql", "-f", f"query={_COMMENTS_QUERY}", "-F", f"owner={owner}",
-                    "-F", f"name={name}", "-F", f"number={number}"] + (["-F", f"after={after}"] if after else [])
-            page = json.loads(run_cmd(args, quiet=True, timeout=120).stdout)["data"]["repository"]["pullRequest"]["comments"]
-            comments += page["nodes"]
-            if not page["pageInfo"]["hasNextPage"]:
-                break
-            after = page["pageInfo"]["endCursor"]
-    except (HarnessError, ValueError, KeyError, TypeError) as e:
-        log(f"could not list {slug}#{number}'s comments to hide the earlier ones: {e}")
-        return 0
-    new = next((c for c in comments if c.get("url") == posted_url), None)
-    if not new or not new.get("author"):
-        log(f"the new comment ({posted_url}) is not among {slug}#{number}'s comments; earlier ones left as they are")
+    while True:
+        args = ["gh", "api", "graphql", "-f", f"query={_COMMENTS_QUERY}", "-F", f"owner={owner}",
+                "-F", f"name={name}", "-F", f"number={number}"] + (["-F", f"after={after}"] if after else [])
+        page = json.loads(run_cmd(args, quiet=True, timeout=120).stdout)["data"]["repository"]["pullRequest"]["comments"]
+        comments += page["nodes"]
+        if not page["pageInfo"]["hasNextPage"]:
+            return comments
+        after = page["pageInfo"]["endCursor"]
+
+
+def hide_earlier_comments(slug: str, number: int, posted_url: str, *, attempts: int = 3) -> int:
+    """Hides the harness's earlier comments on the PR as outdated, with GitHub's own Hide (minimizeComment), once
+    the API shows the new one posted: found by its URL, with its author and COMMENT_MARKER (read again a few times if
+    it does not show yet; nothing is hidden if it never does). Hidden are those by the same author that carry the
+    marker or the footer. Their text is left as it is. Returns how many it hid; a failure is only logged, since the
+    new comment is already up."""
+    import time
+    owner, name = slug.split("/")
+    new, comments = None, []
+    for attempt in range(attempts):
+        if attempt:
+            time.sleep(2 * attempt)
+        try:
+            comments = _pr_comments(owner, name, number)
+        except (HarnessError, ValueError, KeyError, TypeError) as e:
+            log(f"could not list {slug}#{number}'s comments to hide the earlier ones: {e}")
+            continue
+        new = next((c for c in comments if c.get("url") == posted_url and c.get("author")
+                    and COMMENT_MARKER in (c.get("body") or "")), None)
+        if new:
+            break
+    if not new:
+        log(f"the new comment ({posted_url or 'no URL'}) did not show on {slug}#{number}; earlier ones left as they are")
         return 0
     hidden = 0
     for c in comments:
