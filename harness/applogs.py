@@ -13,7 +13,9 @@ The logs:
   device  the device log: every pump and CGM driver's entries, each as "[driver/type] message".
   watch   the Watch app's log, as far as the watch has sent it to the phone (every 3 min or 100 entries).
 Loop has tandem and device only. Each log reaches back about two days. The output is the last -n entries (default
-200) after the filters; `all` merges the logs by time and prefixes each entry with its log's name.
+200) after the filters; `all` merges the logs by time and prefixes each entry with its log's name. Each line shows
+once: one the app keeps in two places (TandemKit's are in the device log too) under the first log that has it, and
+identical lines in the same second as one, marked "(×N)".
 
 This works on the simulator and on the phone, and goes through the target's daemon when one runs, so the web UI/CI
 agent, whose sandbox reaches only the daemon, can use it.
@@ -91,15 +93,83 @@ def read_logs(target: str, bundle_id: str, names: list[str]) -> dict[str, str | 
 
 
 def _merge(texts: list[str | None]) -> str | None:
+    """A log's sources as one text: identical lines collapsed in each, and those another source already has dropped."""
     if all(t is None for t in texts):
         return None
-    return "\n".join(t.rstrip("\n") for t in texts if t)
+    kept = _dedup([_collapse(_entries(t)) for t in texts if t])
+    return "\n".join(e for group in kept for _, _, e in group)
+
+
+# An entry's body: its text without what its source frames it with, the timestamp and level and a device log's
+# [driver/type]. Two sources holding one line hold the same body, stamped up to DEDUP_WINDOW apart: TandemKit stamps
+# its file's line, then the host stamps the device log's copy when it gets it.
+DEVICE_FRAMING = re.compile(r"^\[[^\]/]+/(?:send|receive|error|delegate|delegateResponse|connection)\] ")
+DEDUP_WINDOW = 2.0
+REPEATS = re.compile(r" \(×(\d+)\)$")
+
+
+def _body(entry: str) -> str:
+    m = ENTRY.match(entry)
+    return REPEATS.sub("", DEVICE_FRAMING.sub("", (entry[m.end():] if m else entry).lstrip(" ]"), count=1))
+
+
+def _repeats(entry: str) -> int:
+    m = REPEATS.search(entry)
+    return int(m.group(1)) if m else 1
+
+
+def _collapse(entries: list[tuple]) -> list[tuple]:
+    """Adjacent entries identical to the second as one, marked (×N): repeats are kept count of, not hidden, since a
+    command logged twice is worth seeing."""
+    out: list[list] = []
+    for when, lvl, text in entries:
+        if out and out[-1][0] == when and out[-1][2] == text:
+            out[-1][3] += 1
+        else:
+            out.append([when, lvl, text, 1])
+    return [(w, lv, t if n == 1 else f"{t} (×{n})") for w, lv, t, n in out]
+
+
+def _dedup(groups: list[list[tuple]]) -> list[list[tuple]]:
+    """Each group (a log's sources, or the logs `all` shows) without the entries an earlier group already holds: the
+    same body within DEDUP_WINDOW, each earlier entry standing for as many later ones as it was repeated. Within a group
+    nothing is dropped."""
+    import bisect
+    seen: dict[str, tuple[list[float], list[int]]] = {}       # body -> its earlier entries' times, repeats unmatched
+    out = []
+    for group in groups:
+        kept = []
+        for e in group:
+            when, body = e[0], _body(e[2])
+            if when is not None and body in seen:
+                times, left = seen[body]
+                t = when.timestamp()
+                lo, hi = bisect.bisect_left(times, t - DEDUP_WINDOW), bisect.bisect_right(times, t + DEDUP_WINDOW)
+                near = [j for j in range(lo, hi) if left[j] > 0]
+                if near:
+                    left[min(near, key=lambda j: abs(times[j] - t))] -= 1
+                    continue
+            kept.append(e)
+        for e in kept:
+            if e[0] is not None:
+                times, left = seen.setdefault(_body(e[2]), ([], []))
+                j = bisect.bisect_right(times, e[0].timestamp())
+                times.insert(j, e[0].timestamp())
+                left.insert(j, _repeats(e[2]))
+        out.append(kept)
+    return out
 
 
 def tandem_from_device(device: str | None) -> str | None:
-    """TandemKit's entries in the device log's text."""
-    lines = [e for _, _, e in _entries(device or "") if TANDEM_MANAGER.match(e)]
+    """TandemKit's entries in the device log's text, as its own file has them."""
+    lines = [_unframe(e) for _, _, e in _entries(device or "") if TANDEM_MANAGER.match(e)]
     return "\n".join(lines) if lines else None
+
+
+def _unframe(entry: str) -> str:
+    """A device log entry without its [driver/type]."""
+    m = ENTRY.match(entry)
+    return entry[:m.end()] + " " + DEVICE_FRAMING.sub("", entry[m.end():].lstrip(), count=1) if m else entry
 
 
 def query(texts: dict[str, str | None], *, grep: str | None = None, ignore_case: bool = False,
@@ -108,8 +178,10 @@ def query(texts: dict[str, str | None], *, grep: str | None = None, ignore_case:
     pat = re.compile(grep, re.I if ignore_case else 0) if grep else None
     minlvl = LEVELS[level] if level else None
     rows: list[tuple[dt.datetime | None, str, str]] = []
-    for name, text in texts.items():
-        for when, lvl, entry in _entries(text or ""):
+    # each line once, under the first log that has it (TandemKit's lines are in the device log too)
+    logs = dict(zip(texts, _dedup([_entries(t or "") for t in texts.values()])))
+    for name, entries in logs.items():
+        for when, lvl, entry in entries:
             if since and (when is None or when < since):
                 continue
             if minlvl is not None and LEVELS.get(lvl or "info", 0) < minlvl:
@@ -161,9 +233,9 @@ def tail(target: str, bundle_id: str, name: str, cursor: str | None) -> dict:
         got = _tail_source(target, bundle_id, rel, int(pos) if same else None)
         if got is None:
             continue
-        text = got["text"]
-        if tandem_only:
-            text = "".join(e + "\n" for _, _, e in _entries(text) if TANDEM_MANAGER.match(e))
+        entries = _collapse(_entries(got["text"]))
+        text = "".join((_unframe(e) if tandem_only else e) + "\n" for _, _, e in entries
+                       if not tandem_only or TANDEM_MANAGER.match(e))
         return {"text": text, "cursor": f"{rel}@{got['offset']}", "more": got["offset"] < got["size"],
                 "earlier": not same and got["earlier"], "reset": same and got["reset"],
                 "restart": cursor is not None and not same, "missing": False}

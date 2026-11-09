@@ -30,7 +30,8 @@ try to work around them.
   [--level warning] [-n N]` reads the app's logs by name through the daemon (`logs --help`; `logs all --save` writes
   each one as text into the run's `logs/` for Read/Grep; `logs --summary` says how far back each goes): `trio`,
   Trio's own; `tandem`, TandemKit's; `device`, the device log, every pump and CGM driver's entries as
-  `[driver/type] message`. Loop has `tandem` and `device` only. Use them to confirm
+  `[driver/type] message`. Loop has `tandem` and `device` only. Each line shows once; identical lines in the same
+  second show as one, marked `(×N)` (a command logged twice is two events). Use them to confirm
   what the app did behind a screen (a bolus recorded, a pump error, a history entry). Quote only the lines that
   matter, and leave out anything identifying (pump or sensor serial numbers, device names, IDs, tokens) from notes,
   the summary and screenshots' notes.

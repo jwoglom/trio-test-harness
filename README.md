@@ -271,7 +271,9 @@ the sandbox, fetches it.
   it too; the pump's serial they are filed under is not printed.
 - `watch`: the Watch app's log, as far as the watch has sent it to the phone.
 
-Loop has `tandem` and `device`. Each log reaches back about two days. It filters with `--grep REGEX [-i]`,
+Loop has `tandem` and `device`. Each log reaches back about two days. Each line shows once: one the app keeps in two
+places (TandemKit's are in the device log too) under the first log that has it, and identical lines in the same second
+as one, marked `(×N)`. It filters with `--grep REGEX [-i]`,
 `--since 10m|2h|<ISO time>` and `--level warning`, prints the last `-n` entries (default 200; multi-line entries stay
 whole, `all` merges by time), gives each log's entry count and span with `--summary`, and writes each log as text into
 the run's `logs/` with `--save`. It works the same on the simulator and the phone, and through the target's daemon when
