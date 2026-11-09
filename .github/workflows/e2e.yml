@@ -326,6 +326,18 @@ jobs:
           private-key: ${{ secrets.TRIO_E2E_APP_KEY }}
           owner: ${{ steps.v.outputs.pr_owner }}
 
+      # comment.md: the comment's markdown, screenshots at their uploaded URLs, for every run. With post_comment the
+      # PR comment step below writes it; without, this one does.
+      - name: Comment markdown
+        if: always() && !inputs.post_comment && steps.e2e.outputs.run_dir != ''
+        continue-on-error: true
+        env:
+          RUN_DIR: ${{ steps.e2e.outputs.run_dir }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          TH_UPLOAD_TOKEN: ${{ secrets.TRIO_TEST_HARNESS_USER_PAT }}
+          TH_UPLOAD_REPO: ${{ github.repository }}
+        run: ./trio-test-harness report comment-md --run "$RUN_DIR" --artifact-url "$RUN_URL"
+
       - name: PR comment
         id: comment
         if: always() && inputs.post_comment && steps.e2e.outputs.run_dir != ''
@@ -339,33 +351,33 @@ jobs:
           # attachment uploads from user tokens only); the comment is still posted as the App. The
           # images are visible to people who can read this private repo, so only PRs in jwoglom's
           # repos show them inline; elsewhere the comment carries captions and a link to the run, and
-          # the uploads are only linked from pr-comment.md.
+          # the uploads are only linked from comment.md.
           TH_UPLOAD_TOKEN: ${{ secrets.TRIO_TEST_HARNESS_USER_PAT }}
           TH_UPLOAD_REPO: ${{ github.repository }}
           TH_COMMENT_INLINE_IMAGES: ${{ steps.v.outputs.pr_owner == 'jwoglom' && '1' || '0' }}
-        # pr-comment.md, the comment's markdown with the screenshots at their uploaded URLs, is attached to the run
+        # comment.md, the comment's markdown with the screenshots at their uploaded URLs, is attached to the run
         # as its own file whatever happens to the comment: posted, failed, or skipped for want of a PR or permission.
         run: |
           comment_file() {
-            [ -s "$RUN_DIR/pr-comment.md" ] || ./trio-test-harness report comment-md --run "$RUN_DIR" --artifact-url "$RUN_URL" >/dev/null \
-              || echo "::warning title=pr-comment.md not written::see the PR comment step log"
+            [ -s "$RUN_DIR/comment.md" ] || ./trio-test-harness report comment-md --run "$RUN_DIR" --artifact-url "$RUN_URL" >/dev/null \
+              || echo "::warning title=comment.md not written::see the PR comment step log"
           }
           if [ -z "$PR" ]; then
             comment_file
             echo "::notice title=PR comment skipped::this run has no PR (Trio branch only)"
-            echo "note=skipped: this run has no PR; its markdown is attached as pr-comment.md" >> "$GITHUB_OUTPUT"; exit 0
+            echo "note=skipped: this run has no PR; its markdown is attached as comment.md" >> "$GITHUB_OUTPUT"; exit 0
           fi
           if [ -z "$GH_TOKEN" ]; then
             comment_file
             echo "::notice title=PR comment skipped::the trio-test-harness-runner App is not installed on $PR_OWNER"
-            echo "note=skipped: the trio-test-harness-runner App is not installed on $PR_OWNER; the comment's markdown is attached as pr-comment.md" >> "$GITHUB_OUTPUT"; exit 0
+            echo "note=skipped: the trio-test-harness-runner App is not installed on $PR_OWNER; the comment's markdown is attached as comment.md" >> "$GITHUB_OUTPUT"; exit 0
           fi
           if out=$(./trio-test-harness report pr "$PR" --run "$RUN_DIR" --artifact-url "$RUN_URL" 2>&1); then
             echo "note=posted $(echo "$out" | tail -1)" >> "$GITHUB_OUTPUT"
           else
             echo "$out" | tail -20
-            echo "::warning title=PR comment failed::see the PR comment step log; the comment's markdown is attached as pr-comment.md"
-            echo "note=failed (see the PR comment step log); the comment's markdown is attached as pr-comment.md" >> "$GITHUB_OUTPUT"
+            echo "::warning title=PR comment failed::see the PR comment step log; the comment's markdown is attached as comment.md"
+            echo "note=failed (see the PR comment step log); the comment's markdown is attached as comment.md" >> "$GITHUB_OUTPUT"
           fi
           comment_file
 
@@ -398,12 +410,12 @@ jobs:
           retention-days: 14
           if-no-files-found: ignore
 
-      # The PR comment's markdown on its own, posted or not (see the PR comment step).
-      - name: Upload pr-comment.md (unzipped)
-        if: always() && inputs.post_comment && steps.e2e.outputs.run_dir != ''
+      # The comment's markdown on its own, for every run, posted or not (the Comment markdown and PR comment steps).
+      - name: Upload comment.md (unzipped)
+        if: always() && steps.e2e.outputs.run_dir != ''
         uses: actions/upload-artifact@v7
         with:
-          path: ${{ steps.e2e.outputs.run_dir }}/pr-comment.md
+          path: ${{ steps.e2e.outputs.run_dir }}/comment.md
           archive: false
           retention-days: 14
           if-no-files-found: ignore
