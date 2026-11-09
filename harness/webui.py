@@ -701,30 +701,18 @@ class Handler(BaseHTTPRequestHandler):
         return self._json({"error": f"unknown action {action}"}, 404)
 
     def _applogs(self, q: dict):
-        """New bytes of the installed app's Trio or TandemKit log (the log pane polls this; harness/applogs.py)."""
+        """The installed app's log since the pane's last read (the log pane polls this; harness/applogs.py)."""
         from . import applogs as A
         which = (q.get("which") or ["trio"])[0]
         app = (q.get("app") or ["trio"])[0]
-        # current Trio logs to the SQLite store only; older Trio, and TandemKit, to text files
-        rels = {"trio": ("logs/AppLog.sqlite", "logs/log.txt"), "tandem": ("tandem/tandem_log.txt",)}.get(which)
         target = TARGETS.get((q.get("target") or ["rooted-vnc"])[0])
-        if not rels or not target or app not in ("trio", "loop") or which not in A.files_for(app):
-            return self._json({"error": "which: trio|tandem (Loop: tandem), target: rooted-vnc|simulator, app: trio|loop"}, 400)
-        off = (q.get("off") or [""])[0]
-        res: dict = {"size": None}
+        if not target or app not in ("trio", "loop") or which not in A.logs_for(app):
+            return self._json({"error": "which: trio|tandem|device|watch (Loop: tandem|device), "
+                                        "target: rooted-vnc|simulator, app: trio|loop"}, 400)
         try:
-            bundle = A.default_bundle(target, app)
-            for rel in rels:
-                if rel.endswith(".sqlite") and target != "sim":
-                    continue      # copying the whole store every few seconds is too much for the pane
-                res = A.read_tail(target, bundle, rel, int(off) if off.isdigit() else None)
-                if res["size"] is not None:
-                    break
+            res = A.tail(target, A.default_bundle(target, app), which, (q.get("cursor") or [""])[0] or None)
         except (HarnessError, OSError) as e:
             return self._json({"error": str(e)[-600:]}, 502)
-        if res["size"] is None and which == "trio" and target != "sim":
-            res["note"] = ("(current Trio logs to Documents/logs/AppLog.sqlite, which this pane reads on the simulator "
-                           "only: `th --target rooted-vnc logs trio` copies it from the phone)")
         return self._json(res)
 
     def _continue(self, job: Job, body: dict):
