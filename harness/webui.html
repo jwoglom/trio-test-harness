@@ -582,7 +582,7 @@ $("#logfilter").oninput = () => { for (const k of Object.keys(logStreams)) rende
 async function pollOne(which) {
   const s = logStreams[which];
   const r = await api(`/api/applogs?which=${which}&target=${encodeURIComponent(logTarget)}&app=${form.app.value}&off=${s.off ?? ""}`);
-  if (r.size === null) { if (!s.raw) { s.raw = "(no log file yet)"; renderLog(which); } return; }
+  if (r.size === null) { if (!s.raw) { s.raw = r.note || "(no log file yet)"; renderLog(which); } return; }
   const first = s.off === null;
   if (first) s.raw = r.offset < r.size || r.size > 64 * 1024 ? "… earlier lines not shown …\n" : "";
   if (r.reset) s.raw += "\n——— new day's log ———\n";

@@ -705,15 +705,26 @@ class Handler(BaseHTTPRequestHandler):
         from . import applogs as A
         which = (q.get("which") or ["trio"])[0]
         app = (q.get("app") or ["trio"])[0]
-        rel = {"trio": "logs/log.txt", "tandem": "tandem/tandem_log.txt"}.get(which)
+        # current Trio logs to the SQLite store only; older Trio, and TandemKit, to text files
+        rels = {"trio": ("logs/AppLog.sqlite", "logs/log.txt"), "tandem": ("tandem/tandem_log.txt",)}.get(which)
         target = TARGETS.get((q.get("target") or ["rooted-vnc"])[0])
-        if not rel or not target or app not in ("trio", "loop") or which not in A.files_for(app):
+        if not rels or not target or app not in ("trio", "loop") or which not in A.files_for(app):
             return self._json({"error": "which: trio|tandem (Loop: tandem), target: rooted-vnc|simulator, app: trio|loop"}, 400)
         off = (q.get("off") or [""])[0]
+        res: dict = {"size": None}
         try:
-            res = A.read_tail(target, A.default_bundle(target, app), rel, int(off) if off.isdigit() else None)
+            bundle = A.default_bundle(target, app)
+            for rel in rels:
+                if rel.endswith(".sqlite") and target != "sim":
+                    continue      # copying the whole store every few seconds is too much for the pane
+                res = A.read_tail(target, bundle, rel, int(off) if off.isdigit() else None)
+                if res["size"] is not None:
+                    break
         except (HarnessError, OSError) as e:
             return self._json({"error": str(e)[-600:]}, 502)
+        if res["size"] is None and which == "trio" and target != "sim":
+            res["note"] = ("(current Trio logs to Documents/logs/AppLog.sqlite, which this pane reads on the simulator "
+                           "only: `th --target rooted-vnc logs trio` copies it from the phone)")
         return self._json(res)
 
     def _continue(self, job: Job, body: dict):

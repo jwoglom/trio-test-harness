@@ -263,13 +263,26 @@ Through the sandbox's network proxy the 640 KB search index arrived cut short (I
 gzipped, a plain body cut short is completed with Range requests, and failing that a running harness daemon, outside
 the sandbox, fetches it.
 
-`th logs` reads the installed app's log files: Trio's `Documents/logs/log.txt`, TandemKit's
-`Documents/tandem/tandem_log.txt` (info and above; debug goes to OSLog only) and the watch log, plus each one's `*_prev`
-file for the previous day. It filters with `--grep REGEX [-i]`, `--since 10m|2h|<ISO time>` and `--level warning`
+`th logs` reads the installed app's logs, under its `Documents/`:
+- `trio`: current Trio's own log is the Core Data store `logs/AppLog.sqlite` (debug lines included, its watch lines
+  under categories `Watch/…`), read as text, the last two days; older Trio wrote `logs/log.txt`.
+- `device`: the device log, LoopKit's `PersistentDeviceLog` (Trio's `logs/DeviceLog.sqlite`, Loop's
+  `DeviceLog/Storage.sqlite`): every pump and CGM manager's entries, as `[manager/type] message`. TandemKit sends its
+  info, warning and error lines there as `delegate` entries; the pump's serial they are filed under is not printed.
+- `tandem`: `tandem/tandem_log.txt` (info and above; debug goes to OSLog only); without it, TandemKit's entries in the
+  device log.
+- `watch`: `logs/watch_log.txt`.
+Text files are read with their `*_prev` file for the previous day; the SQLite stores are copied off the phone over SSH
+(scp, with their WAL) and read on the Mac. It filters with `--grep REGEX [-i]`, `--since 10m|2h|<ISO time>` and `--level warning`
 (TandemKit), prints the last `-n` entries (default 200; multi-line entries stay whole, `all` merges by time), lists sizes
 with `--files`, and copies the files into the run's `logs/` with `--save`. It reads from the simctl container or over SSH,
 or through the target's daemon when one runs, so the sandboxed web UI/CI agent can use it (restart a daemon started
 before this command existed). Logs from the phone may hold real device data: keep them out of reports and PRs.
+
+`th oref` forces one Trio oref cycle (the home screen's pull-down: glucose, oref's determination, the enactment) and
+checks from Trio's log that it went all the way through, with TandemKit's lines of the same window alongside; exit 1
+names the stage that failed (`harness/oref.py`, `th oref --help`). It is named for the algorithm, not "loop", so it is
+not taken for the Loop app.
 
 `th db` reads and changes the app's local database, its Core Data SQLite store on the simulator (Trio's
 `Library/Application Support/TrioCoreDataPersistentContainer.sqlite`, Loop's `Model.sqlite` in its app group; `--store`

@@ -1,8 +1,14 @@
-"""`th loop`: run one Trio loop cycle by hand and check, from Trio's own log, that it went all the way through.
+"""`th oref`: run one oref cycle in Trio by hand (glucose, then oref's determination, then the enactment) and check,
+from Trio's own log, that it went all the way through. Named for the algorithm, not "loop", so it is not taken for the
+Loop app (`--app loop`), whose cycles this does not check.
 
-    th --target sim loop                 # force a cycle (closed loop) and check it
-    th --target sim loop --no-trigger    # check the latest cycle in the log, forcing nothing
-    th --target sim loop --wait          # Open Loop: wait for Trio's next cycle and check it
+    th --target sim oref                 # force a cycle (closed loop) and check it
+    th --target sim oref --no-trigger    # check the latest cycle in the log, forcing nothing
+    th --target sim oref --wait          # Open Loop: wait for Trio's next cycle and check it
+
+Where it reads (harness/applogs.py): Trio's lines from its log, logs/AppLog.sqlite in current Trio (log.txt in older
+Trio); TandemKit's, shown alongside, from tandem/tandem_log.txt, else from TandemKit's entries in the device log
+(logs/DeviceLog.sqlite). Both stores are copied from the phone over SSH.
 
 Facts (Trio feat/tandem-closed-beta and dev: Trio/Sources/APS/APSManager.swift, DeviceDataManager.swift,
 Modules/Home/View/HomeRootView+Refresh.swift, Config/Config.swift) this relies on:
@@ -41,7 +47,7 @@ NOT_ENACTED = re.compile(r"Determination not enacted: (.*)")
 FINISHED = re.compile(r"Loop finished in ([\d.]+) s")
 FAILED = re.compile(r"Loop failed")
 SKIPPED = re.compile(r"Loop skipped: (.*)")
-# TandemKit's side of an enactment, shown alongside (TandemKit writes tandem/tandem_log.txt)
+# TandemKit's side of an enactment, shown alongside
 PUMP_LINES = re.compile(r"enactTempBasal|enactBolus|[Tt]emp basal (enacted|cancelled)|SetTempRate|StopTempRate|"
                         r"InitiateBolus|refus")
 
@@ -71,13 +77,11 @@ def _from(rx: re.Pattern, text: str) -> str:
 
 
 def _entries(target: str, bundle: str, name: str = "trio") -> list[tuple[dt.datetime, str]]:
-    rels = A.FILES[name]
-    got = A.fetch(target, bundle, rels)
-    out = []
-    for rel in rels:
-        for when, _, text in A._entries(got.get(rel) or ""):
-            if when:
-                out.append((when, text))
+    got = A.fetch(target, bundle, A.FILES[name])
+    texts = [got.get(rel) for rel in A.FILES[name]]
+    if name == "tandem" and not any(texts):
+        texts = [A.tandem_from_device(A.fetch(target, bundle, A.FILES["device"]))]
+    out = [(when, text) for t in texts for when, _, text in A._entries(t or "") if when]
     return sorted(out, key=lambda e: e[0])
 
 
@@ -217,13 +221,13 @@ def run_cycle(drv, target: str, bundle: str, flows, run=None, *, trigger: bool =
         if pump:
             lines.append("TandemKit during the cycle:")
             lines += [f"    {p[:300]}" for p in pump[-12:]]
-    report = "\n".join([f"Trio loop cycle: {'PASSED' if ok else 'FAILED'} ({'; '.join(notes)})", *lines])
+    report = "\n".join([f"Trio oref cycle: {'PASSED' if ok else 'FAILED'} ({'; '.join(notes)})", *lines])
     if run is not None:
         try:
-            flows.step(run, drv, "loop-cycle", f"Trio loop cycle {'passed' if ok else 'failed'}: "
+            flows.step(run, drv, "oref-cycle", f"Trio oref cycle {'passed' if ok else 'failed'}: "
                        + "; ".join(l[2:] for l in lines if l[:1] in "✓✗")[:900])
         except Exception as e:  # noqa: BLE001 - the check stands without its screenshot
-            log(f"no screenshot of the loop cycle: {e}")
+            log(f"no screenshot of the oref cycle: {e}")
     return ok, report
 
 

@@ -466,6 +466,9 @@ def cmd_logs(args):
     rels = [r for n in names for r in app_files[n]]
     got = A.fetch(target, bundle, rels)
     texts = {n: {r: got.get(r) for r in app_files[n]} for n in names}
+    if "tandem" in texts and "device" not in texts and all(t is None for t in texts["tandem"].values()):
+        devs = A.fetch(target, bundle, app_files["device"])
+        texts["tandem"] = {r: A.tandem_from_device({r: t}) for r, t in devs.items() if t is not None} or texts["tandem"]
     if args.files:
         for n, files in texts.items():
             for r, t in files.items():
@@ -485,28 +488,28 @@ def cmd_logs(args):
     return 0
 
 
-def cmd_loop(args):
-    """One Trio loop cycle, forced by hand and checked from Trio's log (harness/loopcheck.py)."""
-    from . import loopcheck as L
+def cmd_oref(args):
+    """One oref cycle of Trio's, forced by hand and checked from Trio's log (harness/oref.py)."""
+    from . import oref as O
     from .report import Run
     app = _app()
     if app.key != "trio":
-        raise HarnessError(f"`th loop` reads Trio's loop log; {app.name} logs its loop elsewhere")
+        raise HarnessError(f"`th oref` checks Trio's oref cycle; {app.name} runs its own algorithm and logs it elsewhere")
     target = _target(args)
     bundle = _debug_bundle(args, target)
     try:
         r = Run.current(args.run)
     except HarnessError:
         r = None
-    ok, report = L.run_cycle(get_driver(target), target, bundle, app.flows, r, trigger=not args.no_trigger,
+    ok, report = O.run_cycle(get_driver(target), target, bundle, app.flows, r, trigger=not args.no_trigger,
                              wait_next=args.wait, timeout=args.timeout)
     print(report)
     return 0 if ok else 1
 
 
-def _loopcheck_doc():
-    from . import loopcheck
-    return loopcheck.__doc__
+def _oref_doc():
+    from . import oref
+    return oref.__doc__
 
 
 def _appdebug_doc():
@@ -1318,12 +1321,12 @@ def build_parser() -> argparse.ArgumentParser:
     bz = sp.add_parser("busy", help="who is driving each target (the device lock; the only thing that counts)",
                        description=_busy_doc(), formatter_class=argparse.RawDescriptionHelpFormatter)
     bz.set_defaults(fn=cmd_busy)
-    lg = sp.add_parser("logs", help="Trio / TandemKit / watch log files from the installed app (filter, tail, save); "
-                                    "Loop: TandemKit's only",
+    lg = sp.add_parser("logs", help="Trio's log, the device log, TandemKit's and the watch's, from the installed app "
+                                    "(filter, tail, save); Loop: TandemKit's and the device log",
                        description=_applogs_doc(),
                        formatter_class=argparse.RawDescriptionHelpFormatter)
-    lg.add_argument("which", nargs="?", default="all", choices=["trio", "tandem", "watch", "all"],
-                    help="which log (default all, merged by time)")
+    lg.add_argument("which", nargs="?", default="all", choices=["trio", "tandem", "device", "watch", "all"],
+                    help="which log (default all, merged by time); device: every pump and CGM manager's")
     lg.add_argument("-g", "--grep", metavar="REGEX", help="only entries matching (Python regex; multi-line entries match as a whole)")
     lg.add_argument("-i", "--ignore-case", action="store_true")
     lg.add_argument("--since", metavar="WHEN", help="30s, 10m, 2h, 1d, or an ISO time")
@@ -1335,10 +1338,10 @@ def build_parser() -> argparse.ArgumentParser:
     lg.add_argument("--bundle-id", help="default: the last build's, else the target's")
     lg.set_defaults(fn=cmd_logs)
 
-    lp = sp.add_parser("loop", help="Trio: force one loop cycle (the home screen's pull-down) and check from Trio's log "
+    lp = sp.add_parser("oref", help="Trio: force one oref cycle (the home screen's pull-down) and check from Trio's log "
                                     "that it went through: glucose, determination, and the enactment where the dosing "
                                     "mode enacts (exit 1 if not)",
-                       description=_loopcheck_doc(), formatter_class=argparse.RawDescriptionHelpFormatter)
+                       description=_oref_doc(), formatter_class=argparse.RawDescriptionHelpFormatter)
     lp.add_argument("--no-trigger", action="store_true", help="check the latest cycle in the log, forcing nothing")
     lp.add_argument("--wait", action="store_true", help="Open Loop, where Trio offers no forced cycle: wait for its next "
                                                         "one instead of checking the latest")
@@ -1347,7 +1350,7 @@ def build_parser() -> argparse.ArgumentParser:
                          "interval the command stays under a job agent's 5-minute command limit)")
     lp.add_argument("--run", help="record it in this run (default: $TH_RUN / the current run)")
     lp.add_argument("--bundle-id", help="default: the app as installed")
-    lp.set_defaults(fn=cmd_loop)
+    lp.set_defaults(fn=cmd_oref)
     def _debug_parser(name, **kw):
         q = sp.add_parser(name, description=_appdebug_doc(), formatter_class=argparse.RawDescriptionHelpFormatter, **kw)
         q.add_argument("--bundle-id", help="default: the app as installed (simulator) / the last build's (phone)")

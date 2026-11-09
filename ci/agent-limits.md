@@ -20,15 +20,17 @@ try to work around them.
   in this sandbox could replace what the job started outside it.
 - Coordinates are screenshot pixels; a swipe past the screen's edge is moved onto it. `scroll up|down --amount` is a
   fraction of the screen's height (0.5 is half), or pixels from 50.
-- Trio's loop cycle: `./trio-test-harness --target sim loop` forces one (the home screen's pull-down, which Trio
+- Trio's oref cycle: `./trio-test-harness --target sim oref` forces one (the home screen's pull-down, which Trio
   offers only where the dosing mode enacts) and checks from Trio's log that it went through: the glucose check, the
   determination, the temp basal or SMB enacted where the mode enacts, and "Loop finished" (exit 1 and the failing
-  stage if not). It first waits out Trio's 3-minute minimum between cycles. In Open Loop, `loop --wait` checks the
-  next cycle Trio runs on its own; `loop --no-trigger` checks the latest one. Use it to show the closed loop works
-  end to end, before and after the change under test.
-- App logs: `./trio-test-harness --target sim logs [trio|tandem|all] [--grep REGEX -i] [--since 10m] [--level warning]
-  [-n N]` reads Trio's and TandemKit's log files from the app through the daemon (`logs --help`; `logs all --save`
-  copies them into the run's `logs/` for Read/Grep); Loop writes only TandemKit's (`tandem`). Use them to confirm
+  stage if not). It first waits out Trio's 3-minute minimum between cycles. In Open Loop, `oref --wait` checks the
+  next cycle Trio runs on its own; `oref --no-trigger` checks the latest one. Use it to show the closed loop works
+  end to end, before and after the change under test. Trio only: with `--app loop` it refuses.
+- App logs: `./trio-test-harness --target sim logs [trio|tandem|device|all] [--grep REGEX -i] [--since 10m]
+  [--level warning] [-n N]` reads the app's logs through the daemon (`logs --help`; `logs all --save` copies them into
+  the run's `logs/` for Read/Grep): `trio`, Trio's own (current Trio keeps it in `logs/AppLog.sqlite`, read as text);
+  `tandem`, TandemKit's (`tandem/tandem_log.txt`, else its entries in the device log); `device`, the device log, every
+  pump and CGM manager's entries as `[manager/type] message`. Loop has `tandem` and `device` only. Use them to confirm
   what the app did behind a screen (a bolus recorded, a pump error, a history entry). Quote only the lines that
   matter, and leave out anything identifying (pump or sensor serial numbers, device names, IDs, tokens) from notes,
   the summary and screenshots' notes.
