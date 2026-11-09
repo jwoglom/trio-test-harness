@@ -268,6 +268,10 @@ until merged: pass `--faketandem-ref` until then).
   unverified: the Toggle's switch point and its state (tree value; on the phone, a tinted switch in the screenshot),
   and Loop's `open_pump_settings`.
 - `th report pr` against a real PR (gh --attach inline uploads; ask before posting).
+- A new PR comment hides the harness's earlier ones on that PR as outdated (`report.hide_earlier_comments`): GitHub's
+  own Hide (`minimizeComment`, classifier OUTDATED), their text untouched, for comments by the new one's author that
+  carry `COMMENT_MARKER` (in every comment posted since) or the "Posted by trio-test-harness" footer. A failure is only
+  logged. Checked against a fake gh only; whether the App's token may minimize comments in every installation is not.
 - comment.md attached to every CI run (2026-11-09), "post comment" or not: the PR comment step writes it whether the
   comment is posted, refused or skipped (no PR, the App not installed), and the Comment markdown step when no comment
   was asked for, each screenshot at its user-attachments URL (`report.comment_markdown`, `write_comment_file`,

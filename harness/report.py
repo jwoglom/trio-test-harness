@@ -422,6 +422,57 @@ def write_comment_file(run: Run, md: str, files: list[Path], urls: dict[Path, st
     return path
 
 
+# In every comment the harness posts, so a later one can find it (`hide_earlier_comments`). Comments from before
+# the marker are found by their footer.
+COMMENT_MARKER = "<!-- trio-test-harness comment -->"
+COMMENT_FOOTER = "Posted by trio-test-harness"
+_COMMENTS_QUERY = """query($owner: String!, $name: String!, $number: Int!, $after: String) {
+  repository(owner: $owner, name: $name) { pullRequest(number: $number) {
+    comments(first: 100, after: $after) {
+      nodes { id url isMinimized body author { login } }
+      pageInfo { hasNextPage endCursor } } } } }"""
+_MINIMIZE = """mutation($id: ID!) { minimizeComment(input: {subjectId: $id, classifier: OUTDATED}) {
+  minimizedComment { isMinimized } } }"""
+
+
+def hide_earlier_comments(slug: str, number: int, posted_url: str) -> int:
+    """Hides the harness's earlier comments on the PR as outdated, with GitHub's own Hide (minimizeComment), once a
+    new one is posted: those by the new comment's author that carry COMMENT_MARKER or the footer. Their text is left
+    as it is. Returns how many it hid; a failure is only logged, since the new comment is already up."""
+    owner, name = slug.split("/")
+    comments: list[dict] = []
+    after = None
+    try:
+        while True:
+            args = ["gh", "api", "graphql", "-f", f"query={_COMMENTS_QUERY}", "-F", f"owner={owner}",
+                    "-F", f"name={name}", "-F", f"number={number}"] + (["-F", f"after={after}"] if after else [])
+            page = json.loads(run_cmd(args, quiet=True, timeout=120).stdout)["data"]["repository"]["pullRequest"]["comments"]
+            comments += page["nodes"]
+            if not page["pageInfo"]["hasNextPage"]:
+                break
+            after = page["pageInfo"]["endCursor"]
+    except (HarnessError, ValueError, KeyError, TypeError) as e:
+        log(f"could not list {slug}#{number}'s comments to hide the earlier ones: {e}")
+        return 0
+    new = next((c for c in comments if c.get("url") == posted_url), None)
+    if not new or not new.get("author"):
+        log(f"the new comment ({posted_url}) is not among {slug}#{number}'s comments; earlier ones left as they are")
+        return 0
+    hidden = 0
+    for c in comments:
+        if (c is new or c.get("isMinimized") or (c.get("author") or {}).get("login") != new["author"]["login"]
+                or not (COMMENT_MARKER in (c.get("body") or "") or COMMENT_FOOTER in (c.get("body") or ""))):
+            continue
+        try:
+            run_cmd(["gh", "api", "graphql", "-f", f"query={_MINIMIZE}", "-F", f"id={c['id']}"], quiet=True, timeout=60)
+            hidden += 1
+        except HarnessError as e:
+            log(f"could not hide {c.get('url')} as outdated: {e}")
+    if hidden:
+        log(f"hid {hidden} earlier trio-test-harness comment(s) on {slug}#{number} as outdated")
+    return hidden
+
+
 def post_to_pr(run: Run, pr: str, *, mode: str = "comment", repo: str | None = None,
                columns: int = 3, max_shots: int | None = None, artifact_url: str | None = None,
                body: str | None = None) -> str:
@@ -433,6 +484,8 @@ def post_to_pr(run: Run, pr: str, *, mode: str = "comment", repo: str | None = N
     from .build import resolve_pr
     md, files, urls = comment_markdown(run, columns=columns, max_shots=max_shots, artifact_url=artifact_url,
                                        body=body)
+    if mode == "comment" and COMMENT_MARKER not in md:
+        md = md.rstrip("\n") + "\n\n" + COMMENT_MARKER + "\n"
     write_comment_file(run, md, files, urls, artifact_url)
     slug, num = resolve_pr(pr) if not repo else (repo, int(pr))
     body = tmp_path("comment-posted.md")
@@ -467,6 +520,7 @@ def post_to_pr(run: Run, pr: str, *, mode: str = "comment", repo: str | None = N
                           cwd=run.path, timeout=300).stdout
             files = []
         log(f"commented on {slug}#{num} with {len(files)} screenshots attached")
+        hide_earlier_comments(slug, num, out.strip().splitlines()[-1] if out.strip() else "")
         return out.strip()
     if mode == "description":
         marker = "<!-- trio-test-harness -->"
