@@ -237,10 +237,13 @@ jobs:
           fi
           smoke_note=$([ "$IN_SMOKE" = true ] && echo ", with the $cgm and the $pump" || true)
           extra=$([ -n "$IN_AGENT_INSTRUCTIONS" ] && printf '\nFocus from the person who started this run:\n%s\n' "$IN_AGENT_INSTRUCTIONS" || true)
+          # The notes are optional: one whose helper fails is left out with a warning, and the agent still runs.
           # the faketandem pump: what it is, its commands and how this run set it up (ci/agent-faketandem*.md)
-          extra="$extra$(RUN_DIR="$RUN_DIR" .venv/bin/python -c 'import os; from harness import faketandem; print(faketandem.agent_notes(os.environ["RUN_DIR"]))')"
+          extra="$extra$(RUN_DIR="$RUN_DIR" .venv/bin/python -c 'import os; from harness import faketandem; print(faketandem.agent_notes(os.environ["RUN_DIR"]))' || echo "::warning::the faketandem notes failed" >&2)"
+          # what trio-test-e2e's setup left undone after the launch (harness/pipeline.py setup_notes)
+          extra="$extra$(RUN_DIR="$RUN_DIR" .venv/bin/python -c 'import os; from harness import pipeline; print(pipeline.setup_notes(os.environ["RUN_DIR"]))' || echo "::warning::the setup notes failed" >&2)"
           # whether trio-test-e2e included the watch (asked for, or decided by --devices auto)
-          watch=$(RUN_DIR="$RUN_DIR" .venv/bin/python -c 'import json, os, pathlib; print(str(json.loads((pathlib.Path(os.environ["RUN_DIR"]) / "run.json").read_text()).get("watch", False)).lower())')
+          watch=$(RUN_DIR="$RUN_DIR" .venv/bin/python -c 'import json, os, pathlib; print(str(json.loads((pathlib.Path(os.environ["RUN_DIR"]) / "run.json").read_text()).get("watch", False)).lower())' || echo false)
           if [ "$watch" = true ]; then extra="$extra"$'\n'"$(cat ci/agent-watch.md)"; fi
           prompt=$(RUN_DIR="$RUN_DIR" SMOKE="$smoke_note" EXTRA="$extra" PROMPT_FILE="$prompt_file" .venv/bin/python -c '
           import os, pathlib

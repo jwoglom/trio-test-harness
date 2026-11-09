@@ -237,6 +237,15 @@ until merged: pass `--faketandem-ref` until then).
   started one inside the sandbox, which lost faketandem's port and screenshots for the rest of the run: in a job's
   agent `daemon restart` now replaces the driver inside the running daemon (`daemon.restart_driver`), and `daemon
   stop|start` and `faketandem start|stop` are refused. All of this is checked against fake drivers only.
+- A failed setup step no longer ends a run. 42534932220 died on one tap in the smoke stage's Add CGM sheet:
+  `run_stages` held build through smoke in one `try`, so the exception exited 1, the workflow skipped the agent
+  (`if: steps.e2e.outcome == 'success'`) and the comment posted it as the PR's ❌. Now only checkout, build, install and
+  `stage_launch` (simulator, faketandem, the watch, WebDriverAgent, the app's launch) end the run. `stage_home` and
+  each simulated device in `stage_smoke` are best effort: a failure is a `setup-incomplete` step with a screenshot and
+  an entry in run.json's `setup_problems`, the run finishes `partial` with exit 0, and `ci/agent-setup-incomplete.md`
+  tells the agent what to finish (`pipeline.setup_notes`, in the workflow's and the web UI's prompt). report.html
+  renders best effort and the agent's notes are optional, so neither keeps the agent from running either. Checked
+  with stubbed stages only.
 - TandemKit's feature flags: `ci/agent-tandemkit-flags.md` goes into every faketandem run's agent notes, with the
   flags read from the build's TandemKit (`flows/tandemkit.py` `known_flags`), so a flag a PR adds is listed and
   `flow tandem-feature-flag` takes it. 42516779754's agent never found Manual Temp Basal Support.

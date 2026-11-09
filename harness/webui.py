@@ -429,6 +429,8 @@ def run_job(job: Job) -> None:
             smoke_note += (", and a Tandem pump on faketandem " + ("not set up yet: you walk its setup"
                            if inp.get("pump_setup") == "walk" else "already paired") + " (see below)")
             extra += faketandem.agent_notes(rd)
+        from . import pipeline
+        extra += pipeline.setup_notes(rd)
         # whether trio-test-e2e included the watch (asked for, or decided by --devices auto)
         try:
             watch = bool(json.loads((rd / "run.json").read_text()).get("watch"))
