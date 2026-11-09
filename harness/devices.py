@@ -214,15 +214,26 @@ def _ensure_ssh_iproxy(device_port: str) -> str:
     return str(local)
 
 
-def ssh_run(cmd: str, *, check: bool = True, timeout: int = 60, quiet: bool = True, mux: bool = False):
+def _ssh_opts(mux: bool) -> list[str]:
     """mux: reuse one SSH connection for a minute (the web UI's log pane polls every couple of seconds)."""
-    user, host, port = ssh_target()
     opts = ["-o", "BatchMode=yes", "-o", "ConnectTimeout=8", "-o", "StrictHostKeyChecking=accept-new"]
     if mux:      # the socket path must stay under ~104 bytes: ~/.ssh, not the harness folder
         (Path.home() / ".ssh").mkdir(mode=0o700, exist_ok=True)
         opts += ["-o", "ControlMaster=auto", "-o", f"ControlPath={Path.home() / '.ssh' / 'cm-th-%C'}",
                  "-o", "ControlPersist=60"]
-    return run(["ssh", *opts, "-p", port, f"{user}@{host}", cmd], check=check, timeout=timeout, quiet=quiet)
+    return opts
+
+
+def ssh_run(cmd: str, *, check: bool = True, timeout: int = 60, quiet: bool = True, mux: bool = False):
+    user, host, port = ssh_target()
+    return run(["ssh", *_ssh_opts(mux), "-p", port, f"{user}@{host}", cmd], check=check, timeout=timeout, quiet=quiet)
+
+
+def ssh_pull(remote_paths: list[str], dest: Path, *, timeout: int = 180, mux: bool = False) -> None:
+    """Copy files from the phone into the directory `dest` (scp)."""
+    user, host, port = ssh_target()
+    run(["scp", *_ssh_opts(mux), "-q", "-P", port, *[f"{user}@{host}:{p}" for p in remote_paths], str(dest)],
+        timeout=timeout, quiet=True)
 
 
 def ssh_ok() -> bool:

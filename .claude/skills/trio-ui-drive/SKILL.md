@@ -20,8 +20,9 @@ phone over TrollVNC (tesseract OCR), or any iPhone through iPhone Mirroring (Vis
 ## Primitives
 `tap X Y [--duration s]` · `tap X Y --count 3 [--interval 0.1]` (a double/triple tap sent as one gesture: separate `tap` calls are too far apart for `onTapGesture(count:)`; on the simulator it needs WebDriverAgent) · `swipe X1 Y1 X2 Y2` · `drag X1 Y1 X2 Y2 [--hold 0.8 --duration 0.8 --settle 0.5]` (long-press then move: SwiftUI drag & drop) · `scroll down|up|left|right [--amount 0.5]` · `type "text"` (focus a field first) ·
 `key return|backspace|tab|escape` · `home` · `tap-text "label" [--exact] [--index n]` · `tree [--filter t] [--all]` (sim only) ·
-`find "text"` · `wait-text "text"` · `ocr file.png [--find text]` · `logs [trio|tandem|all] [--grep RE -i] [--since 10m] [--level warning] [-n N] [--save]`
-(the app's own log files, to confirm what happened behind a screen; see `th logs --help`).
+`find "text"` · `wait-text "text"` · `ocr file.png [--find text]` · `logs [trio|tandem|device|all] [--grep RE -i] [--since 10m] [--level warning] [-n N] [--save]`
+(the app's own logs by name, to confirm what happened behind a screen: `trio` Trio's own, `tandem` TandemKit's,
+`device` every pump and CGM driver's entries; `--summary` says how far back each goes; see `th logs --help`) · `oref [--no-trigger | --wait]` (force one Trio oref cycle and check it went through; below).
 `db tables` · `db schema ZTABLE` · `db query "SELECT …"` · `db exec "UPDATE …"` (sim: the app's Core Data store; exec
 terminates the app, backs the store up into the run and relaunches; change rows, do not insert; see `th db --help`).
 `oslog [--since 10m] [--grep RE] [--level debug]` (the app process's system log) · `crashes [--save]` (crash reports
@@ -112,14 +113,25 @@ phone session checks for the watch when it starts, and logs `📱 Phone isReacha
   `WatchDataManager`, in the system log only: `th --target sim oslog --grep WatchDataManager --since 10m`.
 - What the phone did (Trio): `th logs trio --grep "WatchManager"` (`📱 Received bolus request from watch`, `Enacted bolus via
   APS Manager`). The Watch app's own log reaches the phone's `th logs watch` only when the watch flushes it (every 3 min
-  or 100 entries). Current Trio (`dev` since its SQLite app log) keeps one log, `Documents/logs/AppLog.sqlite`, which
-  `th logs trio` reads (simulator only): `--grep "Watch"` finds the phone's `[Watch]` lines ("Watch requested bolus of
-  1.0 U") and the watch's own lines, categories `Watch/…` ("Bolus of 1 U requested").
+  or 100 entries). Current Trio puts both in its own log: `th logs trio --grep "Watch"` finds the phone's `[Watch]`
+  lines ("Watch requested bolus of 1.0 U") and the watch's own lines, categories `Watch/…` ("Bolus of 1 U requested").
 - **Away and back with the screen kept** (a wrist lower and raise): `th --target watch home`, then
   `th --target watch launch --resume`. Plain `launch` restarts the Watch app, which always lands on its main screen.
   The phone dropping out while the watch stays on a screen: `th --target sim launch` (restarts the phone app; the Watch
   app sees the phone unreachable, then reachable). Waiting out a timeout: `th wait <seconds>` (≤ 280 per call).
 - Everything on the watch is a simulator and the bolus goes to the Pump Simulator; no real pump is ever involved.
+
+## Trio's oref cycle
+- `th oref` forces one cycle and checks it from Trio's log (`harness/oref.py`; named for the algorithm, so it is not
+  taken for the Loop app, which it does not check): "Loop started, mode … requested
+  by user" → "Glucose ready" → "Determination: eventual BG …, temp basal …, SMB … U" → "Temp basal enacted" / "SMB
+  enacted" where the dosing mode enacts → "Loop finished in N s" (or "Loop failed"). Exit 1 names the stage that
+  failed, and TandemKit's lines of the same window follow.
+- The force is the home screen's pull-down ("Pull down to force loop", past 70 pt), offered only where the dosing mode
+  enacts (closed, low glucose suspend, basal testing; not open). Trio skips a cycle within 3 min of the last one's
+  start, so `th oref` waits that out first. Open Loop: `th oref --wait` for the next cycle Trio runs on its own, or
+  `--no-trigger` for the latest.
+- The dosing mode is `dosingMode` in Documents/freeaps/freeaps_settings.json (`th files cat freeaps/freeaps_settings.json`).
 
 ## Tips
 - Simulator taps/tree need an input backend: run `th wda start` once per simulator boot (WebDriverAgent, built on first use

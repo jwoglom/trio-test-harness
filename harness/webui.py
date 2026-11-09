@@ -701,17 +701,16 @@ class Handler(BaseHTTPRequestHandler):
         return self._json({"error": f"unknown action {action}"}, 404)
 
     def _applogs(self, q: dict):
-        """New bytes of the installed app's Trio or TandemKit log (the log pane polls this; harness/applogs.py)."""
+        """The installed app's log since the pane's last read (the log pane polls this; harness/applogs.py)."""
         from . import applogs as A
         which = (q.get("which") or ["trio"])[0]
         app = (q.get("app") or ["trio"])[0]
-        rel = {"trio": "logs/log.txt", "tandem": "tandem/tandem_log.txt"}.get(which)
         target = TARGETS.get((q.get("target") or ["rooted-vnc"])[0])
-        if not rel or not target or app not in ("trio", "loop") or which not in A.files_for(app):
-            return self._json({"error": "which: trio|tandem (Loop: tandem), target: rooted-vnc|simulator, app: trio|loop"}, 400)
-        off = (q.get("off") or [""])[0]
+        if not target or app not in ("trio", "loop") or which not in A.logs_for(app):
+            return self._json({"error": "which: trio|tandem|device|watch (Loop: tandem|device), "
+                                        "target: rooted-vnc|simulator, app: trio|loop"}, 400)
         try:
-            res = A.read_tail(target, A.default_bundle(target, app), rel, int(off) if off.isdigit() else None)
+            res = A.tail(target, A.default_bundle(target, app), which, (q.get("cursor") or [""])[0] or None)
         except (HarnessError, OSError) as e:
             return self._json({"error": str(e)[-600:]}, 502)
         return self._json(res)

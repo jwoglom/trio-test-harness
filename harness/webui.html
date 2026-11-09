@@ -581,16 +581,16 @@ function renderLog(which, scroll) {
 $("#logfilter").oninput = () => { for (const k of Object.keys(logStreams)) renderLog(k, $("#logfollow").checked); };
 async function pollOne(which) {
   const s = logStreams[which];
-  const r = await api(`/api/applogs?which=${which}&target=${encodeURIComponent(logTarget)}&app=${form.app.value}&off=${s.off ?? ""}`);
-  if (r.size === null) { if (!s.raw) { s.raw = "(no log file yet)"; renderLog(which); } return; }
-  const first = s.off === null;
-  if (first) s.raw = r.offset < r.size || r.size > 64 * 1024 ? "… earlier lines not shown …\n" : "";
-  if (r.reset) s.raw += "\n——— new day's log ———\n";
+  const r = await api(`/api/applogs?which=${which}&target=${encodeURIComponent(logTarget)}&app=${form.app.value}&cursor=${encodeURIComponent(s.off ?? "")}`);
+  if (r.missing) { if (!s.raw) { s.raw = "(nothing logged yet)"; renderLog(which); } return; }
+  const first = s.off === null || r.restart;
+  if (first) s.raw = r.earlier ? "… earlier lines not shown …\n" : "";
+  if (r.reset) s.raw += "\n——— the log started over ———\n";
   if (r.text) s.raw += r.text;
   if (s.raw.length > 600000) s.raw = "… earlier lines trimmed …\n" + s.raw.slice(-450000);
-  s.off = r.offset;
+  s.off = r.cursor;
   if (first || r.text || r.reset) renderLog(which, first && $("#logfollow").checked);
-  return r.offset < r.size;                   // more to read right away (a long gap)
+  return r.more;                              // more to read right away (a long gap)
 }
 async function pollLogs() {
   clearTimeout(logTimer);
@@ -602,7 +602,7 @@ async function pollLogs() {
   }
   let more = false;
   try {
-    if (form.app.value === "loop") {          // Loop writes no text log of its own (harness/applogs.py)
+    if (form.app.value === "loop") {          // Loop writes no log of its own (harness/applogs.py)
       logStreams.trio.raw = "(Loop writes no app log of its own; TandemKit's is below)"; renderLog("trio");
     } else more = await pollOne("trio");
     if (tandemOpen()) more = (await pollOne("tandem")) || more;

@@ -469,34 +469,32 @@ def _applogs_doc() -> str:
 
 
 def cmd_logs(args):
-    """Trio / TandemKit / watch log files from the installed app (harness/applogs.py)."""
+    """The installed app's logs (harness/applogs.py)."""
     from . import applogs as A
     from .build import BuildInfo
     target = _target(args)
     bi = BuildInfo.load()
     built_for = "sim" if bi and bi.target == "sim" else "rooted-vnc" if bi and str(bi.target).startswith("device") else None
     bundle = args.bundle_id or (bi.bundle_id if bi and built_for == target else CONFIG.bundle_id(target))
-    app_files = A.files_for(_app().key)
+    app = _app()
+    logs = A.logs_for(app.key)
     wanted = [w for item in args.which for w in item.split(",") if w] or ["all"]
     for w in wanted:
-        if w not in ("all", *app_files):
-            raise HarnessError(f"{_app().name} writes no {w} log file; it has: {', '.join(app_files)} (or all)")
-    names = list(app_files) if "all" in wanted else list(dict.fromkeys(wanted))
-    rels = [r for n in names for r in app_files[n]]
-    got = A.fetch(target, bundle, rels)
-    texts = {n: {r: got.get(r) for r in app_files[n]} for n in names}
-    if args.files:
-        for n, files in texts.items():
-            for r, t in files.items():
-                print(f"{n:7} Documents/{r:30} " + ("missing" if t is None else f"{len(t.splitlines())} lines, {len(t) // 1024} KB"))
+        if w not in ("all", *logs):
+            raise HarnessError(f"{app.name} has no {w} log; it has: {', '.join(logs)} (or all)")
+    names = list(logs) if "all" in wanted else list(dict.fromkeys(wanted))
+    texts = A.read_logs(target, bundle, names)
+    if args.summary:
+        print("\n".join(A.summary(texts)))
         return 0
     if args.save:
         dest = _run(args).path / "logs"
         for p in A.save(texts, dest):
             print(p)
         return 0
-    if all(t is None for f in texts.values() for t in f.values()):
-        raise HarnessError(f"no log files yet in {bundle}'s Documents ({', '.join(rels)})")
+    if all(t is None for t in texts.values()):
+        raise HarnessError(f"{app.name} ({bundle}) has not written " + ("any of its logs" if len(names) > 1
+                                                                       else f"its {names[0]} log") + " yet")
     rows = A.query(texts, grep=args.grep, ignore_case=args.ignore_case,
                    since=A.parse_since(args.since) if args.since else None, level=args.level,
                    lines=None if args.count else args.lines or None)
@@ -516,6 +514,30 @@ def _defaults_type(s: str) -> str:
 
 def _level_name(s: str) -> str:
     return {"warn": "warning", "err": "error", "information": "info"}.get(s.lower(), s.lower())
+
+
+def cmd_oref(args):
+    """One oref cycle of Trio's, forced by hand and checked from Trio's log (harness/oref.py)."""
+    from . import oref as O
+    from .report import Run
+    app = _app()
+    if app.key != "trio":
+        raise HarnessError(f"`th oref` checks Trio's oref cycle; {app.name} runs its own algorithm and logs it elsewhere")
+    target = _target(args)
+    bundle = _debug_bundle(args, target)
+    try:
+        r = Run.current(args.run)
+    except HarnessError:
+        r = None
+    ok, report = O.run_cycle(get_driver(target), target, bundle, app.flows, r, trigger=not args.no_trigger,
+                             wait_next=args.wait, timeout=args.timeout)
+    print(report)
+    return 0 if ok else 1
+
+
+def _oref_doc():
+    from . import oref
+    return oref.__doc__
 
 
 def _appdebug_doc():
@@ -1420,23 +1442,40 @@ def build_parser() -> argparse.ArgumentParser:
     bz = sp.add_parser("busy", help="who is driving each target (the device lock; the only thing that counts)",
                        description=_busy_doc(), formatter_class=argparse.RawDescriptionHelpFormatter)
     bz.set_defaults(fn=cmd_busy)
-    lg = sp.add_parser("logs", help="Trio / TandemKit / watch log files from the installed app (filter, tail, save); "
-                                    "Loop: TandemKit's only",
+    lg = sp.add_parser("logs", help="the installed app's logs: Trio's, TandemKit's, the device log and the watch's "
+                                    "(filter, tail, save); Loop: TandemKit's and the device log",
                        description=_applogs_doc(),
                        formatter_class=argparse.RawDescriptionHelpFormatter)
-    lg.add_argument("which", nargs="*", metavar="{trio,tandem,watch,all}",
-                    help="which log(s), several or comma-separated allowed (default all, merged by time)")
+    lg.add_argument("which", nargs="*", metavar="{trio,tandem,device,watch,all}",
+                    help="which log(s), several or comma-separated allowed (default all, merged by time); "
+                         "device: every pump and CGM driver's entries")
     lg.add_argument("-g", "--grep", metavar="REGEX", help="only entries matching (Python regex; multi-line entries match as a whole)")
     lg.add_argument("-i", "--ignore-case", action="store_true")
     lg.add_argument("--since", metavar="WHEN", help="30s, 10m, 2h, 1d, or an ISO time")
-    lg.add_argument("--level", type=_level_name, choices=["info", "warning", "error"], help="TandemKit: at least this level (warn = warning)")
+    lg.add_argument("--level", type=_level_name, choices=["info", "warning", "error"], help="at least this level (warn = warning)")
     lg.add_argument("-n", "--lines", type=int, default=200, help="last N entries (default 200; 0 = all)")
     lg.add_argument("--count", action="store_true", help="print only how many entries match (all of them, not the last -n)")
-    lg.add_argument("--files", action="store_true", help="list the log files and their sizes")
-    lg.add_argument("--save", action="store_true", help="copy the log files into the current run's logs/ (read them with Read/Grep)")
+    lg.add_argument("--summary", action="store_true", help="each log: how many entries, from when to when")
+    lg.add_argument("--files", dest="summary", action="store_true", help=argparse.SUPPRESS)
+    lg.add_argument("--save", action="store_true", help="write each log as text into the current run's logs/ "
+                                                        "(read them with Read/Grep)")
     lg.add_argument("--run", help="run dir for --save (default: $TH_RUN / the current run)")
     lg.add_argument("--bundle-id", help="default: the last build's, else the target's")
     lg.set_defaults(fn=cmd_logs)
+
+    lp = sp.add_parser("oref", help="Trio: force one oref cycle (the home screen's pull-down) and check from Trio's log "
+                                    "that it went through: glucose, determination, and the enactment where the dosing "
+                                    "mode enacts (exit 1 if not)",
+                       description=_oref_doc(), formatter_class=argparse.RawDescriptionHelpFormatter)
+    lp.add_argument("--no-trigger", action="store_true", help="check the latest cycle in the log, forcing nothing")
+    lp.add_argument("--wait", action="store_true", help="Open Loop, where Trio offers no forced cycle: wait for its next "
+                                                        "one instead of checking the latest")
+    lp.add_argument("--timeout", type=float, default=60,
+                    help="seconds a cycle may take to finish (default 60; with the wait for Trio's 3-minute loop "
+                         "interval the command stays under a job agent's 5-minute command limit)")
+    lp.add_argument("--run", help="record it in this run (default: $TH_RUN / the current run)")
+    lp.add_argument("--bundle-id", help="default: the app as installed")
+    lp.set_defaults(fn=cmd_oref)
     def _debug_parser(name, **kw):
         q = sp.add_parser(name, description=_appdebug_doc(), formatter_class=argparse.RawDescriptionHelpFormatter, **kw)
         q.add_argument("--bundle-id", help="default: the app as installed (simulator) / the last build's (phone)")

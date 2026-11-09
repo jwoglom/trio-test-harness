@@ -273,6 +273,20 @@ until merged: pass `--faketandem-ref` until then).
   cartridge-change API), with cookbook entries for them, the refusals and `connection.subscribed`. Stub faketandem only.
 
 ## Still unverified
+- `th oref` (`harness/oref.py`, 2026-11-09; first `th loop`, renamed so it is not taken for the Loop app): forces a
+  Trio oref cycle with the home screen's pull-down and checks each stage from Trio's log. Checked against fake logs and
+  a fake driver only: that the pull (22% to 57% of the screen down, 0.3 s press) arms Trio's 70 pt pull-to-loop on the
+  simulator, and how long the AppLog.sqlite entries take to show, are not.
+- Logs by name (`harness/applogs.py`, 2026-11-09): `th logs`, `th oref` and the web UI's pane ask for `trio`,
+  `tandem`, `device` or `watch` and get entries; `SOURCES` maps each to what the app keeps it in. Current Trio:
+  `logs/AppLog.sqlite`; the device log is Trio's `logs/DeviceLog.sqlite` or Loop's `DeviceLog/Storage.sqlite` (table
+  `ZENTRY` of LoopKit's `PersistentDeviceLog`), which also holds TandemKit's lines (TandemKit 56dcb3c on), used for
+  `tandem` when its file is missing. Read from synthetic stores only. On the phone a store and its WAL are mirrored
+  (`_phone_store`: one `stat` probe over the shared SSH connection, scp only for what changed or was written in the
+  last 3 s); the probe's `stat -c`/`stat -f` fallback and scp from the phone are untested there, as is the pane on a
+  real simulator. A line read from two sources shows once (`_dedup`): a copy in another source within 2 s, by its
+  text without the source's framing, is dropped; repeats within one source all show. That the device log stamps TandemKit's copy within 2 s of its file is
+  inferred from the code (the copy goes through the delegate queue), not measured.
 - `th tap --count N` / `Driver.multi_tap` and `th flow tandem-feature-flag[s]` (`harness/flows/tandemkit.py`, added
   2026-11-01 after CI run 41275701186 could not reach TandemKit's Feature Flags list: three `th tap` calls landed ~1.5 s
   apart, too slow for `onTapGesture(count: 3)`). Run 42538914279 (TandemKit#644) showed WDA's `/actions` triple tap
@@ -282,6 +296,12 @@ until merged: pass `--faketandem-ref` until then).
   unverified: the Toggle's switch point and its state (tree value; on the phone, a tinted switch in the screenshot),
   and Loop's `open_pump_settings`.
 - `th report pr` against a real PR (gh --attach inline uploads; ask before posting).
+- A new PR comment hides the harness's earlier ones on that PR as outdated (`report.hide_earlier_comments`), only once
+  the API shows the new one posted (its URL, its author and `COMMENT_MARKER`, read up to three times): GitHub's own
+  Hide (`minimizeComment`, classifier OUTDATED), their text untouched, for comments by the new one's author that carry
+  the marker (in every comment posted since, which no longer ends with a visible footer) or the "Posted by
+  trio-test-harness" footer the comments before it had. A failure is only logged.
+  Checked against a fake gh only; whether the App's token may minimize comments in every installation is not.
 - comment.md attached to every CI run (2026-11-09), "post comment" or not: the PR comment step writes it whether the
   comment is posted, refused or skipped (no PR, the App not installed), and the Comment markdown step when no comment
   was asked for, each screenshot at its user-attachments URL (`report.comment_markdown`, `write_comment_file`,
