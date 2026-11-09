@@ -339,7 +339,11 @@ def run(FT, args) -> int:
     if sub == "fault":
         if args.fault_action == "clear":
             res = _call(FT, "DELETE", "/api/faults" + (f"/{args.id}" if args.id is not None else ""))
-            print(f"cleared {res.get('cleared', 0)} fault(s)" if isinstance(res, dict) else "cleared")
+            n = res.get("cleared", 0) if isinstance(res, dict) else None
+            if n == 0:
+                print("no armed faults to clear (a one-shot fault is consumed when it fires; `fault list` shows what is armed)")
+            else:
+                print(f"cleared {n} fault(s)" if n is not None else "cleared")
         elif args.fault_action == "list":
             print(json.dumps(_call(FT, "GET", "/api/faults"), indent=2))
         else:

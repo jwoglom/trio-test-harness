@@ -48,8 +48,10 @@ Typed shortcuts for the pump's side (each prints what it did; `faketandem api` s
   `workflow_mode`); `faketandem history --type BasalDelivery --last 3`; `faketandem log --last 20 --message Bolus`
   (what the app sent; `--count`).
 - Wait for something instead of looping: `wait --until "faketandem status --field connection.connected" --matches true
-  --timeout 120` or `wait --until "logs tandem --since 2m" --matches "Bolus.*delivered" -i`; it prints the line, exit 1
-  on timeout. `key backspace --count 12`, `logs trio tandem --count`.
+  --timeout 120` or `wait --until "logs tandem --since 30s" --matches "Bolus.*delivered" -i`; it prints the line, exit 1
+  on timeout. A log window that starts before your action matches an older line (a `--since 2m` wait for "resume" matched
+  a resume from 90 s earlier): keep `--since` to the seconds since the action, or poll `faketandem log --since SEQ
+  --message RE` with the SEQ `faketandem log` printed just before it. `key backspace --count 12`, `logs trio tandem --count`.
 - Lost bolus answer (pump delivers, app hears nothing): `faketandem fault add drop_response --message InitiateBolusRequest`.
   Refused: `fault add error_response --message InitiateBolusRequest --error-code 3`. Slow: `fault add delay_response
   --message X --delay-ms 8000 --every`. Link cut: `fault add disconnect --message HistoryLogRequest`;
