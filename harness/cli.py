@@ -452,35 +452,30 @@ def _applogs_doc() -> str:
 
 
 def cmd_logs(args):
-    """Trio / TandemKit / watch log files from the installed app (harness/applogs.py)."""
+    """The installed app's logs (harness/applogs.py)."""
     from . import applogs as A
     from .build import BuildInfo
     target = _target(args)
     bi = BuildInfo.load()
     built_for = "sim" if bi and bi.target == "sim" else "rooted-vnc" if bi and str(bi.target).startswith("device") else None
     bundle = args.bundle_id or (bi.bundle_id if bi and built_for == target else CONFIG.bundle_id(target))
-    app_files = A.files_for(_app().key)
-    if args.which not in ("all", *app_files):
-        raise HarnessError(f"{_app().name} writes no {args.which} log file; it has: {', '.join(app_files)}")
-    names = list(app_files) if args.which == "all" else [args.which]
-    rels = [r for n in names for r in app_files[n]]
-    got = A.fetch(target, bundle, rels)
-    texts = {n: {r: got.get(r) for r in app_files[n]} for n in names}
-    if "tandem" in texts and "device" not in texts and all(t is None for t in texts["tandem"].values()):
-        devs = A.fetch(target, bundle, app_files["device"])
-        texts["tandem"] = {r: A.tandem_from_device({r: t}) for r, t in devs.items() if t is not None} or texts["tandem"]
-    if args.files:
-        for n, files in texts.items():
-            for r, t in files.items():
-                print(f"{n:7} Documents/{r:30} " + ("missing" if t is None else f"{len(t.splitlines())} lines, {len(t) // 1024} KB"))
+    app = _app()
+    logs = A.logs_for(app.key)
+    if args.which not in ("all", *logs):
+        raise HarnessError(f"{app.name} has no {args.which} log; it has: {', '.join(logs)}")
+    names = list(logs) if args.which == "all" else [args.which]
+    texts = A.read_logs(target, bundle, names)
+    if args.summary:
+        print("\n".join(A.summary(texts)))
         return 0
     if args.save:
         dest = _run(args).path / "logs"
         for p in A.save(texts, dest):
             print(p)
         return 0
-    if all(t is None for f in texts.values() for t in f.values()):
-        raise HarnessError(f"no log files yet in {bundle}'s Documents ({', '.join(rels)})")
+    if all(t is None for t in texts.values()):
+        raise HarnessError(f"{app.name} ({bundle}) has not written " + ("any of its logs" if len(names) > 1
+                                                                       else f"its {names[0]} log") + " yet")
     rows = A.query(texts, grep=args.grep, ignore_case=args.ignore_case,
                    since=A.parse_since(args.since) if args.since else None, level=args.level,
                    lines=args.lines or None)
@@ -1321,19 +1316,21 @@ def build_parser() -> argparse.ArgumentParser:
     bz = sp.add_parser("busy", help="who is driving each target (the device lock; the only thing that counts)",
                        description=_busy_doc(), formatter_class=argparse.RawDescriptionHelpFormatter)
     bz.set_defaults(fn=cmd_busy)
-    lg = sp.add_parser("logs", help="Trio's log, the device log, TandemKit's and the watch's, from the installed app "
+    lg = sp.add_parser("logs", help="the installed app's logs: Trio's, TandemKit's, the device log and the watch's "
                                     "(filter, tail, save); Loop: TandemKit's and the device log",
                        description=_applogs_doc(),
                        formatter_class=argparse.RawDescriptionHelpFormatter)
     lg.add_argument("which", nargs="?", default="all", choices=["trio", "tandem", "device", "watch", "all"],
-                    help="which log (default all, merged by time); device: every pump and CGM manager's")
+                    help="which log (default all, merged by time); device: every pump and CGM driver's entries")
     lg.add_argument("-g", "--grep", metavar="REGEX", help="only entries matching (Python regex; multi-line entries match as a whole)")
     lg.add_argument("-i", "--ignore-case", action="store_true")
     lg.add_argument("--since", metavar="WHEN", help="30s, 10m, 2h, 1d, or an ISO time")
-    lg.add_argument("--level", choices=["info", "warning", "error"], help="TandemKit: at least this level")
+    lg.add_argument("--level", choices=["info", "warning", "error"], help="at least this level")
     lg.add_argument("-n", "--lines", type=int, default=200, help="last N entries (default 200; 0 = all)")
-    lg.add_argument("--files", action="store_true", help="list the log files and their sizes")
-    lg.add_argument("--save", action="store_true", help="copy the log files into the current run's logs/ (read them with Read/Grep)")
+    lg.add_argument("--summary", action="store_true", help="each log: how many entries, from when to when")
+    lg.add_argument("--files", dest="summary", action="store_true", help=argparse.SUPPRESS)
+    lg.add_argument("--save", action="store_true", help="write each log as text into the current run's logs/ "
+                                                        "(read them with Read/Grep)")
     lg.add_argument("--run", help="run dir for --save (default: $TH_RUN / the current run)")
     lg.add_argument("--bundle-id", help="default: the last build's, else the target's")
     lg.set_defaults(fn=cmd_logs)

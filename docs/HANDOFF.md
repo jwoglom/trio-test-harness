@@ -263,10 +263,16 @@ until merged: pass `--faketandem-ref` until then).
   Trio oref cycle with the home screen's pull-down and checks each stage from Trio's log. Checked against fake logs and
   a fake driver only: that the pull (22% to 57% of the screen down, 0.3 s press) arms Trio's 70 pt pull-to-loop on the
   simulator, and how long the AppLog.sqlite entries take to show, are not.
-- The device log (`th logs device`, 2026-11-09): Trio's `logs/DeviceLog.sqlite` and Loop's `DeviceLog/Storage.sqlite`,
-  table `ZENTRY` of LoopKit's `PersistentDeviceLog`, and TandemKit's `delegate` entries in it (TandemKit since
-  56dcb3c), read from synthetic stores only. Copying the SQLite stores off the phone with scp (`devices.ssh_pull`, with
-  the WAL) is untested on the phone, as is the web UI's pane tailing `AppLog.sqlite` by row on a real simulator.
+- Logs by name (`harness/applogs.py`, 2026-11-09): `th logs`, `th oref` and the web UI's pane ask for `trio`,
+  `tandem`, `device` or `watch` and get entries; `SOURCES` maps each to what the app keeps it in. Current Trio:
+  `logs/AppLog.sqlite`; the device log is Trio's `logs/DeviceLog.sqlite` or Loop's `DeviceLog/Storage.sqlite` (table
+  `ZENTRY` of LoopKit's `PersistentDeviceLog`), which also holds TandemKit's lines (TandemKit 56dcb3c on), used for
+  `tandem` when its file is missing. Read from synthetic stores only. On the phone a store and its WAL are mirrored
+  (`_phone_store`: one `stat` probe over the shared SSH connection, scp only for what changed or was written in the
+  last 3 s); the probe's `stat -c`/`stat -f` fallback and scp from the phone are untested there, as is the pane on a
+  real simulator. A line read from two sources shows once (`_dedup`): a copy in another source within 2 s, by its
+  text without the source's framing, is dropped; repeats within one source all show. That the device log stamps TandemKit's copy within 2 s of its file is
+  inferred from the code (the copy goes through the delegate queue), not measured.
 - `th tap --count N` / `Driver.multi_tap` and `th flow tandem-feature-flag[s]` (`harness/flows/tandemkit.py`, added
   2026-11-01 after CI run 41275701186 could not reach TandemKit's Feature Flags list: three `th tap` calls landed ~1.5 s
   apart, too slow for `onTapGesture(count: 3)`). Run 42538914279 (TandemKit#644) showed WDA's `/actions` triple tap
