@@ -40,3 +40,31 @@ Two things to know:
   with, after pairing and before tapping Load: `faketandem api POST /api/faults '{"kind": "delay_response", "message":
   "HistoryLogStatusRequest", "delay_ms": 8000, "every": true}'`. Its bar shows how much of the window the log read at
   pairing covers, so it can open near 100%.
+
+### Pump-side events cookbook
+Typed shortcuts for the pump's side (each prints what it did; `faketandem api` stays for the rest, and takes
+`fill_tubing` for `filltubing`):
+- `faketandem status --field basal.temp_active` (dotted path, one value: `connection.connected`, `insulin.reservoir_units`,
+  `workflow_mode`); `faketandem history --type BasalDelivery --last 3`; `faketandem log --last 20 --message Bolus`
+  (what the app sent; `--count`).
+- Wait for something instead of looping: `wait --until "faketandem status --field connection.connected" --matches true
+  --timeout 120` or `wait --until "logs tandem --since 2m" --matches "Bolus.*delivered" -i`; it prints the line, exit 1
+  on timeout. `key backspace --count 12`, `logs trio tandem --count`.
+- Lost bolus answer (pump delivers, app hears nothing): `faketandem fault add drop_response --message InitiateBolusRequest`.
+  Refused: `fault add error_response --message InitiateBolusRequest --error-code 3`. Slow: `fault add delay_response
+  --message X --delay-ms 8000 --every`. Link cut: `fault add disconnect --message HistoryLogRequest`;
+  `fault add reject_quick_pair`; `fault add drop_fragment --index 1 --every`. `fault clear` takes them all back.
+- Radio off and on: `fault add radio_off`, then `fault add radio_on`.
+- Occlusion with the temp kept: start a temp (`tempbasal start --percent 150 --duration-minutes 60`), then `suspend
+  --keep-temp` (an alarm stop; faketandem refuses `--reason occlusion --keep-temp`), then `resume`.
+- A bolus from the pump: `bolus start --units 1.5`, `bolus stall|resume|abort|complete`.
+- Pump clock: `clock --offset-seconds 20` (skew alert), `clock --offset-seconds 90000` (over the driver's 24 h limit:
+  dosing is refused), `clock --shift-pump-time -3600` (the pump's screen moved an hour), `clock --zone Europe/Paris`,
+  `clock --advance-seconds 600 --advance-ticks 6` (manual clock), `clock --real` undoes it.
+- Pump fields: `set reservoir_units=5 battery_percent=10`, `set closed_loop_enabled=true` (Control-IQ on),
+  `set controliq_algorithm_rate=2.2 basal_cycle_enabled=true`, `set max_bolus_milliunits=3000`, `set workflow_mode=fill_tubing`,
+  `set idp_profiles='[...]'` (a pump profile that differs from the app's; `faketandem scenario pump-profile-differs`
+  does it too).
+- Pump replaced: `faketandem api GET /api/settings/PumpVersionRequest` shows the answer's fields; PUT it back with another
+  serial (names are case-insensitive).
+- MTU 23 against a real phone's: `transport --mtu 23` / `--mtu 247`.

@@ -4,7 +4,10 @@ try to work around them.
 - Bash: only `./trio-test-harness ...`, `./bin/th ...` and `sleep ...` are allowed. Every other command (ls, cat,
   find, python, git, curl, xcrun, ...) is denied without asking anyone.
 - Waiting (to let a timeout pass, or for the app to catch up): `./trio-test-harness wait <seconds> --note "why"`, up
-  to 280 s per call; call it again to wait longer. Not `sleep` for more than a few seconds (Claude Code blocks it), and
+  to 280 s per call; call it again to wait longer. To wait
+  for something rather than a time: `./trio-test-harness wait --until "<harness subcommand>" --matches REGEX
+  [--timeout 120 --every 5]` re-runs that subcommand (no shell, no pipes) until a line of its output matches, prints it,
+  and exits 1 on timeout. Not `sleep` for more than a few seconds (Claude Code blocks it), and
   never in the background, ScheduleWakeup, Monitor or a cron: this is one session, and once you stop to wait for a
   notification nothing resumes it, so the run ends there.
 - Files: Read, Glob and Grep work inside this harness checkout (the current directory), including the run directory
@@ -45,7 +48,8 @@ try to work around them.
   Loop. **Always look a setting or option up there first** to learn which screen it is on, what it is called and
   what it does, then go to it in the app; do not hunt through screens. The docs can lag the PR under test: if the
   app differs, say so in your notes.
-- `./trio-test-harness --help` and `<command> --help` show the syntax. `--target` goes before the command:
-  `./trio-test-harness --target sim shot --name x`.
+- `./trio-test-harness --help` and `<command> --help` show the syntax. `--target` may come before or after the
+  command: `./trio-test-harness --target sim shot --name x`. Pipes, `grep` and `python3` are denied: use the
+  commands' own `--field`, `--grep`, `--count` and `--type`, and `key NAME --count N` for repeated keys.
 - If something you need is denied, do not look for another way in. Record it with `./trio-test-harness run note "..."`
   and continue with what you can do.

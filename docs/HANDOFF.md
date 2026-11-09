@@ -258,6 +258,17 @@ until merged: pass `--faketandem-ref` until then).
   40289321649 for run 40279063228.
 - Not verified yet: `th faketandem seed` by hand; the web UI's pump fields; Loop with `--pump faketandem`.
 
+- 2026-11-09: CLI ergonomics for the sandboxed job agent (mined from 57 e2e runs: 44 denied commands, 10 usage-error
+  turns). Added `wait --until "<subcommand>" --matches REGEX` (`harness/waituntil.py`), `--field` on `faketandem status|api`,
+  `faketandem history --type/--last/--since`, `logs --count`, `key --count`, typed `faketandem fault|clock|set|suspend|resume|
+  bolus|tempbasal|log|transport` (`harness/ftcli.py`), `faketandem api` path normalisation (`fill_tubing`, case-insensitive
+  `/api/settings/<Message>`, errors that list the valid modes/routes), global options before or after the subcommand,
+  `sim defaults --type string|int|float|bool`; `ci/agent-faketandem.md` has the pump-side events cookbook. `tests/`
+  (`python -m unittest discover -s tests`) is the repo's first test directory. **Checked against a stub faketandem and stub
+  drivers only; not yet run in CI or on a Mac, and not against a real faketandem.** faketandem refuses `suspend
+  --keep-temp` unless the reason is `alarm`, which the wrapper says up front. `/api/settings` case-matching relies on
+  `GET /api/settings` listing every message.
+
 ## Still unverified
 - `th tap --count N` / `Driver.multi_tap` and `th flow tandem-feature-flag[s]` (`harness/flows/tandemkit.py`, added
   2026-11-01 after CI run 41275701186 could not reach TandemKit's Feature Flags list: three `th tap` calls landed ~1.5 s
