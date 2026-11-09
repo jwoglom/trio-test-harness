@@ -321,7 +321,7 @@ def cmd_launch(args):
 
 
 def cmd_faketandem(args):
-    from . import faketandem as FT
+    from . import faketandem as FT, ftcli as FTC
     if args.sub in ("start", "stop"):
         from .jobguard import refuse_inside_job_agent
         # The job built and started faketandem outside the sandbox, which has no network to build it or port to serve it.
@@ -350,6 +350,9 @@ def cmd_faketandem(args):
         raise HarnessError("no faketandem is running (`th faketandem start`, or trio-test-e2e --pump faketandem)")
     if args.sub == "status":
         snapshot = FT.api("GET", "/api/state")
+        if args.field:
+            print(FTC.format_value(FTC.get_field(snapshot, args.field)))
+            return 0
         if args.json:
             print(json.dumps(snapshot, indent=2))
             return 0
@@ -363,8 +366,18 @@ def cmd_faketandem(args):
         print(FT.set_pairing_state(args.state) if args.state else FT.api("GET", "/api/bluetooth/pairingstate")["pairingState"])
         return 0
     if args.sub == "history":
-        if args.all:
+        types = FTC.parse_types(args.type)
+        if args.all and not (types or args.last or args.since):
             print(json.dumps(FT.api("GET", f"/api/history?limit={args.limit}"), indent=2))
+        elif types or args.last or args.since or args.json:
+            entries = FTC.filter_history(FT.api("GET", f"/api/history?limit={args.limit}").get("entries", []),
+                                         types=types, last=args.last, since=args.since)
+            if args.json or args.all:
+                print(json.dumps(entries, indent=2))
+            elif args.count:
+                print(len(entries))
+            else:
+                print("\n".join(map(FTC.format_entry, entries)) or "(no matching records)")
         else:
             print("\n".join(FT.history_doses(args.limit)))
         return 0
@@ -374,10 +387,14 @@ def cmd_faketandem(args):
         print(json.dumps(result.get("scenario"), indent=2))
         return 0
     if args.sub == "api":
-        body = json.loads(args.body) if args.body else None
-        print(json.dumps(FT.api(args.method, args.path, body), indent=2))
+        try:
+            body = json.loads(args.body) if args.body else None
+        except ValueError as e:
+            raise HarnessError(f"faketandem api: the body is not JSON ({e}); quote it: '{{\"units\": 1.5}}'") from None
+        result = FTC._call(FT, args.method.upper(), args.path, body)
+        print(FTC.format_value(FTC.get_field(result, args.field)) if args.field else json.dumps(result, indent=2))
         return 0
-    raise HarnessError(f"unknown faketandem command {args.sub}")
+    return FTC.run(FT, args)
 
 
 def cmd_faceid(args):
@@ -460,9 +477,11 @@ def cmd_logs(args):
     built_for = "sim" if bi and bi.target == "sim" else "rooted-vnc" if bi and str(bi.target).startswith("device") else None
     bundle = args.bundle_id or (bi.bundle_id if bi and built_for == target else CONFIG.bundle_id(target))
     app_files = A.files_for(_app().key)
-    if args.which not in ("all", *app_files):
-        raise HarnessError(f"{_app().name} writes no {args.which} log file; it has: {', '.join(app_files)}")
-    names = list(app_files) if args.which == "all" else [args.which]
+    wanted = [w for item in args.which for w in item.split(",") if w] or ["all"]
+    for w in wanted:
+        if w not in ("all", *app_files):
+            raise HarnessError(f"{_app().name} writes no {w} log file; it has: {', '.join(app_files)} (or all)")
+    names = list(app_files) if "all" in wanted else list(dict.fromkeys(wanted))
     rels = [r for n in names for r in app_files[n]]
     got = A.fetch(target, bundle, rels)
     texts = {n: {r: got.get(r) for r in app_files[n]} for n in names}
@@ -480,9 +499,23 @@ def cmd_logs(args):
         raise HarnessError(f"no log files yet in {bundle}'s Documents ({', '.join(rels)})")
     rows = A.query(texts, grep=args.grep, ignore_case=args.ignore_case,
                    since=A.parse_since(args.since) if args.since else None, level=args.level,
-                   lines=args.lines or None)
+                   lines=None if args.count else args.lines or None)
+    if args.count:
+        print(len(rows))
+        return 0
     print("\n".join(rows) if rows else "(no matching entries)")
     return 0
+
+
+def _defaults_type(s: str) -> str:
+    t = s.lstrip("-").lower()
+    if t not in ("string", "int", "integer", "float", "bool", "boolean"):
+        raise argparse.ArgumentTypeError(f"{s!r}: use string, int, float or bool")
+    return "-" + {"integer": "int", "boolean": "bool"}.get(t, t)
+
+
+def _level_name(s: str) -> str:
+    return {"warn": "warning", "err": "error", "information": "info"}.get(s.lower(), s.lower())
 
 
 def _appdebug_doc():
@@ -878,7 +911,14 @@ def cmd_type(args):
 
 
 def cmd_key(args):
-    get_driver(_target(args)).key(args.name); return 0
+    if args.count < 1:
+        raise HarnessError("key: --count is at least 1")
+    drv = get_driver(_target(args))
+    for i in range(args.count):
+        if i and args.interval:
+            time.sleep(args.interval)
+        drv.key(args.name)
+    return 0
 
 
 def cmd_home(args):
@@ -1116,10 +1156,84 @@ def cmd_flow(args):
 WAIT_MAX = 280      # under the job agent's 5 min Bash timeout (ci/claude-sandbox.py)
 
 
+GLOBAL_OPTIONS = ("--target", "--app", "--git-protocol")
+
+
+def _wait_until(args) -> int:
+    from . import waituntil as W
+    argv = W.split_command(args.until)
+    if "wait" in argv[:1] or "webui" in argv[:1]:
+        raise HarnessError(f"wait --until: {argv[0]} cannot be the command it polls")
+    timeout = WAIT_MAX if args.timeout is None else args.timeout
+    if not 0 < timeout <= WAIT_MAX:
+        raise HarnessError(f"wait: --timeout 1 to {WAIT_MAX} seconds per call (call it again to wait longer)")
+    if args.every <= 0:
+        raise HarnessError("wait: --every must be positive")
+    # the outer command's own --target/--app lead, so one the polled command names itself wins
+    carried = [x for name in ("target", "app", "git_protocol") if getattr(args, name, None)
+               for x in (f"--{name.replace('_', '-')}", getattr(args, name))]
+    cmd = carried + argv
+    if args.note:
+        _run(args).log_step("note", f"waiting up to {timeout:g} s for /{args.matches}/ from `{args.until}`: {args.note}")
+    out = W.wait_until(lambda: W.capture(main, cmd), args.matches, timeout=timeout, every=args.every,
+                       ignore_case=args.ignore_case, progress=lambda m: print(m, flush=True))
+    if out.line is not None:
+        print(out.line)
+        print(f"matched after {out.elapsed:.0f} s ({out.attempts} runs)", file=sys.stderr)
+        return 0
+    tail = "\n".join(out.last_output.strip().splitlines()[-5:])
+    print(f"wait: no line matching /{args.matches}/ from `{args.until}` in {timeout:g} s ({out.attempts} runs)."
+          + (f"\nLast output:\n{tail}" if tail else "") + (f"\nLast error: {out.last_error}" if out.last_error else ""),
+          file=sys.stderr)
+    return 1
+
+
+def hoist_global_options(argv: list[str]) -> list[str]:
+    """--target, --app and --git-protocol, wherever the caller put them (`faketandem status --target sim`), moved in
+    front of the subcommand, where argparse takes them; `--type -string`'s value, which argparse reads as an option,
+    joined to it. Nothing after a bare `--` is touched."""
+    heads: list[str] = []
+    rest: list[str] = []
+    i = 0
+    while i < len(argv):
+        a = argv[i]
+        if a == "--":
+            rest += argv[i:]
+            break
+        name = a.split("=", 1)[0]
+        if name in GLOBAL_OPTIONS:
+            if "=" in a:
+                heads.append(a)
+            elif i + 1 < len(argv) and not argv[i + 1].startswith("--"):
+                heads += [a, argv[i + 1]]
+                i += 1
+            else:
+                raise HarnessError(f"{a} needs a value (sim | rooted-vnc | iphone-usb | watch for --target; trio | loop for --app)")
+        elif a == "--type":
+            nxt = argv[i + 1] if i + 1 < len(argv) else None
+            if nxt is None or (nxt.startswith("--")):
+                raise HarnessError("--type needs a value (`sim defaults KEY VALUE --type string|int|float|bool`; "
+                                   "`faketandem history --type BasalDelivery`)")
+            rest.append(f"--type={nxt}")
+            i += 1
+        else:
+            rest.append(a)
+        i += 1
+    return heads + rest
+
+
 def cmd_wait(args):
     """Waits in the foreground, so a test can let a timeout pass. A job's agent must wait this way: Claude Code blocks a
-    long `sleep`, and a background wait ends its one-shot session."""
+    long `sleep`, and a background wait ends its one-shot session. With --until it polls a harness subcommand."""
     import time
+    if args.until:
+        if args.seconds is not None:
+            raise HarnessError("wait: give N seconds or --until \"...\" --matches REGEX, not both")
+        if not args.matches:
+            raise HarnessError("wait --until needs --matches REGEX: the line of the command's output to wait for")
+        return _wait_until(args)
+    if args.seconds is None:
+        raise HarnessError("wait: N seconds, or --until \"<subcommand>\" --matches REGEX")
     secs = args.seconds
     if not 0 < secs <= WAIT_MAX:
         raise HarnessError(f"wait: 1 to {WAIT_MAX} seconds per call (call it again to wait longer)")
@@ -1190,7 +1304,9 @@ def cmd_test(args):
 def build_parser() -> argparse.ArgumentParser:
     from . import apps
     from .faketandem import SCENARIOS
-    p = argparse.ArgumentParser(prog="trio-test-harness", description="Trio / Loop test harness toolbox (short alias: th)")
+    from . import ftcli as FTC
+    p = argparse.ArgumentParser(prog="trio-test-harness", description="Trio / Loop test harness toolbox (short alias: th)",
+                                epilog="--target, --app and --git-protocol are accepted before or after the subcommand.")
     p.add_argument("--target", help="sim | rooted-vnc | iphone-usb | watch (aliases: device=rooted-vnc, mirror=iphone-usb; default $TH_TARGET or sim)")
     p.add_argument("--app", choices=sorted(apps.APPS),
                    help="the app under test: trio or loop (LoopWorkspace); default $TH_APP, else trio")
@@ -1264,17 +1380,27 @@ def build_parser() -> argparse.ArgumentParser:
     fts.add_parser("seed", help="seed the installed app (simulator) as paired with the running faketandem")
     fss2 = fts.add_parser("status", help="what the pump holds: pairing, basal, IOB, last bolus, reservoir")
     fss2.add_argument("--json", action="store_true", help="faketandem's whole state snapshot")
+    fss2.add_argument("--field", metavar="A.B.C", help="one field of the snapshot by dotted path (a list item by "
+                                                       "index, basal.temp_active, history.count); prints just the value")
     fpa = fts.add_parser("pairing", help="print the pairing state, or set it: PairStep1 = the double-tap step, "
                                          "PairStep2 = the pump shows its code, NotDiscoverable")
     fpa.add_argument("state", nargs="?", choices=["NotDiscoverable", "PairStep1", "PairStep2"])
-    fhi = fts.add_parser("history", help="the pump's history log: dose records, or --all")
-    fhi.add_argument("--all", action="store_true"); fhi.add_argument("--limit", type=int, default=5000)
+    fhi = fts.add_parser("history", help="the pump's history log: dose records, or --all; --type/--last/--since filter")
+    fhi.add_argument("--all", action="store_true", help="every record as JSON, BasalDelivery included"); fhi.add_argument("--limit", type=int, default=5000)
+    fhi.add_argument("--type", action="append", metavar="TYPE", help="only records of this type, e.g. BasalDelivery "
+                                                                      "(case-insensitive, repeatable or comma-separated)")
+    fhi.add_argument("--last", type=int, metavar="N", help="only the last N of those")
+    fhi.add_argument("--since", metavar="WHEN", help="a sequence number, or 10m, 2h, an ISO time")
+    fhi.add_argument("--json", action="store_true", help="the filtered records as JSON")
+    fhi.add_argument("--count", action="store_true", help="print only how many records match")
     fsc = fts.add_parser("scenario", help="replay pump use over its past (refused while the app is connected)")
     fsc.add_argument("scenario", metavar="NAME|FILE", help="a preset (" + ", ".join(SCENARIOS) + ") or a scenario JSON file")
     fap = fts.add_parser("api", help="any request to faketandem's HTTP API, e.g. POST /api/state/bolus/start "
                                      "'{\"units\": 1.5}' (see faketandem's README)")
     fap.add_argument("method", choices=["GET", "POST", "PUT", "PATCH", "DELETE", "get", "post", "put", "patch", "delete"])
     fap.add_argument("path"); fap.add_argument("body", nargs="?")
+    fap.add_argument("--field", metavar="A.B.C", help="print one field of the answer by dotted path")
+    FTC.add_parsers(fts)
     ft.set_defaults(fn=cmd_faketandem)
 
     fi = sp.add_parser("faceid", help="simulator Face ID: enroll a face (trio-test-e2e does at launch), then answer an "
@@ -1298,13 +1424,14 @@ def build_parser() -> argparse.ArgumentParser:
                                     "Loop: TandemKit's only",
                        description=_applogs_doc(),
                        formatter_class=argparse.RawDescriptionHelpFormatter)
-    lg.add_argument("which", nargs="?", default="all", choices=["trio", "tandem", "watch", "all"],
-                    help="which log (default all, merged by time)")
+    lg.add_argument("which", nargs="*", metavar="{trio,tandem,watch,all}",
+                    help="which log(s), several or comma-separated allowed (default all, merged by time)")
     lg.add_argument("-g", "--grep", metavar="REGEX", help="only entries matching (Python regex; multi-line entries match as a whole)")
     lg.add_argument("-i", "--ignore-case", action="store_true")
     lg.add_argument("--since", metavar="WHEN", help="30s, 10m, 2h, 1d, or an ISO time")
-    lg.add_argument("--level", choices=["info", "warning", "error"], help="TandemKit: at least this level")
+    lg.add_argument("--level", type=_level_name, choices=["info", "warning", "error"], help="TandemKit: at least this level (warn = warning)")
     lg.add_argument("-n", "--lines", type=int, default=200, help="last N entries (default 200; 0 = all)")
+    lg.add_argument("--count", action="store_true", help="print only how many entries match (all of them, not the last -n)")
     lg.add_argument("--files", action="store_true", help="list the log files and their sizes")
     lg.add_argument("--save", action="store_true", help="copy the log files into the current run's logs/ (read them with Read/Grep)")
     lg.add_argument("--run", help="run dir for --save (default: $TH_RUN / the current run)")
@@ -1369,7 +1496,9 @@ def build_parser() -> argparse.ArgumentParser:
     ir = ss.add_parser("install-runtime"); ir.add_argument("version", nargs="?")
     ir.add_argument("--platform", default="iOS", choices=["iOS", "watchOS"], help="both apps need both: their schemes embed a Watch app")
     c = ss.add_parser("container"); c.add_argument("--bundle-id")
-    d = ss.add_parser("defaults"); d.add_argument("key"); d.add_argument("value"); d.add_argument("--type", default="-string"); d.add_argument("--bundle-id")
+    d = ss.add_parser("defaults"); d.add_argument("key"); d.add_argument("value"); d.add_argument("--type", default="-string", type=_defaults_type, metavar="{string,int,float,bool}",
+                   help="the defaults type, with or without the dash: string (default), int, float, bool")
+    d.add_argument("--bundle-id")
     ou = ss.add_parser("openurl"); ou.add_argument("url")
     s.set_defaults(fn=cmd_sim)
 
@@ -1410,7 +1539,10 @@ def build_parser() -> argparse.ArgumentParser:
                          "pixels from 50; past 70%% of the screen it takes several swipes")
     sc.set_defaults(fn=cmd_scroll)
     ty = sp.add_parser("type"); ty.add_argument("text"); ty.set_defaults(fn=cmd_type)
-    k = sp.add_parser("key"); k.add_argument("name"); k.set_defaults(fn=cmd_key)
+    k = sp.add_parser("key", help="press a key (backspace, return, ...); --count N presses it N times")
+    k.add_argument("name"); k.add_argument("--count", type=int, default=1, help="presses (e.g. 12 backspaces)")
+    k.add_argument("--interval", type=float, default=0.05, help="seconds between presses")
+    k.set_defaults(fn=cmd_key)
     sp.add_parser("home").set_defaults(fn=cmd_home)
     cr = sp.add_parser("crown", help="--target watch: turn the Digital Crown (1.0 = one full turn, negative = the other way)")
     cr.add_argument("delta", type=float); cr.add_argument("--velocity", type=float, help="turns per second")
@@ -1505,14 +1637,26 @@ def build_parser() -> argparse.ArgumentParser:
     te.add_argument("--no-devices", dest="devices", action="store_false"); te.set_defaults(fn=cmd_test)
 
     wt = sp.add_parser("wait", help=f"wait N seconds in the foreground (1-{WAIT_MAX}), e.g. to let a timeout pass; "
-                                    "how a job's agent waits")
-    wt.add_argument("seconds", type=float)
+                                    "or --until \"SUBCOMMAND\" --matches REGEX: poll a subcommand until its output "
+                                    "matches; how a job's agent waits")
+    wt.add_argument("seconds", type=float, nargs="?")
+    wt.add_argument("--until", metavar="SUBCOMMAND", help="a harness subcommand to run again and again (no shell; quote "
+                                                          "it), e.g. \"logs trio --since 2m\" or \"faketandem status --json --field connection.connected\"")
+    wt.add_argument("--matches", metavar="REGEX", help="with --until: wait for an output line matching this (Python regex); it is printed")
+    wt.add_argument("--timeout", type=float, help=f"with --until: give up after this many seconds (default and cap {WAIT_MAX}); exit 1")
+    wt.add_argument("--every", type=float, default=5.0, help="with --until: seconds between runs (default 5)")
+    wt.add_argument("-i", "--ignore-case", action="store_true", help="with --until: --matches ignores case")
     wt.add_argument("--note", help="also record why in the current run")
     wt.set_defaults(fn=cmd_wait)
     return p
 
 
 def main(argv=None) -> int:
+    try:
+        argv = hoist_global_options(sys.argv[1:] if argv is None else list(argv))
+    except HarnessError as e:
+        print(f"th: error: {e}", file=sys.stderr)
+        return 2
     args = build_parser().parse_args(argv)
     if args.git_protocol:
         CONFIG.set("TH_GIT_PROTOCOL", args.git_protocol)
