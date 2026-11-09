@@ -333,25 +333,36 @@ jobs:
           # Screenshots are uploaded with a user PAT that can only reach this repo (GitHub takes
           # attachment uploads from user tokens only); the comment is still posted as the App. The
           # images are visible to people who can read this private repo, so only PRs in jwoglom's
-          # repos get them; elsewhere the comment carries captions and a link to the run.
-          TH_UPLOAD_TOKEN: ${{ steps.v.outputs.pr_owner == 'jwoglom' && secrets.TRIO_TEST_HARNESS_USER_PAT || '' }}
+          # repos show them inline; elsewhere the comment carries captions and a link to the run, and
+          # the uploads are only linked from pr-comment.md.
+          TH_UPLOAD_TOKEN: ${{ secrets.TRIO_TEST_HARNESS_USER_PAT }}
           TH_UPLOAD_REPO: ${{ github.repository }}
+          TH_COMMENT_INLINE_IMAGES: ${{ steps.v.outputs.pr_owner == 'jwoglom' && '1' || '0' }}
+        # pr-comment.md, the comment's markdown with the screenshots at their uploaded URLs, is attached to the run
+        # as its own file whatever happens to the comment: posted, failed, or skipped for want of a PR or permission.
         run: |
+          comment_file() {
+            [ -s "$RUN_DIR/pr-comment.md" ] || ./trio-test-harness report comment-md --run "$RUN_DIR" --artifact-url "$RUN_URL" >/dev/null \
+              || echo "::warning title=pr-comment.md not written::see the PR comment step log"
+          }
           if [ -z "$PR" ]; then
+            comment_file
             echo "::notice title=PR comment skipped::this run has no PR (Trio branch only)"
-            echo "note=skipped: this run has no PR" >> "$GITHUB_OUTPUT"; exit 0
+            echo "note=skipped: this run has no PR; its markdown is attached as pr-comment.md" >> "$GITHUB_OUTPUT"; exit 0
           fi
           if [ -z "$GH_TOKEN" ]; then
+            comment_file
             echo "::notice title=PR comment skipped::the trio-test-harness-runner App is not installed on $PR_OWNER"
-            echo "note=skipped: the trio-test-harness-runner App is not installed on $PR_OWNER" >> "$GITHUB_OUTPUT"; exit 0
+            echo "note=skipped: the trio-test-harness-runner App is not installed on $PR_OWNER; the comment's markdown is attached as pr-comment.md" >> "$GITHUB_OUTPUT"; exit 0
           fi
           if out=$(./trio-test-harness report pr "$PR" --run "$RUN_DIR" --artifact-url "$RUN_URL" 2>&1); then
             echo "note=posted $(echo "$out" | tail -1)" >> "$GITHUB_OUTPUT"
           else
             echo "$out" | tail -20
-            echo "::warning title=PR comment failed::see the PR comment step log"
-            echo "note=failed; see the PR comment step log" >> "$GITHUB_OUTPUT"
+            echo "::warning title=PR comment failed::see the PR comment step log; the comment's markdown is attached as pr-comment.md"
+            echo "note=failed (see the PR comment step log); the comment's markdown is attached as pr-comment.md" >> "$GITHUB_OUTPUT"
           fi
+          comment_file
 
       - name: Job summary
         if: always()
@@ -378,6 +389,16 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           path: ${{ steps.e2e.outputs.run_dir }}/report.html
+          archive: false
+          retention-days: 14
+          if-no-files-found: ignore
+
+      # The PR comment's markdown on its own, posted or not (see the PR comment step).
+      - name: Upload pr-comment.md (unzipped)
+        if: always() && inputs.post_comment && steps.e2e.outputs.run_dir != ''
+        uses: actions/upload-artifact@v7
+        with:
+          path: ${{ steps.e2e.outputs.run_dir }}/pr-comment.md
           archive: false
           retention-days: 14
           if-no-files-found: ignore
