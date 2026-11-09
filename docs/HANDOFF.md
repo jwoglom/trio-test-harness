@@ -246,6 +246,10 @@ until merged: pass `--faketandem-ref` until then).
   tells the agent what to finish (`pipeline.setup_notes`, in the workflow's and the web UI's prompt). report.html
   renders best effort and the agent's notes are optional, so neither keeps the agent from running either. Checked
   with stubbed stages only.
+- The agent's prompt carries the change under test (`pipeline.pr_context`, first in its notes, in the workflow and the
+  web UI): pr.md's title, links, the PR's branch and the branch it goes into, each submodule's ref and the commit
+  built, and every PR's description, a second submodule PR's included (`build.pr_metadata`). Agents used to start by
+  reading pr.md, which named neither branch.
 - TandemKit's feature flags: `ci/agent-tandemkit-flags.md` goes into every faketandem run's agent notes, with the
   flags read from the build's TandemKit (`flows/tandemkit.py` `known_flags`), so a flag a PR adds is listed and
   `flow tandem-feature-flag` takes it. 42516779754's agent never found Manual Temp Basal Support.

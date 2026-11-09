@@ -237,6 +237,8 @@ jobs:
           fi
           smoke_note=$([ "$IN_SMOKE" = true ] && echo ", with the $cgm and the $pump" || true)
           extra=$([ -n "$IN_AGENT_INSTRUCTIONS" ] && printf '\nFocus from the person who started this run:\n%s\n' "$IN_AGENT_INSTRUCTIONS" || true)
+          # what is under test, before the focus: titles, links, branches, the commits built, every PR's description (pr.md)
+          extra="$(RUN_DIR="$RUN_DIR" .venv/bin/python -c 'import os; from harness import pipeline; print(pipeline.pr_context(os.environ["RUN_DIR"]))' || echo "::warning::the PR context failed" >&2)$extra"
           # The notes are optional: one whose helper fails is left out with a warning, and the agent still runs.
           # the faketandem pump: what it is, its commands and how this run set it up (ci/agent-faketandem*.md)
           extra="$extra$(RUN_DIR="$RUN_DIR" .venv/bin/python -c 'import os; from harness import faketandem; print(faketandem.agent_notes(os.environ["RUN_DIR"]))' || echo "::warning::the faketandem notes failed" >&2)"
