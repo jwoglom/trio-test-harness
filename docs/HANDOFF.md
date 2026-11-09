@@ -267,7 +267,10 @@ until merged: pass `--faketandem-ref` until then).
   (`python -m unittest discover -s tests`) is the repo's first test directory. **Checked against a stub faketandem and stub
   drivers only; not yet run in CI or on a Mac, and not against a real faketandem.** faketandem refuses `suspend
   --keep-temp` unless the reason is `alarm`, which the wrapper says up front. `/api/settings` case-matching relies on
-  `GET /api/settings` listing every message.
+  `GET /api/settings` listing every message. Follow-up: faketandem now takes `keep_temp` with occlusion too (only user is
+  400), so `suspend --reason occlusion --keep-temp` goes through (bare `--keep-temp` means occlusion), and the wrappers
+  gained `alert|alarm|malfunction|reminder|cgmalert raise|clear` and `cartridge ready|insert` (faketandem's alerts and
+  cartridge-change API), with cookbook entries for them, the refusals and `connection.subscribed`. Stub faketandem only.
 
 ## Still unverified
 - `th tap --count N` / `Driver.multi_tap` and `th flow tandem-feature-flag[s]` (`harness/flows/tandemkit.py`, added

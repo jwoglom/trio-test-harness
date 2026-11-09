@@ -19,7 +19,9 @@ FAULT_KINDS = ("drop_response", "delay_response", "error_response", "disconnect"
 # /api/state/<action>: the route table in faketandem's pkg/harness/actions.go
 STATE_ACTIONS = ("bolus/start", "bolus/stall", "bolus/resume", "bolus/abort", "bolus/complete", "tempbasal/start",
                  "tempbasal/stop", "suspend", "resume", "history/append", "history/bulk", "history/erase", "scenario",
-                 "qualifyingevent", "time", "filltubing/button")
+                 "qualifyingevent", "time", "filltubing/button", "alert", "alarm", "malfunction", "reminder", "cgmalert",
+                 "cartridge/ready", "cartridge/insert")
+NOTIFICATION_KINDS = ("alert", "alarm", "malfunction", "reminder", "cgmalert")
 SUSPEND_REASONS = ("user", "occlusion", "alarm")
 _STATE_WORDS = {w for a in STATE_ACTIONS for w in a.split("/")}
 
@@ -215,14 +217,40 @@ def suspend_request(reason: str | None, keep_temp: bool, message: str | None = N
     if reason:
         body["reason"] = reason
     if keep_temp:
-        if reason == "occlusion":
-            raise HarnessError("suspend: --keep-temp is for the alarm reason; faketandem refuses it with occlusion "
-                               "(its README's occlusion-style stop is --reason alarm --keep-temp)")
-        body["reason"] = reason or "alarm"
+        if reason == "user":
+            raise HarnessError("suspend: --keep-temp is for --reason occlusion or alarm; faketandem refuses it with user")
+        body["reason"] = reason or "occlusion"
         body["keep_temp"] = True
     if message:
         body["message"] = message
     return "POST", "/api/state/suspend", body
+
+
+def notification_request(kind: str, action: str, ident: str, *, message: str | None = None,
+                         fault_id: int | None = None) -> tuple[str, str, dict]:
+    """POST (raise) or DELETE (clear) /api/state/<kind>: IDENT is a pumpX2 name (LOW_INSULIN, LOW_INSULIN_ALERT) or a bit."""
+    if kind not in NOTIFICATION_KINDS:
+        raise HarnessError(f"unknown notification kind {kind!r} ({', '.join(NOTIFICATION_KINDS)})")
+    ident = ident.strip()
+    if not ident:
+        raise HarnessError(f"{kind} {action}: give a name (LOW_INSULIN) or a bit number")
+    body: dict = {"code": int(ident, 0)} if re.fullmatch(r"0[xX][0-9a-fA-F]+|\d+", ident) else {"type": ident}
+    if action == "raise":
+        if message and kind in ("alert", "alarm"):
+            body["message"] = message
+        if fault_id is not None:
+            if kind != "malfunction":
+                raise HarnessError("--fault-id is for malfunction")
+            body["fault_id"] = fault_id
+    return "POST" if action == "raise" else "DELETE", f"/api/state/{kind}", body
+
+
+def cartridge_request(action: str, *, units: float | None = None) -> tuple[str, str, dict]:
+    if action == "ready":
+        return "POST", "/api/state/cartridge/ready", {}
+    if not units or units <= 0:
+        raise HarnessError("cartridge insert needs --units U (positive, at most 300)")
+    return "POST", "/api/state/cartridge/insert", {"units": units}
 
 
 def bolus_request(action: str, *, units: float | None = None, source: str | None = None,
@@ -352,6 +380,17 @@ def run(FT, args) -> int:
         m, p, b = suspend_request(args.reason, args.keep_temp, args.message)
         _show(FT, f"suspended ({b.get('reason', 'user')}{', keeping the temp' if args.keep_temp else ''})", _call(FT, m, p, b))
         return 0
+    if sub in NOTIFICATION_KINDS:
+        m, p, b = notification_request(sub, args.notify_action, args.ident, message=getattr(args, "message", None),
+                                       fault_id=getattr(args, "fault_id", None))
+        verb = "raised" if args.notify_action == "raise" else "cleared"
+        _show(FT, f"{sub} {verb}: {json.dumps(b)}", _call(FT, m, p, b))
+        return 0
+    if sub == "cartridge":
+        m, p, b = cartridge_request(args.cartridge_action, units=getattr(args, "units", None))
+        _show(FT, "cartridge " + ("retracted, ready to change" if args.cartridge_action == "ready"
+                                  else f"inserted ({args.units:g} U)"), _call(FT, m, p, b))
+        return 0
     if sub == "resume":
         body = {"clear_alarms": False} if args.keep_alarms else {}
         _show(FT, "resumed", _call(FT, "POST", "/api/state/resume", body))
@@ -430,14 +469,33 @@ def add_parsers(fts) -> None:
     c.add_argument("--shift-pump-time", type=float, metavar="S", help="as the screen, move the pump's time by S seconds")
     c.add_argument("--real", action="store_true", help="back to the real clock, no skew")
 
-    s = fts.add_parser("set", help="stage pump fields: KEY=VALUE... (PUT /api/state; values are JSON), e.g. "
-                                   "reservoir_units=5 battery_percent=10 closed_loop_enabled=true")
+    s = fts.add_parser("set", help="stage pump fields: KEY=VALUE... (PUT /api/state; values are JSON, nested too), e.g. "
+                                   "reservoir_units=5 closed_loop_enabled=true refusals='{\"temp_rate_while_running\":false}' "
+                                   "fill_cannula_stream_lost=true cartridge_loaded=true")
     s.add_argument("assignments", nargs="+", metavar="KEY=VALUE")
 
     su = fts.add_parser("suspend", help="stop delivery from the pump's side (POST /api/state/suspend)")
     su.add_argument("--reason", choices=SUSPEND_REASONS, help="default user; occlusion and alarm raise the pump's alarm")
-    su.add_argument("--keep-temp", action="store_true", help="alarm stop that leaves the running temp set (it runs again on resume)")
+    su.add_argument("--keep-temp", action="store_true", help="occlusion or alarm stop that leaves the running temp set (it runs again on resume); "
+                                                      "alone, an occlusion stop, as a Mobi was seen doing")
     su.add_argument("--message", help="alarm text")
+    for kind, what in (("alert", "an alert (LOW_INSULIN)"), ("alarm", "an alarm (RESUME_PUMP_ALARM, OCCLUSION_ALARM)"),
+                       ("malfunction", "a malfunction (stays until cleared here; the app cannot dismiss it)"),
+                       ("reminder", "a reminder (SITE_CHANGE)"), ("cgmalert", "a CGM alert (LOW_CGM_ALERT)")):
+        n = fts.add_parser(kind, help=f"raise or clear {what}: POST/DELETE /api/state/{kind}")
+        na = n.add_subparsers(dest="notify_action", required=True)
+        for act in ("raise", "clear"):
+            x = na.add_parser(act, help=f"{act} it by pumpX2 name (category suffix optional) or by bit number")
+            x.add_argument("ident", metavar="NAME_OR_BIT")
+            if kind in ("alert", "alarm") and act == "raise":
+                x.add_argument("--message", help="text on the pump's screen")
+            if kind == "malfunction" and act == "raise":
+                x.add_argument("--fault-id", type=lambda v: int(v, 0), help="the fault HighestAam reports (default 8305)")
+    ca = fts.add_parser("cartridge", help="the cartridge change from the pump's side: ready, insert")
+    cs = ca.add_subparsers(dest="cartridge_action", required=True)
+    cs.add_parser("ready", help="finish retracting now (after the app's Enter) instead of after cartridge_ready_seconds")
+    ci = cs.add_parser("insert", help="put a new cartridge into a pump that is ready for it")
+    ci.add_argument("--units", type=float, required=True, help="what it holds, at most 300")
     r = fts.add_parser("resume", help="resume delivery from the pump's side")
     r.add_argument("--keep-alarms", action="store_true", help="leave the pump's alarms raised")
 

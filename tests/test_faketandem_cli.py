@@ -106,9 +106,10 @@ class Builders(unittest.TestCase):
 
     def test_suspend_bolus_tempbasal(self):
         self.assertEqual(F.suspend_request("alarm", True), ("POST", "/api/state/suspend", {"reason": "alarm", "keep_temp": True}))
-        self.assertEqual(F.suspend_request(None, True)[2], {"reason": "alarm", "keep_temp": True})
+        self.assertEqual(F.suspend_request(None, True)[2], {"reason": "occlusion", "keep_temp": True})
+        self.assertEqual(F.suspend_request("occlusion", True), ("POST", "/api/state/suspend", {"reason": "occlusion", "keep_temp": True}))
         with self.assertRaises(HarnessError):
-            F.suspend_request("occlusion", True)
+            F.suspend_request("user", True)
         self.assertEqual(F.bolus_request("start", units=1.5, source="remote"),
                          ("POST", "/api/state/bolus/start", {"units": 1.5, "source": "remote"}))
         self.assertEqual(F.bolus_request("abort", delivered_units=0.4), ("POST", "/api/state/bolus/abort", {"delivered_units": 0.4}))
@@ -118,6 +119,31 @@ class Builders(unittest.TestCase):
         self.assertEqual(F.tempbasal_request("start", rate=1.2)[2], {"rate": 1.2, "duration_minutes": 30})
         with self.assertRaises(HarnessError):
             F.tempbasal_request("start")
+
+
+class Notifications(unittest.TestCase):
+    def test_raise_and_clear_by_name_or_bit(self):
+        self.assertEqual(F.notification_request("alert", "raise", "LOW_INSULIN"), ("POST", "/api/state/alert", {"type": "LOW_INSULIN"}))
+        self.assertEqual(F.notification_request("alarm", "raise", "OCCLUSION_ALARM", message="Occlusion")[2],
+                         {"type": "OCCLUSION_ALARM", "message": "Occlusion"})
+        self.assertEqual(F.notification_request("alarm", "clear", "18"), ("DELETE", "/api/state/alarm", {"code": 18}))
+        self.assertEqual(F.notification_request("malfunction", "raise", "9", fault_id=8305)[2], {"code": 9, "fault_id": 8305})
+        self.assertEqual(F.notification_request("cgmalert", "raise", "0x10")[2], {"code": 16})
+        self.assertEqual(F.notification_request("reminder", "raise", "SITE_CHANGE", message="x")[2], {"type": "SITE_CHANGE"})
+        with self.assertRaises(HarnessError):
+            F.notification_request("alert", "raise", "LOW_INSULIN", fault_id=1)
+        with self.assertRaises(HarnessError):
+            F.notification_request("alert", "raise", " ")
+
+    def test_cartridge(self):
+        self.assertEqual(F.cartridge_request("ready"), ("POST", "/api/state/cartridge/ready", {}))
+        self.assertEqual(F.cartridge_request("insert", units=300), ("POST", "/api/state/cartridge/insert", {"units": 300}))
+        with self.assertRaises(HarnessError):
+            F.cartridge_request("insert")
+
+    def test_state_routes_are_not_misrouted(self):
+        self.assertEqual(F.normalise_path("/api/state/cartridge/insert"), "/api/state/cartridge/insert")
+        self.assertEqual(F.normalise_path("/api/state/cgm_alert"), "/api/state/cgmalert")
 
 
 class AgainstAFakePump(unittest.TestCase):
@@ -223,6 +249,42 @@ class AgainstAFakePump(unittest.TestCase):
         self.assertEqual(self.fake.writes()[-1], ("POST", "/api/state/tempbasal/start", {"percent": 150, "duration_minutes": 30}))
         th("faketandem", "tempbasal", "stop")
         self.assertEqual(self.fake.writes()[-1][1], "/api/state/tempbasal/stop")
+
+    def test_occlusion_keep_temp_and_default(self):
+        th("faketandem", "suspend", "--reason", "occlusion", "--keep-temp")
+        self.assertEqual(self.fake.writes()[-1], ("POST", "/api/state/suspend", {"reason": "occlusion", "keep_temp": True}))
+        th("faketandem", "suspend", "--keep-temp")
+        self.assertEqual(self.fake.writes()[-1][2], {"reason": "occlusion", "keep_temp": True})
+        self.assertEqual(th("faketandem", "suspend", "--reason", "user", "--keep-temp")[0], 2)
+
+    def test_notifications_and_cartridge(self):
+        rc, out, _ = th("faketandem", "alert", "raise", "LOW_INSULIN")
+        self.assertEqual(rc, 0)
+        self.assertEqual(self.fake.writes()[-1], ("POST", "/api/state/alert", {"type": "LOW_INSULIN"}))
+        self.assertIn("alert raised", out)
+        th("faketandem", "alarm", "raise", "RESUME_PUMP_ALARM", "--message", "Resume")
+        self.assertEqual(self.fake.writes()[-1], ("POST", "/api/state/alarm", {"type": "RESUME_PUMP_ALARM", "message": "Resume"}))
+        th("faketandem", "alarm", "clear", "18")
+        self.assertEqual(self.fake.writes()[-1], ("DELETE", "/api/state/alarm", {"code": 18}))
+        th("faketandem", "malfunction", "raise", "9", "--fault-id", "8305")
+        self.assertEqual(self.fake.writes()[-1], ("POST", "/api/state/malfunction", {"code": 9, "fault_id": 8305}))
+        th("faketandem", "reminder", "raise", "SITE_CHANGE")
+        self.assertEqual(self.fake.writes()[-1], ("POST", "/api/state/reminder", {"type": "SITE_CHANGE"}))
+        th("faketandem", "cgmalert", "clear", "LOW_CGM_ALERT")
+        self.assertEqual(self.fake.writes()[-1], ("DELETE", "/api/state/cgmalert", {"type": "LOW_CGM_ALERT"}))
+        th("faketandem", "cartridge", "ready")
+        self.assertEqual(self.fake.writes()[-1], ("POST", "/api/state/cartridge/ready", {}))
+        rc, out, _ = th("faketandem", "cartridge", "insert", "--units", "300")
+        self.assertEqual(self.fake.writes()[-1], ("POST", "/api/state/cartridge/insert", {"units": 300.0}))
+        self.assertIn("inserted (300 U)", out)
+        self.assertEqual(th("faketandem", "cartridge", "insert")[0], 2)
+
+    def test_set_nested_json(self):
+        th("faketandem", "set", 'refusals={"temp_rate_while_running":false}', "fill_cannula_stream_lost=true",
+           "cartridge_loaded=true", "cartridge_ready_seconds=0.5")
+        self.assertEqual(self.fake.writes()[-1][2], {"refusals": {"temp_rate_while_running": False},
+                                                     "fill_cannula_stream_lost": True, "cartridge_loaded": True,
+                                                     "cartridge_ready_seconds": 0.5})
 
     def test_log_and_transport(self):
         rc, out, _ = th("faketandem", "log", "--last", "5")

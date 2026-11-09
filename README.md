@@ -245,7 +245,7 @@ Mode, and the phone unlocked while installing. Install only — driving the phon
 
 ## CLI overview (`./trio-test-harness --help`; `th` = short alias in `bin/`)
 `doctor` · `build` · `install` · `launch` · `sim {list,runtimes,install-runtime,boot,shutdown,erase,container,defaults,openurl}` ·
-`device {list,vnc-check,serve-ipa,wake,ssh,diag,vnc-restart,kill,apps}` · `faketandem {start,stop,seed,status,pairing,history,scenario,api,fault,clock,set,suspend,resume,bolus,tempbasal,log,transport}` · `faceid {enroll,match,nomatch}` · `daemon {start,stop,status,restart}` · `wda {build,start,stop,status}` · `watch {pair,status,agent}` · `shot` · `tap` · `swipe` · `drag` · `scroll` · `type` · `key [--count N]` · `home` · `crown` · `tap-text` · `find` ·
+`device {list,vnc-check,serve-ipa,wake,ssh,diag,vnc-restart,kill,apps}` · `faketandem {start,stop,seed,status,pairing,history,scenario,api,fault,clock,set,suspend,resume,alert,alarm,malfunction,reminder,cgmalert,cartridge,bolus,tempbasal,log,transport}` · `faceid {enroll,match,nomatch}` · `daemon {start,stop,status,restart}` · `wda {build,start,stop,status}` · `watch {pair,status,agent}` · `shot` · `tap` · `swipe` · `drag` · `scroll` · `type` · `key [--count N]` · `home` · `crown` · `tap-text` · `find` ·
 `tree` · `wait-text` · `ocr` · `logs [trio|tandem|watch|all] [--count]` · `db {stores,tables,schema,query,exec}` · `oslog` · `crashes` · `files {ls,cat}` · `perf` · `run {new,current,use,note,finish,list,steps}` · `report {html,pr,markdown}` ·
 `flow {onboarding-walk,add-cgm-sim,add-pump-sim,back-home,dismiss,at-home,tandem-feature-flags,tandem-feature-flag}` · `test smoke`
 
@@ -258,7 +258,8 @@ stay under the 280 s cap a job's agent has per call. The CI agent cannot pipe, s
 The typed pump wrappers over faketandem's HTTP API (`ci/agent-faketandem.md` has the recipes):
 `faketandem fault add KIND [--message M --delay-ms N --every --error-code N --index N]|clear|list`, `clock
 [--offset-seconds|--advance-seconds/--advance-ticks|--set ISO|--zone TZ|--shift-pump-time|--pump-local-time|--real]`,
-`set KEY=VALUE...`, `suspend [--reason occlusion|alarm] [--keep-temp]`, `resume`, `bolus start|stall|resume|abort|complete`,
+`set KEY=VALUE...` (values are JSON, nested too: `refusals='{"temp_rate_while_running":false}'`), `suspend [--reason occlusion|alarm] [--keep-temp]`, `resume`,
+`alert|alarm|malfunction [--fault-id N]|reminder|cgmalert raise|clear NAME_OR_BIT [--message M]`, `cartridge ready|insert --units N`, `bolus start|stall|resume|abort|complete`,
 `tempbasal start|stop`, `log [--last N --message RE --count]`, `transport [--mtu N]`. `faketandem api` also turns
 `fill_tubing` into `filltubing`, matches `/api/settings/<Message>` names case-insensitively, and appends faketandem's
 valid modes, routes and fault kinds to its bare errors.
