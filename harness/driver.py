@@ -24,12 +24,11 @@ def scroll_distance(amount: float, extent: int) -> int:
                      f"({MIN_SCROLL_PIXELS} or more)")
 
 
-def check_on_screen(size: tuple[int, int], *points: tuple[float, float]) -> None:
-    """ValueError for a point off the screen, which a gesture must not reach."""
+def clamp_to_screen(size: tuple[int, int], x: float, y: float) -> tuple[int, int]:
+    """A swipe's point moved onto the screen: WebDriverAgent hung for minutes on one dragged a thousand screens past
+    its top. Taps are left alone, since a row just below a sheet's edge takes one (WebDriverAgent scrolls it in)."""
     w, h = size
-    for x, y in points:
-        if not (0 <= x < w and 0 <= y < h):
-            raise ValueError(f"{x:g},{y:g} is off the screen, which is {w}x{h} pixels")
+    return int(min(max(x, 0), w - 1)), int(min(max(y, 0), h - 1))
 
 
 @dataclass

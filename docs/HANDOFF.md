@@ -229,7 +229,9 @@ until merged: pass `--faketandem-ref` until then).
   taking the amount for pixels; it is a fraction of the screen, so WebDriverAgent dragged hundreds of screens past the
   top. That drag ran for minutes, every request after it queued behind it, and /status still answered, so the recovery
   above never restarted the runner. Now `--amount` above 1 is pixels (from 50), a scroll stays on the screen (several
-  swipes past 70% of it), and the simulator refuses a tap or swipe off the screen. A request gets 30 s
+  swipes past 70% of it), and the simulator moves a swipe's points onto the screen. It first refused a tap or swipe
+  off the screen, which failed 42534932220's smoke stage: `tap_text` taps a sheet's row whose centre is just below
+  the screen, which WebDriverAgent scrolls in, so taps are left alone. A request gets 30 s
   (`wda.REQUEST_TIMEOUT`), and one that times out restarts the runner (`recover(error)`); a timed-out tap or swipe is
   reported and not repeated, since it may have reached the app. In 42516779754 the agent also stopped the daemon and
   started one inside the sandbox, which lost faketandem's port and screenshots for the rest of the run: in a job's
@@ -246,10 +248,12 @@ until merged: pass `--faketandem-ref` until then).
 ## Still unverified
 - `th tap --count N` / `Driver.multi_tap` and `th flow tandem-feature-flag[s]` (`harness/flows/tandemkit.py`, added
   2026-11-01 after CI run 41275701186 could not reach TandemKit's Feature Flags list: three `th tap` calls landed ~1.5 s
-  apart, too slow for `onTapGesture(count: 3)`). Checked only against fake drivers, not yet on a Mac: WDA's `/actions`
-  triple tap, the image point (its accessibility node, else 60 pt above "No feature flags changed."), the Toggle's
-  switch point and its state (tree value; on the phone, a tinted switch in the screenshot), and Loop's
-  `open_pump_settings`.
+  apart, too slow for `onTapGesture(count: 3)`). Run 42538914279 (TandemKit#644) showed WDA's `/actions` triple tap
+  works on the simulator (`th tap 550 1411 --count 3` revealed the list) but the flow's did not: it took the first
+  `tandem_mobi` image WDA found, the settings screen's in the navigation stack below, and tapped empty space. The image
+  point is now 60 pt above "No feature flags changed." unless an image node sits there; not yet re-run. Still
+  unverified: the Toggle's switch point and its state (tree value; on the phone, a tinted switch in the screenshot),
+  and Loop's `open_pump_settings`.
 - `th report pr` against a real PR (gh --attach inline uploads; ask before posting).
 - `th webui` with a real job: only tested with the stages stubbed (auth, validation, stage order, sandbox settings per
   target, comment gating). Unverified: the sandboxed agent on rooted-vnc (daemon socket `daemon-rooted-vnc.sock`, `device

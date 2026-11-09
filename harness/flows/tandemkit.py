@@ -172,11 +172,10 @@ def _scale(drv: Driver) -> float | None:
 
 
 def _pump_image_point(drv: Driver) -> tuple[int, int]:
-    """The pump image above the empty state's caption: its accessibility node, or 60 pt above the caption (the image
-    is 96 pt high, 12 pt above it)."""
-    img = [n for n in drv.find(PUMP_IMAGE) + drv.find(PUMP_IMAGE.replace("_", " ")) if n.w > 0 and n.h > 0]
-    if img:
-        return img[0].center
+    """The pump image above the empty state's caption: 60 pt above the caption (the image is 96 pt high, 12 pt above
+    it), or the caption's line height three times over where the scale is unknown. An image node is taken only when it
+    sits there: TandemKit's settings screen, still in the navigation stack below, has a `tandem_mobi` image of its own
+    near the top, which WebDriverAgent's search returns first (run 42538914279 triple-tapped empty space there)."""
     caption = [n for n in drv.find(EMPTY_STATE) if n.w > 0 and n.h > 0]
     if caption:
         top, cx, line = caption[0].y, caption[0].center[0], caption[0].h
@@ -187,7 +186,10 @@ def _pump_image_point(drv: Driver) -> tuple[int, int]:
             raise LookupError(f"neither the feature flags nor {EMPTY_STATE!r} is on screen")
         top, cx, line = hits[0].y, hits[0].center[0], hits[0].h
     scale = _scale(drv)
-    return cx, max(0, top - (int(60 * scale) if scale else 3 * line))
+    above = int(60 * scale) if scale else 3 * line
+    img = [n for n in drv.find(PUMP_IMAGE) + drv.find(PUMP_IMAGE.replace("_", " ")) if n.w > 0 and n.h > 0
+           and abs(n.center[1] - (top - above)) <= above // 2 and abs(n.center[0] - cx) <= above]
+    return img[0].center if img else (cx, max(0, top - above))
 
 
 def reveal_feature_flags(drv: Driver, run: Run | None = None, *, attempts: int = 3) -> None:
