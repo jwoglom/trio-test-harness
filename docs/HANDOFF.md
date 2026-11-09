@@ -271,7 +271,8 @@ until merged: pass `--faketandem-ref` until then).
 - A new PR comment hides the harness's earlier ones on that PR as outdated (`report.hide_earlier_comments`), only once
   the API shows the new one posted (its URL, its author and `COMMENT_MARKER`, read up to three times): GitHub's own
   Hide (`minimizeComment`, classifier OUTDATED), their text untouched, for comments by the new one's author that carry
-  the marker (in every comment posted since) or the "Posted by trio-test-harness" footer. A failure is only logged.
+  the marker (in every comment posted since, which no longer ends with a visible footer) or the "Posted by
+  trio-test-harness" footer the comments before it had. A failure is only logged.
   Checked against a fake gh only; whether the App's token may minimize comments in every installation is not.
 - comment.md attached to every CI run (2026-11-09), "post comment" or not: the PR comment step writes it whether the
   comment is posted, refused or skipped (no PR, the App not installed), and the Comment markdown step when no comment

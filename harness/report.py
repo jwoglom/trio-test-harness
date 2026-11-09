@@ -330,14 +330,12 @@ def render_markdown(run: Run, *, columns: int = 3, max_shots: int | None = None,
             lines.append("| " + " | ".join(row) + " |")
         total = len([st for st in shown_steps(run) if st.get("screenshot")])
         where = f" in the [full report]({artifact_url})" if artifact_url else " in the run's report"
-        lines += ["", f"<sub>{len(cells)} of {total} screenshots chosen by a separate review pass; all steps are{where}.</sub>",
-                  "", "<sub>Posted by trio-test-harness (simulator CGM/pump, no real patient data).</sub>"]
+        lines += ["", f"<sub>{len(cells)} of {total} screenshots chosen by a separate review pass; all steps are{where}.</sub>"]
         return "\n".join(lines), files
     # No review for this run (no agent, or the review failed): the comment carries only the run's result and
     # summary. Screenshots in a PR comment are only ever the review's picks; everything is in the full report.
     where = f"the [full report]({artifact_url})" if artifact_url else "the run's report"
     lines += ["", f"<sub>No screenshot review for this run; all steps and screenshots are in {where}.</sub>"]
-    lines += ["", "<sub>Posted by trio-test-harness (simulator CGM/pump, no real patient data).</sub>"]
     return "\n".join(lines), files
 
 
@@ -422,8 +420,8 @@ def write_comment_file(run: Run, md: str, files: list[Path], urls: dict[Path, st
     return path
 
 
-# In every comment the harness posts, so a later one can find it (`hide_earlier_comments`). Comments from before
-# the marker are found by their footer.
+# In every comment the harness posts, so a later one can find it (`hide_earlier_comments`). Comments from before the
+# marker are found by the visible footer they ended with, which comments no longer carry.
 COMMENT_MARKER = "<!-- trio-test-harness comment -->"
 COMMENT_FOOTER = "Posted by trio-test-harness"
 _COMMENTS_QUERY = """query($owner: String!, $name: String!, $number: Int!, $after: String) {
