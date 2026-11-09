@@ -19,7 +19,7 @@ import subprocess
 from pathlib import Path
 
 from .config import CONFIG, REPO_ROOT
-from .util import HarnessError, log, now_slug, read_json, run, write_json
+from .util import HarnessError, log, now_slug, read_json, run, tmp_path, write_json
 from .util import run as run_cmd  # post_to_pr's `run` parameter shadows run()
 
 CURRENT = REPO_ROOT / "runs" / ".current"
@@ -393,35 +393,66 @@ def _without_images(md: str, artifact_url: str | None) -> str:
     return text + f"\n\n_Screenshots could not be attached with this token; they are in {where}._\n"
 
 
+def comment_markdown(run: Run, *, columns: int = 3, max_shots: int | None = None, artifact_url: str | None = None,
+                     body: str | None = None) -> tuple[str, list[Path], dict[Path, str]]:
+    """The comment's markdown (images at their ./screenshots/ paths), its screenshots, and those uploaded as GitHub
+    attachments where TH_UPLOAD_TOKEN allows ({file: URL}; empty when there is no token or the upload failed)."""
+    md, files = (authored_markdown(run, body) if body is not None
+                 else render_markdown(run, columns=columns, max_shots=max_shots, artifact_url=artifact_url))
+    urls: dict[Path, str] = {}
+    token, repo = CONFIG.get("TH_UPLOAD_TOKEN"), CONFIG.get("TH_UPLOAD_REPO")
+    if token and repo and files:
+        try:
+            urls = upload_assets(files, token, repo)
+        except HarnessError as e:
+            log(f"screenshot upload failed ({e})")
+    return md, files, urls
+
+
+def write_comment_file(run: Run, md: str, files: list[Path], urls: dict[Path, str],
+                       artifact_url: str | None = None) -> Path:
+    """run/comment.md, attached to every CI run as its own file, whether a comment was asked for, posted, failed or
+    skipped: the comment's markdown with each screenshot at its uploaded URL, or at its path in the run's artifact."""
+    text = _with_uploaded_images(md, run, urls)
+    if any(f not in urls for f in files):
+        where = f"the run's artifact ({artifact_url})" if artifact_url else "the run's artifact"
+        text += f"\n\n_The screenshots could not be uploaded; their `./screenshots/` paths are in {where}._\n"
+    path = run.path / "comment.md"
+    path.write_text(text)
+    return path
+
+
 def post_to_pr(run: Run, pr: str, *, mode: str = "comment", repo: str | None = None,
                columns: int = 3, max_shots: int | None = None, artifact_url: str | None = None,
                body: str | None = None) -> str:
     """Comment on (or append to the description of) a PR with the run's screenshots attached inline.
 
-    `body` replaces the generated summary with a comment written for the run.
+    `body` replaces the generated summary with a comment written for the run. run/comment.md is written before
+    anything is posted (`write_comment_file`).
     """
     from .build import resolve_pr
+    md, files, urls = comment_markdown(run, columns=columns, max_shots=max_shots, artifact_url=artifact_url,
+                                       body=body)
+    write_comment_file(run, md, files, urls, artifact_url)
     slug, num = resolve_pr(pr) if not repo else (repo, int(pr))
-    md, files = (authored_markdown(run, body) if body is not None
-                 else render_markdown(run, columns=columns, max_shots=max_shots, artifact_url=artifact_url))
-    body = run.path / "pr-comment.md"
+    body = tmp_path("comment-posted.md")
     body.write_text(md)
     attach = []
     for f in files:
         rel = f.relative_to(run.path)
         attach += ["--attach", f"./{rel}"]
     if mode == "comment":
-        upload_token, upload_repo = CONFIG.get("TH_UPLOAD_TOKEN"), CONFIG.get("TH_UPLOAD_REPO")
-        if upload_token and upload_repo and files:
-            # CI: the images go up with a user token scoped to upload_repo; the comment itself is posted
-            # with whatever GH_TOKEN is (the App), so the App is the visible author.
-            try:
-                body.write_text(_with_uploaded_images(md, run, upload_assets(files, upload_token, upload_repo)))
-                attach = []
-            except HarnessError as e:
-                log(f"screenshot upload failed ({e}); posting without inline screenshots")
+        if CONFIG.get("TH_UPLOAD_TOKEN") and CONFIG.get("TH_UPLOAD_REPO") and files:
+            # CI: the images went up with a user token scoped to the upload repo, and the comment itself is posted
+            # with whatever GH_TOKEN is (the App), so the App is the visible author. Only readers of that repo can
+            # see them, so a PR elsewhere gets captions only (TH_COMMENT_INLINE_IMAGES=0).
+            if urls and CONFIG.bool("TH_COMMENT_INLINE_IMAGES"):
+                body.write_text(_with_uploaded_images(md, run, urls))
+            else:
+                log("posting without inline screenshots" + ("" if urls else " (their upload failed)"))
                 body.write_text(_without_images(md, artifact_url))
-                attach, files = [], []
+                files = []
+            attach = []
         try:
             out = run_cmd(["gh", "pr", "comment", str(num), "--repo", slug, "--body-file", str(body), *attach],
                           cwd=run.path, timeout=900).stdout

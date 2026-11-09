@@ -98,9 +98,16 @@ def write_pr_notes(run, info: dict) -> Path:
     lines.append(f"App: {app.name} ({app.default_repo})")
     if info.get("pr_url"):
         lines.append(f"PR: {info['pr_url']}")
+    if info.get("pr") and info.get("branch"):
+        lines.append(f"PR branch: {info['branch']}" + (f", into {info['base_branch']}" if info.get("base_branch") else ""))
+    elif info.get("branch"):
+        lines.append(f"Branch: {info['branch']}")
     if info.get("submodule_pr"):
         t = info["submodule_pr"]
         lines.append(f"Submodule PR: {t['slug']}#{t['number']} on submodule `{t['submodule']}` ({app.default_repo} @ {t['trio_branch']})")
+    for ov in info.get("submodule_overrides") or []:
+        built = (info.get("submodules") or {}).get(ov["name"])
+        lines.append(f"Submodule `{ov['name']}`: {ov.get('pr') or ov['ref']}" + (f", built at {built}" if built else ""))
     for c in info.get("cherry_picks") or []:
         lines.append(f"Cherry-picked onto {app.name}: {c['what']}: {c['applied']} commit(s)"
                      + (f", {c['dropped']} already there" if c["dropped"] else ""))
@@ -115,6 +122,11 @@ def write_pr_notes(run, info: dict) -> Path:
     lines.append("")
     if info.get("pr_body"):
         lines += ["## PR description", "", info["pr_body"].strip(), ""]
+    for sp in info.get("submodule_prs") or []:
+        lines += [f"## Submodule PR {sp['pr']}: {sp.get('title') or ''}", "", sp.get("url") or "",
+                  f"Submodule `{sp['submodule']}`" + (f", PR branch {sp['branch']}" if sp.get("branch") else "")
+                  + (f", into {sp['base_branch']}" if sp.get("base_branch") else ""), "",
+                  (sp.get("body") or "(no description)").strip(), ""]
     for c in (info.get("cherry_picks") or []) + (info.get("submodule_cherry_picks") or []):
         if pr := c.get("pr"):
             lines += [f"## Cherry-picked PR {pr['pr']}: {pr.get('title') or ''}", "", f"{pr.get('url') or ''}", "",
@@ -245,6 +257,17 @@ def setup_problem(run, drv, problems: list[dict], what: str, e: BaseException) -
         _app().flows.step(run, drv, "setup-incomplete", f"{what} did not finish: {type(e).__name__}: {e}")
     except Exception as shot:  # noqa: BLE001 - the screenshot is a courtesy; the problem is already recorded
         log(f"no screenshot of the setup problem: {shot}")
+
+
+def pr_context(run_dir) -> str:
+    """pr.md for the agent's prompt: what is under test (title, links, branches, the commits built, every PR's
+    description), so the agent starts with it instead of reading the file first. Empty without one."""
+    try:
+        text = (Path(run_dir) / "pr.md").read_text()
+    except OSError:
+        return ""
+    text = text.split("\n## Test plan", 1)[0].strip()
+    return f"\n## The change under test (also in `{run_dir}/pr.md`)\n\n{text}\n" if text else ""
 
 
 def setup_notes(run_dir) -> str:

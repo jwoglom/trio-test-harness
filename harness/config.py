@@ -36,6 +36,7 @@ DEFAULTS = {
     "TH_GIT_TOKEN": "",               # CI only (env, never a file): HTTPS token for GitHub; overrides TH_GIT_PROTOCOL
     "TH_UPLOAD_TOKEN": "",            # CI only (env): user token that uploads PR-comment screenshots
     "TH_UPLOAD_REPO": "",             # owner/repo those uploads belong to (who can see them)
+    "TH_COMMENT_INLINE_IMAGES": "1",  # 0: the posted comment carries captions only; comment.md still links the uploads
     "TH_DEVELOPER_TEAM": "",          # Apple Team ID for device builds; blank = simulator-only
     "TH_SIM_TEAM_PLACEHOLDER": "TRIOSIMTST",  # fake team id used to form a valid bundle id on the simulator
     "TH_XCODE_APP": "",               # e.g. /Applications/Xcode-26.3.app; blank = auto-detect newest

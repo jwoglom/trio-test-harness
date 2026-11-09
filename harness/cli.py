@@ -1055,6 +1055,12 @@ def cmd_report(args):
         body = Path(args.body).read_text() if args.body else None
         print(post_to_pr(r, args.pr, mode=args.mode, columns=args.columns, max_shots=args.max_shots,
                          artifact_url=args.artifact_url, body=body))
+    elif args.sub == "comment-md":
+        from .report import comment_markdown, write_comment_file
+        body = Path(args.body).read_text() if args.body else None
+        md, files, urls = comment_markdown(r, columns=args.columns, max_shots=args.max_shots,
+                                           artifact_url=args.artifact_url, body=body)
+        print(write_comment_file(r, md, files, urls, args.artifact_url))
     elif args.sub == "markdown":
         from .report import render_markdown
         md, files = render_markdown(r, columns=args.columns, max_shots=args.max_shots, artifact_url=args.artifact_url)
@@ -1460,6 +1466,10 @@ def build_parser() -> argparse.ArgumentParser:
     rpr.add_argument("--artifact-url", help="claude.ai artifact link to include in the comment")
     rpr.add_argument("--body", metavar="FILE", help="post this markdown instead of the generated summary; the run's "
                      "screenshots it shows as ![caption](./screenshots/NNN.png) are attached")
+    rcm = rps.add_parser("comment-md", help="write the run's comment.md without posting it, its screenshots uploaded "
+                                             "where TH_UPLOAD_TOKEN allows (CI attaches it to the run)")
+    rcm.add_argument("--run"); rcm.add_argument("--columns", type=int, default=3); rcm.add_argument("--max-shots", type=int)
+    rcm.add_argument("--artifact-url"); rcm.add_argument("--body", metavar="FILE", help="this markdown instead of the generated summary")
     rm = rps.add_parser("markdown", help="preview the PR comment body"); rm.add_argument("--run"); rm.add_argument("--columns", type=int, default=3)
     rm.add_argument("--max-shots", type=int); rm.add_argument("--artifact-url")
     rp.set_defaults(fn=cmd_report)

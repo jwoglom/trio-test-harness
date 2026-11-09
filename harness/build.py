@@ -285,6 +285,14 @@ def _fetch_trio_branch(src: Path, br: str, ref: str, app: "str | apps.App | None
     return upstream_repo
 
 
+def pr_metadata(slug: str, number: int) -> dict:
+    """A PR's title, url, body and branches from `gh pr view`; `head` is owner:branch."""
+    meta = json.loads(run(["gh", "pr", "view", str(number), "--repo", slug, "--json",
+                           "title,headRefName,headRepositoryOwner,baseRefName,url,body"], quiet=True).stdout)
+    meta["head"] = f"{(meta.get('headRepositoryOwner') or {}).get('login')}:{meta.get('headRefName')}"
+    return meta
+
+
 def resolve_pr(pr: str, app: "str | apps.App | None" = None) -> tuple[str, int]:
     """'123' | 'owner/repo#123' | GitHub PR URL -> (owner/repo, number). A bare number is a PR on the app's repo."""
     m = re.match(r"https://github\.com/([^/]+/[^/]+)/pull/(\d+)", pr)
@@ -770,10 +778,10 @@ def prepare_source(*, branch: str | None = None, pr: str | None = None, repo: st
             target = resolve_pr_target(pr, src, trio_branch, a)
             info["pr"] = f"{target['slug']}#{target['number']}"
             try:
-                meta = json.loads(run(["gh", "pr", "view", str(target["number"]), "--repo", target["slug"], "--json",
-                                       "title,headRefName,headRepositoryOwner,url,body"], quiet=True).stdout)
+                meta = pr_metadata(target["slug"], target["number"])
                 info["pr_title"] = meta.get("title"); info["pr_url"] = meta.get("url"); info["pr_body"] = meta.get("body")
-                info["branch"] = f"{meta.get('headRepositoryOwner', {}).get('login')}:{meta.get('headRefName')}"
+                info["branch"] = meta["head"]
+                info["base_branch"] = meta.get("baseRefName")
             except HarnessError:
                 pass
             if target["kind"] == "trio":
@@ -817,6 +825,16 @@ def prepare_source(*, branch: str | None = None, pr: str | None = None, repo: st
         _git(["checkout", "--force", "--detach", "FETCH_HEAD"], sub)
         _git(["submodule", "update", "--init", "--recursive"], sub, check=False, timeout=1800)
         info.setdefault("submodule_overrides", []).append(asdict(ov))
+        if ov.pr and ov.pr != info.get("pr"):
+            # another submodule PR in the same run: the agent needs its description too
+            slug, num = ov.pr.split("#")
+            try:
+                meta = pr_metadata(slug, int(num))
+                info.setdefault("submodule_prs", []).append(
+                    {"pr": ov.pr, "submodule": ov.name, "title": meta.get("title"), "url": meta.get("url"),
+                     "body": meta.get("body"), "branch": meta["head"], "base_branch": meta.get("baseRefName")})
+            except HarnessError:
+                info.setdefault("submodule_prs", []).append({"pr": ov.pr, "submodule": ov.name})
     if submodule_cherry_picks:
         info["submodule_cherry_picks"] = submodule_cherry_pick(src, submodule_cherry_picks)
     n = stabilize_mtimes(src)

@@ -424,12 +424,14 @@ def run_job(job: Job) -> None:
         if inp.get("app") == "loop":
             prompt_file = prompt_file.replace(".md", "-loop.md")
         smoke_note = f", with the {' and '.join(sims)} configured" if sims else ""
+        from . import pipeline
+        # what is under test (titles, links, branches, the commits built, every PR's description) before the focus
+        extra = pipeline.pr_context(rd) + extra
         if inp.get("pump") == "faketandem":
             from . import faketandem
             smoke_note += (", and a Tandem pump on faketandem " + ("not set up yet: you walk its setup"
                            if inp.get("pump_setup") == "walk" else "already paired") + " (see below)")
             extra += faketandem.agent_notes(rd)
-        from . import pipeline
         extra += pipeline.setup_notes(rd)
         # whether trio-test-e2e included the watch (asked for, or decided by --devices auto)
         try:

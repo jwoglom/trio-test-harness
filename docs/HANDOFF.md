@@ -246,6 +246,10 @@ until merged: pass `--faketandem-ref` until then).
   tells the agent what to finish (`pipeline.setup_notes`, in the workflow's and the web UI's prompt). report.html
   renders best effort and the agent's notes are optional, so neither keeps the agent from running either. Checked
   with stubbed stages only.
+- The agent's prompt carries the change under test (`pipeline.pr_context`, first in its notes, in the workflow and the
+  web UI): pr.md's title, links, the PR's branch and the branch it goes into, each submodule's ref and the commit
+  built, and every PR's description, a second submodule PR's included (`build.pr_metadata`). Agents used to start by
+  reading pr.md, which named neither branch.
 - TandemKit's feature flags: `ci/agent-tandemkit-flags.md` goes into every faketandem run's agent notes, with the
   flags read from the build's TandemKit (`flows/tandemkit.py` `known_flags`), so a flag a PR adds is listed and
   `flow tandem-feature-flag` takes it. 42516779754's agent never found Manual Temp Basal Support.
@@ -264,6 +268,12 @@ until merged: pass `--faketandem-ref` until then).
   unverified: the Toggle's switch point and its state (tree value; on the phone, a tinted switch in the screenshot),
   and Loop's `open_pump_settings`.
 - `th report pr` against a real PR (gh --attach inline uploads; ask before posting).
+- comment.md attached to every CI run (2026-11-09), "post comment" or not: the PR comment step writes it whether the
+  comment is posted, refused or skipped (no PR, the App not installed), and the Comment markdown step when no comment
+  was asked for, each screenshot at its user-attachments URL (`report.comment_markdown`, `write_comment_file`,
+  `report comment-md`); it is uploaded unzipped. The upload token now goes to every run; only jwoglom's PRs show the
+  images inline (`TH_COMMENT_INLINE_IMAGES`), elsewhere the comment keeps captions and the uploads are linked from
+  comment.md alone. Checked against a fake gh and upload only.
 - `th webui` with a real job: only tested with the stages stubbed (auth, validation, stage order, sandbox settings per
   target, comment gating). Unverified: the sandboxed agent on rooted-vnc (daemon socket `daemon-rooted-vnc.sock`, `device
   lock/unlock` through the daemon from inside the sandbox) and a real `report pr` from the button.

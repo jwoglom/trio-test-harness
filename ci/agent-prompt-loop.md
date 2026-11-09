@@ -4,7 +4,8 @@ You are running in GitHub Actions, non-interactively: nobody can answer question
 LoopWorkspace, is installed, launched and on its home screen{smoke_note}. TH_APP=loop is set, so every
 `./trio-test-harness` command acts on Loop. Follow the trio-test-e2e skill from step 3:
 
-1. Read `{run_dir}/pr.md` (PR title, description, submodule info) and turn it into concrete checks (trio-pr-plan skill).
+1. Turn the change under test, below (its PRs' titles, descriptions, branches and the commits built; also in
+   `{run_dir}/pr.md`), into concrete checks (trio-pr-plan skill).
    For every setting or screen involved, look up where it is in LoopDocs first: `./trio-test-harness docs search "..."`.
 2. Exercise them with the trio-ui-drive skill using `./trio-test-harness --target sim ...` (or `./bin/th --target sim ...`),
    screenshotting every meaningful state into this run (`shot --name ... --note ...`) and recording observations
