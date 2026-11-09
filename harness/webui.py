@@ -442,11 +442,16 @@ def run_job(job: Job) -> None:
         from . import daemon as D
         # The daemon holds the VNC/WDA connection outside the sandbox. Another session may already run one:
         # use it, and leave it running afterwards.
+        # One failed start must not keep the agent from running: each daemon gets three.
         started = False
-        if not D.is_running(target):
+        for _ in range(3):
+            if D.is_running(target) or started:
+                break
             started = job.sh(["./trio-test-harness", "--target", target, "daemon", "start"], env)[0] == 0
         watch_started = False
-        if watch and not D.is_running("watch"):
+        for _ in range(3 if watch else 0):
+            if D.is_running("watch") or watch_started:
+                break
             watch_started = job.sh(["./trio-test-harness", "--target", "watch", "daemon", "start"], env)[0] == 0
         # A known session id, so "Continue conversation" can resume it (harness/handoff.py).
         sid = str(uuid.uuid4())
@@ -469,13 +474,7 @@ def run_job(job: Job) -> None:
             if missing:
                 job.note(f"the {' and '.join(missing)} daemon did not start; the agent did not run (see the log)")
             else:
-                arc, _ = job.sh(["bash", "-c",
-                             'set -o pipefail; claude -p "$PROMPT" --model "$MODEL" --output-format stream-json --verbose '
-                             '--session-id "$SID" '
-                             '--permission-mode dontAsk --permission-prompts none --settings "$SETTINGS" '
-                             '--append-system-prompt "$LIMITS" '
-                             '--allowedTools "Bash(./trio-test-harness:*)" "Bash(./bin/th:*)" "Bash(sleep:*)" Read Glob Grep '
-                             '| "$PY" ci/agent-stream.py "$OUT"'], agent_env, timeout=inp["agent_minutes"] * 60)
+                arc = _run_agent(job, agent_env, inp["agent_minutes"] * 60)
         finally:
             # crash reports from the agent's session (the e2e step saved those before it)
             job.sh(["./trio-test-harness", "--target", target, "crashes", "--save", "--run", str(rd)], env)
@@ -524,6 +523,39 @@ def run_job(job: Job) -> None:
     job.update(status="failed" if agent_failed else (meta or {}).get("status") or ("passed" if rc == 0 else "failed"))
     if inp["post_comment"] and rd and job.data.get("pr"):
         post_comment(job, None)
+
+
+AGENT_CMD = ('set -o pipefail; claude -p "$MESSAGE" --model "$MODEL" --output-format stream-json --verbose '
+             '$SESSION_FLAG "$SID" '
+             '--permission-mode dontAsk --permission-prompts none --settings "$SETTINGS" '
+             '--append-system-prompt "$LIMITS" '
+             '--allowedTools "Bash(./trio-test-harness:*)" "Bash(./bin/th:*)" "Bash(sleep:*)" Read Glob Grep '
+             '| "$PY" ci/agent-stream.py "$OUT"')
+RESUME_MESSAGE = ("Your session stopped with an error before you finished, and the harness has resumed it. Look at the "
+                  "screen first, then carry on testing from where you were and finish as instructed, with your final "
+                  "message.")
+
+
+def _run_agent(job, env: dict, limit: float) -> int:
+    """The agent's session, resumed where it stopped when it ends with an error (an API error, a crash), up to twice
+    within its time limit; one that never started is started again. Returns its last exit code (-1: time or cancel)."""
+    deadline = time.time() + limit
+    rc = job.sh(["bash", "-c", AGENT_CMD], {**env, "MESSAGE": env["PROMPT"], "SESSION_FLAG": "--session-id"},
+                timeout=limit)[0]
+    for attempt in (2, 3):
+        left = deadline - time.time()
+        if rc in (0, -1) or left < 60:
+            break
+        job.note(f"the agent's session ended with an error (exit {rc}); resuming it (attempt {attempt} of 3)")
+        started = time.time()
+        rc = job.sh(["bash", "-c", AGENT_CMD], {**env, "MESSAGE": RESUME_MESSAGE, "SESSION_FLAG": "--resume"},
+                    timeout=left)[0]
+        if rc not in (0, -1) and time.time() - started < 30 and deadline - time.time() > 60:
+            sid = str(uuid.uuid4())
+            job.update(agent_session=sid)
+            rc = job.sh(["bash", "-c", AGENT_CMD], {**env, "SID": sid, "MESSAGE": env["PROMPT"],
+                                                     "SESSION_FLAG": "--session-id"}, timeout=deadline - time.time())[0]
+    return rc
 
 
 def _render(job: Job, rd: Path) -> None:

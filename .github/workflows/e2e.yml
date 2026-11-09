@@ -171,15 +171,28 @@ jobs:
           private-key: ${{ secrets.TRIO_E2E_APP_KEY }}
           owner: jwoglom
 
+      # One failed call (a network blip here) must not end the run, so a step a run needs tries again.
       - name: Python environment
         run: |
-          set -euo pipefail
-          uv venv --quiet .venv
-          uv pip install --quiet --python .venv/bin/python -r requirements.txt
+          set -uo pipefail
+          for i in 1 2 3; do
+            uv venv --quiet --allow-existing .venv && uv pip install --quiet --python .venv/bin/python -r requirements.txt && exit 0
+            echo "::warning::setting up the Python environment failed (attempt $i of 3)"; sleep 10
+          done
+          exit 1
 
       # faketandem is built from source (TH_FAKETANDEM_REF) with Go.
       - name: Set up Go
+        id: go
         if: inputs.pump == 'faketandem'
+        continue-on-error: true
+        uses: actions/setup-go@v5
+        with:
+          go-version: stable
+          cache: false
+
+      - name: Set up Go (again)
+        if: inputs.pump == 'faketandem' && steps.go.outcome == 'failure'
         uses: actions/setup-go@v5
         with:
           go-version: stable
@@ -237,17 +250,22 @@ jobs:
           fi
           smoke_note=$([ "$IN_SMOKE" = true ] && echo ", with the $cgm and the $pump" || true)
           extra=$([ -n "$IN_AGENT_INSTRUCTIONS" ] && printf '\nFocus from the person who started this run:\n%s\n' "$IN_AGENT_INSTRUCTIONS" || true)
+          # Each note below is optional: one that fails is left out (with a warning), and the agent still runs.
           # the faketandem pump: what it is, its commands and how this run set it up (ci/agent-faketandem*.md)
-          extra="$extra$(RUN_DIR="$RUN_DIR" .venv/bin/python -c 'import os; from harness import faketandem; print(faketandem.agent_notes(os.environ["RUN_DIR"]))')"
+          extra="$extra$(RUN_DIR="$RUN_DIR" .venv/bin/python -c 'import os; from harness import faketandem; print(faketandem.agent_notes(os.environ["RUN_DIR"]))' || echo "::warning::the faketandem notes failed" >&2)"
           # what trio-test-e2e's setup left undone after the launch (harness/pipeline.py setup_notes)
-          extra="$extra$(RUN_DIR="$RUN_DIR" .venv/bin/python -c 'import os; from harness import pipeline; print(pipeline.setup_notes(os.environ["RUN_DIR"]))')"
+          extra="$extra$(RUN_DIR="$RUN_DIR" .venv/bin/python -c 'import os; from harness import pipeline; print(pipeline.setup_notes(os.environ["RUN_DIR"]))' || echo "::warning::the setup notes failed" >&2)"
           # whether trio-test-e2e included the watch (asked for, or decided by --devices auto)
-          watch=$(RUN_DIR="$RUN_DIR" .venv/bin/python -c 'import json, os, pathlib; print(str(json.loads((pathlib.Path(os.environ["RUN_DIR"]) / "run.json").read_text()).get("watch", False)).lower())')
+          watch=$(RUN_DIR="$RUN_DIR" .venv/bin/python -c 'import json, os, pathlib; print(str(json.loads((pathlib.Path(os.environ["RUN_DIR"]) / "run.json").read_text()).get("watch", False)).lower())' || echo false)
           if [ "$watch" = true ]; then extra="$extra"$'\n'"$(cat ci/agent-watch.md)"; fi
+          # replace, not format: a brace in a note cannot break the prompt
           prompt=$(RUN_DIR="$RUN_DIR" SMOKE="$smoke_note" EXTRA="$extra" PROMPT_FILE="$prompt_file" .venv/bin/python -c '
           import os, pathlib
           t = pathlib.Path(os.environ["PROMPT_FILE"]).read_text()
-          print(t.format(run_dir=os.environ["RUN_DIR"], smoke_note=os.environ["SMOKE"], extra=os.environ["EXTRA"]))')
+          for k, v in (("{run_dir}", "RUN_DIR"), ("{smoke_note}", "SMOKE"), ("{extra}", "EXTRA")):
+              t = t.replace(k, os.environ[v])
+          print(t.replace("{{", "{").replace("}}", "}"))')
+          retry() { local i; for i in 1 2 3; do "$@" && return 0; echo "::warning::$* failed (attempt $i of 3)"; sleep 10; done; return 1; }
           # stream-json + ci/agent-stream.py: live progress in this log (model, each tool call, notes),
           # final answer into agent-summary.md for the job summary.
           # Locked down (ci/claude-sandbox.py, ci/agent-limits.md): Bash may only run the harness and sleep,
@@ -256,28 +274,46 @@ jobs:
           # and the harness daemons' Unix sockets (in /private/tmp: a socket path under this runner's checkout is over
           # macOS's 104 bytes), started here outside the sandbox because they hold the simulator and WebDriverAgent
           # connections. The venv's Python: the container lookup imports the harness.
-          .venv/bin/python ci/claude-sandbox.py "$RUNNER_TEMP/claude-settings.json" sim "$IN_APP"
-          ./trio-test-harness --target sim daemon start
+          retry .venv/bin/python ci/claude-sandbox.py "$RUNNER_TEMP/claude-settings.json" sim "$IN_APP"
+          retry ./trio-test-harness --target sim daemon start
           trap './trio-test-harness --target sim daemon stop >/dev/null 2>&1 || true' EXIT
           if [ "$watch" = true ]; then
-            ./trio-test-harness --target watch daemon start
+            retry ./trio-test-harness --target watch daemon start
             trap './trio-test-harness --target sim daemon stop >/dev/null 2>&1; ./trio-test-harness --target watch daemon stop >/dev/null 2>&1 || true' EXIT
           fi
           # read by "Fail the job if the agent step failed": a failure before this line is the harness's, not the agent's
           echo "setup=ok" >> "$GITHUB_OUTPUT"
           # TH_JOB_AGENT: nothing this agent runs may start another job (harness/jobguard.py, trio-test-ci)
-          TH_JOB_AGENT=1 claude -p "$prompt" --model "$CLAUDE_MODEL" --output-format stream-json --verbose \
-            --permission-mode dontAsk --permission-prompts none --settings "$RUNNER_TEMP/claude-settings.json" \
-            --append-system-prompt "$(cat ci/agent-limits.md)" \
-            --allowedTools "Bash(./trio-test-harness:*)" "Bash(./bin/th:*)" "Bash(sleep:*)" Read Glob Grep \
-            | python3 ci/agent-stream.py "$RUN_DIR/agent-summary.md"
+          agent() {
+            TH_JOB_AGENT=1 claude -p "$1" "${@:2}" --model "$CLAUDE_MODEL" --output-format stream-json --verbose \
+              --permission-mode dontAsk --permission-prompts none --settings "$RUNNER_TEMP/claude-settings.json" \
+              --append-system-prompt "$(cat ci/agent-limits.md)" \
+              --allowedTools "Bash(./trio-test-harness:*)" "Bash(./bin/th:*)" "Bash(sleep:*)" Read Glob Grep \
+              | python3 ci/agent-stream.py "$RUN_DIR/agent-summary.md"
+          }
+          # A session that ends with an error (an API error, a crash) is resumed where it stopped, up to twice, within
+          # the step's time; one that never started is started again.
+          sid=$(uuidgen | tr '[:upper:]' '[:lower:]')
+          rc=0; agent "$prompt" --session-id "$sid" || rc=$?
+          for attempt in 2 3; do
+            [ "$rc" -eq 0 ] && break
+            echo "::warning::the agent's session ended with an error (exit $rc); resuming it (attempt $attempt of 3)"
+            started=$SECONDS; rc=0
+            agent "Your session stopped with an error before you finished, and the harness has resumed it. Look at the screen first, then carry on testing from where you were and finish as instructed, with your final message." --resume "$sid" || rc=$?
+            if [ "$rc" -ne 0 ] && [ $((SECONDS - started)) -lt 30 ]; then
+              sid=$(uuidgen | tr '[:upper:]' '[:lower:]'); rc=0
+              agent "$prompt" --session-id "$sid" || rc=$?
+            fi
+          done
           # crash reports from the agent's session into the run (trio-test-e2e saved those before it)
           ./trio-test-harness --target sim crashes --save --run "$RUN_DIR" || true
-          ./trio-test-harness report html --run "$RUN_DIR" >/dev/null
+          ./trio-test-harness report html --run "$RUN_DIR" >/dev/null || echo "::warning::report html failed; the next steps render it again"
+          exit "$rc"
 
       # The pump's side of the run (its state, history log, request log and log) goes into the run directory.
       - name: Stop faketandem
         if: always() && inputs.pump == 'faketandem'
+        continue-on-error: true
         env:
           RUN_DIR: ${{ steps.e2e.outputs.run_dir }}
         run: |
@@ -326,6 +362,7 @@ jobs:
       - name: PR comment
         id: comment
         if: always() && inputs.post_comment && steps.e2e.outputs.run_dir != ''
+        continue-on-error: true
         env:
           GH_TOKEN: ${{ steps.comment_token.outputs.token || (steps.v.outputs.pr_owner == 'jwoglom' && steps.token.outputs.token) || '' }}
           RUN_DIR: ${{ steps.e2e.outputs.run_dir }}
@@ -357,6 +394,7 @@ jobs:
 
       - name: Job summary
         if: always()
+        continue-on-error: true
         env:
           RUN_DIR: ${{ steps.e2e.outputs.run_dir }}
           COMMENT_NOTE: ${{ steps.comment.outputs.note }}
@@ -368,6 +406,7 @@ jobs:
 
       - name: Upload run (screenshots, steps, report)
         if: always() && steps.e2e.outputs.run_dir != ''
+        continue-on-error: true
         uses: actions/upload-artifact@v7
         with:
           name: ${{ inputs.app || 'trio' }}-e2e-${{ github.run_id }}
@@ -377,6 +416,7 @@ jobs:
       # report.html embeds the screenshots, so as an unzipped artifact it opens without unpacking.
       - name: Upload report.html (unzipped)
         if: always() && steps.e2e.outputs.run_dir != ''
+        continue-on-error: true
         uses: actions/upload-artifact@v7
         with:
           path: ${{ steps.e2e.outputs.run_dir }}/report.html
@@ -386,6 +426,7 @@ jobs:
 
       - name: Upload build log (on failure)
         if: failure() && steps.e2e.outcome == 'failure'
+        continue-on-error: true
         uses: actions/upload-artifact@v7
         with:
           name: ${{ inputs.app || 'trio' }}-e2e-${{ github.run_id }}-build-log
@@ -449,11 +490,15 @@ jobs:
           github-token: ${{ github.token }}
           path: ${{ runner.temp }}/run
 
+      # One failed call (a network blip here) must not end the run, so a step a run needs tries again.
       - name: Python environment
         run: |
-          set -euo pipefail
-          uv venv --quiet .venv
-          uv pip install --quiet --python .venv/bin/python -r requirements.txt
+          set -uo pipefail
+          for i in 1 2 3; do
+            uv venv --quiet --allow-existing .venv && uv pip install --quiet --python .venv/bin/python -r requirements.txt && exit 0
+            echo "::warning::setting up the Python environment failed (attempt $i of 3)"; sleep 10
+          done
+          exit 1
 
       - name: PR comment
         env:
