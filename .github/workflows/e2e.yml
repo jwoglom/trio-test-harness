@@ -239,6 +239,8 @@ jobs:
           extra=$([ -n "$IN_AGENT_INSTRUCTIONS" ] && printf '\nFocus from the person who started this run:\n%s\n' "$IN_AGENT_INSTRUCTIONS" || true)
           # the faketandem pump: what it is, its commands and how this run set it up (ci/agent-faketandem*.md)
           extra="$extra$(RUN_DIR="$RUN_DIR" .venv/bin/python -c 'import os; from harness import faketandem; print(faketandem.agent_notes(os.environ["RUN_DIR"]))')"
+          # what trio-test-e2e's setup left undone after the launch (harness/pipeline.py setup_notes)
+          extra="$extra$(RUN_DIR="$RUN_DIR" .venv/bin/python -c 'import os; from harness import pipeline; print(pipeline.setup_notes(os.environ["RUN_DIR"]))')"
           # whether trio-test-e2e included the watch (asked for, or decided by --devices auto)
           watch=$(RUN_DIR="$RUN_DIR" .venv/bin/python -c 'import json, os, pathlib; print(str(json.loads((pathlib.Path(os.environ["RUN_DIR"]) / "run.json").read_text()).get("watch", False)).lower())')
           if [ "$watch" = true ]; then extra="$extra"$'\n'"$(cat ci/agent-watch.md)"; fi
