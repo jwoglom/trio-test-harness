@@ -485,6 +485,30 @@ def cmd_logs(args):
     return 0
 
 
+def cmd_loop(args):
+    """One Trio loop cycle, forced by hand and checked from Trio's log (harness/loopcheck.py)."""
+    from . import loopcheck as L
+    from .report import Run
+    app = _app()
+    if app.key != "trio":
+        raise HarnessError(f"`th loop` reads Trio's loop log; {app.name} logs its loop elsewhere")
+    target = _target(args)
+    bundle = _debug_bundle(args, target)
+    try:
+        r = Run.current(args.run)
+    except HarnessError:
+        r = None
+    ok, report = L.run_cycle(get_driver(target), target, bundle, app.flows, r, trigger=not args.no_trigger,
+                             wait_next=args.wait, timeout=args.timeout)
+    print(report)
+    return 0 if ok else 1
+
+
+def _loopcheck_doc():
+    from . import loopcheck
+    return loopcheck.__doc__
+
+
 def _appdebug_doc():
     from . import appdebug
     return appdebug.__doc__
@@ -1310,6 +1334,20 @@ def build_parser() -> argparse.ArgumentParser:
     lg.add_argument("--run", help="run dir for --save (default: $TH_RUN / the current run)")
     lg.add_argument("--bundle-id", help="default: the last build's, else the target's")
     lg.set_defaults(fn=cmd_logs)
+
+    lp = sp.add_parser("loop", help="Trio: force one loop cycle (the home screen's pull-down) and check from Trio's log "
+                                    "that it went through: glucose, determination, and the enactment where the dosing "
+                                    "mode enacts (exit 1 if not)",
+                       description=_loopcheck_doc(), formatter_class=argparse.RawDescriptionHelpFormatter)
+    lp.add_argument("--no-trigger", action="store_true", help="check the latest cycle in the log, forcing nothing")
+    lp.add_argument("--wait", action="store_true", help="Open Loop, where Trio offers no forced cycle: wait for its next "
+                                                        "one instead of checking the latest")
+    lp.add_argument("--timeout", type=float, default=60,
+                    help="seconds a cycle may take to finish (default 60; with the wait for Trio's 3-minute loop "
+                         "interval the command stays under a job agent's 5-minute command limit)")
+    lp.add_argument("--run", help="record it in this run (default: $TH_RUN / the current run)")
+    lp.add_argument("--bundle-id", help="default: the app as installed")
+    lp.set_defaults(fn=cmd_loop)
     def _debug_parser(name, **kw):
         q = sp.add_parser(name, description=_appdebug_doc(), formatter_class=argparse.RawDescriptionHelpFormatter, **kw)
         q.add_argument("--bundle-id", help="default: the app as installed (simulator) / the last build's (phone)")

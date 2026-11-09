@@ -259,6 +259,10 @@ until merged: pass `--faketandem-ref` until then).
 - Not verified yet: `th faketandem seed` by hand; the web UI's pump fields; Loop with `--pump faketandem`.
 
 ## Still unverified
+- `th loop` (`harness/loopcheck.py`, 2026-11-09): forces a Trio loop cycle with the home screen's pull-down and checks
+  each stage from Trio's log. Checked against fake logs and a fake driver only: that the pull (22% to 57% of the screen
+  down, 0.3 s press) arms Trio's 70 pt pull-to-loop on the simulator, and how long the AppLog.sqlite entries take to
+  show, are not.
 - `th tap --count N` / `Driver.multi_tap` and `th flow tandem-feature-flag[s]` (`harness/flows/tandemkit.py`, added
   2026-11-01 after CI run 41275701186 could not reach TandemKit's Feature Flags list: three `th tap` calls landed ~1.5 s
   apart, too slow for `onTapGesture(count: 3)`). Run 42538914279 (TandemKit#644) showed WDA's `/actions` triple tap

@@ -121,6 +121,17 @@ phone session checks for the watch when it starts, and logs `📱 Phone isReacha
   app sees the phone unreachable, then reachable). Waiting out a timeout: `th wait <seconds>` (≤ 280 per call).
 - Everything on the watch is a simulator and the bolus goes to the Pump Simulator; no real pump is ever involved.
 
+## Trio's loop cycle
+- `th loop` forces one cycle and checks it from Trio's log (`harness/loopcheck.py`): "Loop started, mode … requested
+  by user" → "Glucose ready" → "Determination: eventual BG …, temp basal …, SMB … U" → "Temp basal enacted" / "SMB
+  enacted" where the dosing mode enacts → "Loop finished in N s" (or "Loop failed"). Exit 1 names the stage that
+  failed, and the TandemKit lines of the same window follow.
+- The force is the home screen's pull-down ("Pull down to force loop", past 70 pt), offered only where the dosing mode
+  enacts (closed, low glucose suspend, basal testing; not open). Trio skips a cycle within 3 min of the last one's
+  start, so `th loop` waits that out first. Open Loop: `th loop --wait` for the next cycle Trio runs on its own, or
+  `--no-trigger` for the latest.
+- The dosing mode is `dosingMode` in Documents/freeaps/freeaps_settings.json (`th files cat freeaps/freeaps_settings.json`).
+
 ## Tips
 - Simulator taps/tree need an input backend: run `th wda start` once per simulator boot (WebDriverAgent, built on first use
   with `th wda build`; `th wda status` / `th wda stop` / `th wda restart`, which a running daemon carries out). idb is used automatically if installed instead.
