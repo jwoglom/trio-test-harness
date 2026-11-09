@@ -1466,7 +1466,7 @@ def build_parser() -> argparse.ArgumentParser:
     rpr.add_argument("--artifact-url", help="claude.ai artifact link to include in the comment")
     rpr.add_argument("--body", metavar="FILE", help="post this markdown instead of the generated summary; the run's "
                      "screenshots it shows as ![caption](./screenshots/NNN.png) are attached")
-    rcm = rps.add_parser("comment-md", help="write the run's pr-comment.md without posting it, its screenshots uploaded "
+    rcm = rps.add_parser("comment-md", help="write the run's comment.md without posting it, its screenshots uploaded "
                                              "where TH_UPLOAD_TOKEN allows (CI attaches it to the run)")
     rcm.add_argument("--run"); rcm.add_argument("--columns", type=int, default=3); rcm.add_argument("--max-shots", type=int)
     rcm.add_argument("--artifact-url"); rcm.add_argument("--body", metavar="FILE", help="this markdown instead of the generated summary")

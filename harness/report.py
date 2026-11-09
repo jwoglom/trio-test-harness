@@ -411,13 +411,13 @@ def comment_markdown(run: Run, *, columns: int = 3, max_shots: int | None = None
 
 def write_comment_file(run: Run, md: str, files: list[Path], urls: dict[Path, str],
                        artifact_url: str | None = None) -> Path:
-    """run/pr-comment.md, attached to the CI run as its own file whether the comment was posted, failed or skipped:
-    the comment's markdown with each screenshot at its uploaded URL, or at its path in the run's artifact."""
+    """run/comment.md, attached to every CI run as its own file, whether a comment was asked for, posted, failed or
+    skipped: the comment's markdown with each screenshot at its uploaded URL, or at its path in the run's artifact."""
     text = _with_uploaded_images(md, run, urls)
     if any(f not in urls for f in files):
         where = f"the run's artifact ({artifact_url})" if artifact_url else "the run's artifact"
         text += f"\n\n_The screenshots could not be uploaded; their `./screenshots/` paths are in {where}._\n"
-    path = run.path / "pr-comment.md"
+    path = run.path / "comment.md"
     path.write_text(text)
     return path
 
@@ -427,7 +427,7 @@ def post_to_pr(run: Run, pr: str, *, mode: str = "comment", repo: str | None = N
                body: str | None = None) -> str:
     """Comment on (or append to the description of) a PR with the run's screenshots attached inline.
 
-    `body` replaces the generated summary with a comment written for the run. run/pr-comment.md is written before
+    `body` replaces the generated summary with a comment written for the run. run/comment.md is written before
     anything is posted (`write_comment_file`).
     """
     from .build import resolve_pr
@@ -435,7 +435,7 @@ def post_to_pr(run: Run, pr: str, *, mode: str = "comment", repo: str | None = N
                                        body=body)
     write_comment_file(run, md, files, urls, artifact_url)
     slug, num = resolve_pr(pr) if not repo else (repo, int(pr))
-    body = tmp_path("pr-comment-posted.md")
+    body = tmp_path("comment-posted.md")
     body.write_text(md)
     attach = []
     for f in files:
