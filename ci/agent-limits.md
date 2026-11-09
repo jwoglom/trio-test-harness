@@ -18,7 +18,7 @@ try to work around them.
   `wda restart`, `wda start`, `wda stop` and `wda status` go through the daemon and work, and `daemon restart` gives
   the running daemon a new driver; `daemon stop|start` and `faketandem start|stop` are refused, because nothing started
   in this sandbox could replace what the job started outside it.
-- Coordinates are screenshot pixels, and a tap or swipe must stay on the screen. `scroll up|down --amount` is a
+- Coordinates are screenshot pixels; a swipe past the screen's edge is moved onto it. `scroll up|down --amount` is a
   fraction of the screen's height (0.5 is half), or pixels from 50.
 - App logs: `./trio-test-harness --target sim logs [trio|tandem|all] [--grep REGEX -i] [--since 10m] [--level warning]
   [-n N]` reads Trio's and TandemKit's log files from the app through the daemon (`logs --help`; `logs all --save`

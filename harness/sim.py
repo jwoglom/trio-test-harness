@@ -11,7 +11,7 @@ import time
 from pathlib import Path
 
 from .config import CONFIG
-from .driver import Driver, UINode, check_on_screen
+from .driver import Driver, UINode, clamp_to_screen
 from .util import HarnessError, log, run, which
 from . import xcode
 
@@ -222,12 +222,18 @@ class SimulatorDriver(Driver):
         return path
 
     # ---- input (pixel coords) ----
+    def _on_screen(self, x1: int, y1: int, x2: int, y2: int) -> tuple[int, int, int, int]:
+        size = self.screen_size()
+        a, b = clamp_to_screen(size, x1, y1), clamp_to_screen(size, x2, y2)
+        if (*a, *b) != (x1, y1, x2, y2):
+            log(f"swipe {x1},{y1} -> {x2},{y2} moved onto the {size[0]}x{size[1]} screen: {a[0]},{a[1]} -> {b[0]},{b[1]}")
+        return (*a, *b)
+
     def _need_input_backend(self) -> None:
         if self.wda is None and not self.have_idb():
             raise HarnessError("no input backend: run `th wda start` (WebDriverAgent) or install idb_companion")
 
     def tap(self, x: int, y: int, *, duration: float = 0.0) -> None:
-        check_on_screen(self.screen_size(), (x, y))
         self._need_input_backend()
         if self.wda:
             if duration:
@@ -242,12 +248,11 @@ class SimulatorDriver(Driver):
 
     def multi_tap(self, x: int, y: int, count: int = 2, *, interval: float = 0.1) -> None:
         # idb taps one per process, too slow for a multi-tap gesture, so this one needs WebDriverAgent.
-        check_on_screen(self.screen_size(), (x, y))
         wda = self.wda or self.ensure_wda()
         wda.multi_tap(x / self.scale, y / self.scale, count, interval=interval)
 
     def swipe(self, x1: int, y1: int, x2: int, y2: int, *, duration: float = 0.3) -> None:
-        check_on_screen(self.screen_size(), (x1, y1), (x2, y2))
+        x1, y1, x2, y2 = self._on_screen(x1, y1, x2, y2)
         self._need_input_backend()
         s = self.scale
         if self.wda:
@@ -257,7 +262,7 @@ class SimulatorDriver(Driver):
                    "--duration", str(duration)], quiet=True)
 
     def drag(self, x1: int, y1: int, x2: int, y2: int, *, hold: float = 0.8, duration: float = 0.8, settle: float = 0.5) -> None:
-        check_on_screen(self.screen_size(), (x1, y1), (x2, y2))
+        x1, y1, x2, y2 = self._on_screen(x1, y1, x2, y2)
         self._need_input_backend()
         s = self.scale
         if self.wda:

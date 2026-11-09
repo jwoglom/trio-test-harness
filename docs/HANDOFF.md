@@ -229,7 +229,9 @@ until merged: pass `--faketandem-ref` until then).
   taking the amount for pixels; it is a fraction of the screen, so WebDriverAgent dragged hundreds of screens past the
   top. That drag ran for minutes, every request after it queued behind it, and /status still answered, so the recovery
   above never restarted the runner. Now `--amount` above 1 is pixels (from 50), a scroll stays on the screen (several
-  swipes past 70% of it), and the simulator refuses a tap or swipe off the screen. A request gets 30 s
+  swipes past 70% of it), and the simulator moves a swipe's points onto the screen. It first refused a tap or swipe
+  off the screen, which failed 42534932220's smoke stage: `tap_text` taps a sheet's row whose centre is just below
+  the screen, which WebDriverAgent scrolls in, so taps are left alone. A request gets 30 s
   (`wda.REQUEST_TIMEOUT`), and one that times out restarts the runner (`recover(error)`); a timed-out tap or swipe is
   reported and not repeated, since it may have reached the app. In 42516779754 the agent also stopped the daemon and
   started one inside the sandbox, which lost faketandem's port and screenshots for the rest of the run: in a job's
