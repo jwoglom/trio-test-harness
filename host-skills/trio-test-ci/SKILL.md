@@ -62,9 +62,10 @@ harness (not by the PR), say so and fix or report the harness, not the PR. Publi
 
 ## 4. PR comment
 
-Ask the user first (AskUserQuestion). Then post that run's report without re-testing:
-`gh workflow run e2e.yml -R jwoglom/trio-test-harness -f trio=<PR> -f comment_on_run=<id> -f comment_body="$(cat comment.md)"`,
-or re-run with `--comment` if they want the workflow's own comment.
+Ask the user first (AskUserQuestion). Then post that run's comment without re-testing:
+`gh workflow run e2e.yml -R jwoglom/trio-test-harness -f trio=<PR> -f comment_on_run=<id>` posts the comment generated
+from the run, the same one `--comment` would have posted. To post one you wrote instead, add
+`-F comment_body=@comment.md` (`@` makes gh fail on a missing file; `-f comment_body="$(cat comment.md)"` sends it empty).
 
 ## 5. Summarize
 

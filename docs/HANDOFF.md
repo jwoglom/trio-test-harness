@@ -255,7 +255,9 @@ until merged: pass `--faketandem-ref` until then).
   `flow tandem-feature-flag` takes it. 42516779754's agent never found Manual Temp Basal Support.
 - `report pr --body` and the e2e workflow's `comment_on_run`/`comment_body`: verified by run 40267059203, which posted a
   written comment on jwoglom/TandemKit#609 with 14 of run 40263901771's screenshots uploaded inline, and again by run
-  40289321649 for run 40279063228.
+  40289321649 for run 40279063228. `comment_on_run` without `comment_body` (the comment generated from the run, as
+  `post_comment` writes it) is not verified in CI yet; `report markdown --run` gives that comment for run 42442132840's
+  downloaded artifact.
 - Not verified yet: `th faketandem seed` by hand; the web UI's pump fields; Loop with `--pump faketandem`.
 
 ## Still unverified

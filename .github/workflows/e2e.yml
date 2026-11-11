@@ -7,10 +7,12 @@
 # pump=faketandem runs the app's TandemKit against faketandem, a Tandem Mobi emulator (harness/faketandem.py):
 #   gh workflow run e2e.yml -R jwoglom/trio-test-harness -f trio=feat/tandem-closed-beta -f pump=faketandem \
 #     -f pump_setup=walk -f pump_scenario=recent-doses
-# comment_on_run tests nothing: it posts comment_body, with an earlier run's screenshots, to the PR named in trio or
-# submodules (`trio-test-harness report pr --body`):
+# comment_on_run tests nothing: it posts an earlier run's comment, with its screenshots, to the PR named in trio or
+# submodules. Without comment_body the comment is generated from that run (`trio-test-harness report pr`); with it,
+# comment_body is posted instead (`report pr --body`):
+#   gh workflow run e2e.yml -R jwoglom/trio-test-harness -f submodules=jwoglom/TandemKit#609 -f comment_on_run=40232151326
 #   gh workflow run e2e.yml -R jwoglom/trio-test-harness -f submodules=jwoglom/TandemKit#609 \
-#     -f comment_on_run=40232151326 -f comment_body="$(cat comment.md)"
+#     -f comment_on_run=40232151326 -F comment_body=@comment.md
 name: Trio e2e (simulator)
 run-name: "${{ inputs.comment_on_run && format('comment from e2e run {0}: ', inputs.comment_on_run) || '' }}e2e${{ inputs.app == 'loop' && ' (Loop)' || '' }}: ${{ inputs.trio || (!inputs.submodules && 'dev') || '' }}${{ inputs.trio && inputs.submodules && ' + ' || '' }}${{ inputs.submodules }}${{ inputs.pump == 'faketandem' && format(' (faketandem, {0})', inputs.pump_setup) || '' }}"
 
@@ -92,10 +94,10 @@ on:
         type: boolean
         default: false
       comment_on_run:
-        description: "Run ID of an earlier run. Tests nothing: posts comment_body, with that run's screenshots, to the PR named in trio or submodules"
+        description: "Run ID of an earlier run. Tests nothing: posts that run's comment, with its screenshots, to the PR named in trio or submodules"
         type: string
       comment_body:
-        description: "Markdown comment for comment_on_run to post. ![caption](./screenshots/NNN.png) embeds one of that run's screenshots"
+        description: "Markdown for comment_on_run to post (blank: generated from the run). ![caption](./screenshots/NNN.png) embeds one of that run's screenshots"
         type: string
       sim_device:
         description: "Simulator device"
@@ -465,7 +467,6 @@ jobs:
         id: v
         run: |
           [[ $IN_RUN_ID =~ ^[0-9]+$ ]] || { echo "::error::comment_on_run must be a workflow run id"; exit 1; }
-          [ -n "$IN_BODY" ] || { echo "::error::comment_body is empty"; exit 1; }
           python3 ci/inputs.py "$RUNNER_TEMP/e2e-args" >> "$GITHUB_OUTPUT"
 
       - name: GitHub App token (PR owner)
@@ -480,7 +481,7 @@ jobs:
       - name: Download the run
         uses: actions/download-artifact@v4
         with:
-          name: trio-e2e-${{ inputs.comment_on_run }}
+          name: ${{ inputs.app || 'trio' }}-e2e-${{ inputs.comment_on_run }}
           run-id: ${{ inputs.comment_on_run }}
           github-token: ${{ github.token }}
           path: ${{ runner.temp }}/run
@@ -498,8 +499,15 @@ jobs:
           # As for the e2e job's comment: only PRs in jwoglom's repos get the screenshots inline.
           TH_UPLOAD_TOKEN: ${{ steps.v.outputs.pr_owner == 'jwoglom' && secrets.TRIO_TEST_HARNESS_USER_PAT || '' }}
           TH_UPLOAD_REPO: ${{ github.repository }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ inputs.comment_on_run }}
         run: |
           set -euo pipefail
           [ -n "$PR" ] || { echo "::error::trio, submodules or cherry_pick must name the PR to comment on"; exit 1; }
-          printf '%s\n' "$IN_BODY" > "$RUNNER_TEMP/comment.md"
-          ./trio-test-harness report pr "$PR" --run "$RUNNER_TEMP/run" --body "$RUNNER_TEMP/comment.md"
+          # Without comment_body, the comment is generated from the run (steps, highlights, agent summary), as the
+          # e2e job's own post_comment would have written it.
+          args=(--artifact-url "$RUN_URL")
+          if [ -n "$IN_BODY" ]; then
+            printf '%s\n' "$IN_BODY" > "$RUNNER_TEMP/comment.md"
+            args+=(--body "$RUNNER_TEMP/comment.md")
+          fi
+          ./trio-test-harness report pr "$PR" --run "$RUNNER_TEMP/run" "${args[@]}"
