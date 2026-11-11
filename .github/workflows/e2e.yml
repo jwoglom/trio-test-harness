@@ -469,8 +469,8 @@ jobs:
           [[ $IN_RUN_ID =~ ^[0-9]+$ ]] || { echo "::error::comment_on_run must be a workflow run id"; exit 1; }
           python3 ci/inputs.py "$RUNNER_TEMP/e2e-args" >> "$GITHUB_OUTPUT"
 
-      # Fails where the trio-test-harness-runner App is not installed (nightscout); the comment is then written to
-      # comment.md and attached to this run instead of posted.
+      # Fails where the trio-test-harness-runner App is not installed (nightscout); the PR comment step then fails
+      # the job, after writing comment.md, which is attached to the run either way.
       - name: GitHub App token (PR owner)
         id: token
         if: steps.v.outputs.pr != ''
@@ -507,11 +507,20 @@ jobs:
           TH_UPLOAD_REPO: ${{ github.repository }}
           TH_COMMENT_INLINE_IMAGES: ${{ steps.v.outputs.pr_owner == 'jwoglom' && '1' || '0' }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ inputs.comment_on_run }}
-        # The comment's markdown is written to the downloaded run's comment.md whatever happens (report pr writes it
-        # before posting), and attached to this run below.
+        # The comment's markdown is always written to the downloaded run's comment.md and attached to this run below,
+        # posted or not; the job fails whenever the comment was not posted.
         run: |
-          set -euo pipefail
-          [ -n "$PR" ] || { echo "::error::trio, submodules or cherry_pick must name the PR to comment on"; exit 1; }
+          set -uo pipefail
+          comment_file() {
+            [ -s "$RUNNER_TEMP/run/comment.md" ] || ./trio-test-harness report comment-md --run "$RUNNER_TEMP/run" "${args[@]}" >/dev/null \
+              || echo "::warning title=comment.md not written::see this step's log"
+          }
+          fail() {
+            comment_file
+            echo "note=not posted: $1; the comment's markdown is attached as comment.md" >> "$GITHUB_OUTPUT"
+            echo "::error title=PR comment not posted::$1; the comment's markdown is attached as comment.md"
+            exit 1
+          }
           # Without comment_body, the comment is generated from the run (steps, highlights, agent summary), as the
           # e2e job's own post_comment would have written it.
           args=(--artifact-url "$RUN_URL")
@@ -519,19 +528,16 @@ jobs:
             printf '%s\n' "$IN_BODY" > "$RUNNER_TEMP/body.md"
             args+=(--body "$RUNNER_TEMP/body.md")
           fi
-          if [ -z "$GH_TOKEN" ]; then
-            ./trio-test-harness report comment-md --run "$RUNNER_TEMP/run" "${args[@]}" >/dev/null
-            echo "::warning title=PR comment not posted::the trio-test-harness-runner App is not installed on $PR_OWNER; the comment's markdown is attached as comment.md"
-            echo "note=not posted: the trio-test-harness-runner App is not installed on $PR_OWNER; the comment's markdown is attached as comment.md" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
+          rm -f "$RUNNER_TEMP/run/comment.md"   # the earlier run's own, not this comment
+          [ -n "$PR" ] || fail "trio, submodules or cherry_pick must name the PR to comment on"
+          [ -n "$GH_TOKEN" ] || fail "no token for $PR_OWNER: the trio-test-harness-runner App is not installed there"
           if out=$(./trio-test-harness report pr "$PR" --run "$RUNNER_TEMP/run" "${args[@]}" 2>&1); then
+            echo "$out" | tail -5
             echo "note=posted $(echo "$out" | tail -1)" >> "$GITHUB_OUTPUT"
+            comment_file
           else
             echo "$out" | tail -20
-            echo "note=failed (see the PR comment step log); the comment's markdown is attached as comment.md" >> "$GITHUB_OUTPUT"
-            echo "::error title=PR comment failed::see this step's log; the comment's markdown is attached as comment.md"
-            exit 1
+            fail "posting failed (see this step's log)"
           fi
 
       - name: Job summary

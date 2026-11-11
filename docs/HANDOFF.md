@@ -257,8 +257,8 @@ until merged: pass `--faketandem-ref` until then).
   written comment on jwoglom/TandemKit#609 with 14 of run 40263901771's screenshots uploaded inline, and again by run
   40289321649 for run 40279063228. `comment_on_run` without `comment_body` (the comment generated from the run, as
   `post_comment` writes it) is not verified in CI yet; `report markdown --run` gives that comment for run 42442132840's
-  downloaded artifact. Where the App is not installed (nightscout) the job attaches `comment.md` instead of failing on
-  the token (run 42959085745 failed there).
+  downloaded artifact. The job always attaches `comment.md` and fails when nothing was posted,
+  e.g. where the App is not installed (nightscout; run 42959085745 failed there with nothing attached).
 - Not verified yet: `th faketandem seed` by hand; the web UI's pump fields; Loop with `--pump faketandem`.
 
 ## Still unverified
