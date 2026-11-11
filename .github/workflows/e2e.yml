@@ -469,9 +469,12 @@ jobs:
           [[ $IN_RUN_ID =~ ^[0-9]+$ ]] || { echo "::error::comment_on_run must be a workflow run id"; exit 1; }
           python3 ci/inputs.py "$RUNNER_TEMP/e2e-args" >> "$GITHUB_OUTPUT"
 
+      # Fails where the trio-test-harness-runner App is not installed (nightscout); the comment is then written to
+      # comment.md and attached to this run instead of posted.
       - name: GitHub App token (PR owner)
         id: token
         if: steps.v.outputs.pr != ''
+        continue-on-error: true
         uses: actions/create-github-app-token@v2
         with:
           app-id: ${{ secrets.TRIO_E2E_APP_ID }}
@@ -493,13 +496,19 @@ jobs:
           uv pip install --quiet --python .venv/bin/python -r requirements.txt
 
       - name: PR comment
+        id: comment
         env:
           GH_TOKEN: ${{ steps.token.outputs.token }}
           PR: ${{ steps.v.outputs.pr }}
-          # As for the e2e job's comment: only PRs in jwoglom's repos get the screenshots inline.
-          TH_UPLOAD_TOKEN: ${{ steps.v.outputs.pr_owner == 'jwoglom' && secrets.TRIO_TEST_HARNESS_USER_PAT || '' }}
+          PR_OWNER: ${{ steps.v.outputs.pr_owner }}
+          # As for the e2e job's comment: screenshots are uploaded with a user PAT that reaches only this private repo,
+          # so only PRs in jwoglom's repos show them inline; comment.md links the uploads either way.
+          TH_UPLOAD_TOKEN: ${{ secrets.TRIO_TEST_HARNESS_USER_PAT }}
           TH_UPLOAD_REPO: ${{ github.repository }}
+          TH_COMMENT_INLINE_IMAGES: ${{ steps.v.outputs.pr_owner == 'jwoglom' && '1' || '0' }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ inputs.comment_on_run }}
+        # The comment's markdown is written to the downloaded run's comment.md whatever happens (report pr writes it
+        # before posting), and attached to this run below.
         run: |
           set -euo pipefail
           [ -n "$PR" ] || { echo "::error::trio, submodules or cherry_pick must name the PR to comment on"; exit 1; }
@@ -507,7 +516,36 @@ jobs:
           # e2e job's own post_comment would have written it.
           args=(--artifact-url "$RUN_URL")
           if [ -n "$IN_BODY" ]; then
-            printf '%s\n' "$IN_BODY" > "$RUNNER_TEMP/comment.md"
-            args+=(--body "$RUNNER_TEMP/comment.md")
+            printf '%s\n' "$IN_BODY" > "$RUNNER_TEMP/body.md"
+            args+=(--body "$RUNNER_TEMP/body.md")
           fi
-          ./trio-test-harness report pr "$PR" --run "$RUNNER_TEMP/run" "${args[@]}"
+          if [ -z "$GH_TOKEN" ]; then
+            ./trio-test-harness report comment-md --run "$RUNNER_TEMP/run" "${args[@]}" >/dev/null
+            echo "::warning title=PR comment not posted::the trio-test-harness-runner App is not installed on $PR_OWNER; the comment's markdown is attached as comment.md"
+            echo "note=not posted: the trio-test-harness-runner App is not installed on $PR_OWNER; the comment's markdown is attached as comment.md" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if out=$(./trio-test-harness report pr "$PR" --run "$RUNNER_TEMP/run" "${args[@]}" 2>&1); then
+            echo "note=posted $(echo "$out" | tail -1)" >> "$GITHUB_OUTPUT"
+          else
+            echo "$out" | tail -20
+            echo "note=failed (see the PR comment step log); the comment's markdown is attached as comment.md" >> "$GITHUB_OUTPUT"
+            echo "::error title=PR comment failed::see this step's log; the comment's markdown is attached as comment.md"
+            exit 1
+          fi
+
+      - name: Job summary
+        if: always() && steps.comment.outputs.note != ''
+        env:
+          RUN_DIR: ${{ runner.temp }}/run
+          COMMENT_NOTE: ${{ steps.comment.outputs.note }}
+        run: python3 ci/summary.py "$RUN_DIR" --agent-summary "$RUN_DIR/agent-summary.md" --comment-note "$COMMENT_NOTE" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload comment.md (unzipped)
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          path: ${{ runner.temp }}/run/comment.md
+          archive: false
+          retention-days: 14
+          if-no-files-found: ignore

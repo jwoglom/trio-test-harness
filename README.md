@@ -319,6 +319,8 @@ posts an earlier run's comment on the PR the run's inputs name, and tests nothin
 run, as `post_comment` would have written it, unless `comment_body` gives one:
 `gh workflow run e2e.yml -f submodules=jwoglom/TandemKit#609 -f comment_on_run=<run id> [-F comment_body=@comment.md]`.
 (`-F ...=@file` makes gh fail when the file is missing; `-f ...="$(cat comment.md)"` would send an empty body.)
+Where the trio-test-harness-runner App is not installed (nightscout), nothing is posted: the job attaches the
+comment's markdown as `comment.md`, as the e2e job does.
 
 ## CI (GitHub Actions)
 `.github/workflows/e2e.yml` runs `trio-test-e2e --mode simulator` on the self-hosted macOS workers
