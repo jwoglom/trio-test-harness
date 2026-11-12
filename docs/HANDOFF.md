@@ -261,6 +261,20 @@ until merged: pass `--faketandem-ref` until then).
   e.g. where the App is not installed (nightscout; run 42959085745 failed there with nothing attached).
 - Not verified yet: `th faketandem seed` by hand; the web UI's pump fields; Loop with `--pump faketandem`.
 
+- 2026-11-09: CLI ergonomics for the sandboxed job agent (mined from 57 e2e runs: 44 denied commands, 10 usage-error
+  turns). Added `wait --until "<subcommand>" --matches REGEX` (`harness/waituntil.py`), `--field` on `faketandem status|api`,
+  `faketandem history --type/--last/--since`, `logs --count`, `key --count`, typed `faketandem fault|clock|set|suspend|resume|
+  bolus|tempbasal|log|transport` (`harness/ftcli.py`), `faketandem api` path normalisation (`fill_tubing`, case-insensitive
+  `/api/settings/<Message>`, errors that list the valid modes/routes), global options before or after the subcommand,
+  `sim defaults --type string|int|float|bool`; `ci/agent-faketandem.md` has the pump-side events cookbook. `tests/`
+  (`python -m unittest discover -s tests`) is the repo's first test directory. **Checked against a stub faketandem and stub
+  drivers only; not yet run in CI or on a Mac, and not against a real faketandem.** faketandem refuses `suspend
+  --keep-temp` unless the reason is `alarm`, which the wrapper says up front. `/api/settings` case-matching relies on
+  `GET /api/settings` listing every message. Follow-up: faketandem now takes `keep_temp` with occlusion too (only user is
+  400), so `suspend --reason occlusion --keep-temp` goes through (bare `--keep-temp` means occlusion), and the wrappers
+  gained `alert|alarm|malfunction|reminder|cgmalert raise|clear` and `cartridge ready|insert` (faketandem's alerts and
+  cartridge-change API), with cookbook entries for them, the refusals and `connection.subscribed`. Stub faketandem only.
+
 ## Still unverified
 - `th oref` (`harness/oref.py`, 2026-11-09; first `th loop`, renamed so it is not taken for the Loop app): forces a
   Trio oref cycle with the home screen's pull-down and checks each stage from Trio's log. Checked against fake logs and
