@@ -317,6 +317,9 @@ until merged: pass `--faketandem-ref` until then).
 - `th webui` live phone panel (`harness/liveview.py`, noVNC 1.7.0 from jsdelivr): verified 2026-09-24 showing the real
   phone through TrollVNC in the user's browser (TrollVNC accepts noVNC's encodings and extended clipboard). Not yet
   checked: control input through noVNC, the panel's buttons, and the USB fallback when Wi-Fi refuses.
+  The panel's **Expand** button (2026-11-16) makes it cover the page (not browser fullscreen): the screen at full window
+  height with the controls beside it, New run / Runs / logs hidden; Collapse or Esc (outside the VNC canvas) undoes it,
+  and it is remembered across reloads. Layout checked in headless Chrome only, not yet with a live phone.
   After a phone reboot the rootless jailbreak must be re-run before TrollVNC/SSH answer.
 - `th test smoke` as a single command (the pieces were run individually).
 - Onboarding walk fully unattended on the phone: the iOS alert "Allow" and the "Next" under a dimmed alert are now handled

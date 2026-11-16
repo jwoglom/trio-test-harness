@@ -23,6 +23,13 @@ header h1{font-size:17px;margin:0} header a{color:inherit;text-decoration:none} 
 .phonehead{display:flex;align-items:center;gap:8px;margin-bottom:6px} .phonehead h2{margin:0}
 #screen{aspect-ratio:var(--ar);width:min(100%,calc(var(--phone-h) * var(--ar)));margin:0 auto;background:#000;border-radius:12px;overflow:hidden;display:flex;align-items:center;justify-content:center;color:#8d96a0;font-size:13px}
 #screen.control{outline:2px solid var(--accent);outline-offset:2px}
+/* expanded phone: the panel covers the page (not browser fullscreen) - screen at full height, controls beside it */
+body.phone-expanded{overflow:hidden}
+#phone.expanded{position:fixed;inset:0;z-index:50;border:0;border-radius:0;padding:16px;--phone-h:calc(100dvh - 32px);
+  display:grid;grid-template-columns:auto 300px;grid-template-rows:repeat(7,auto) 1fr;column-gap:20px;justify-content:center;align-content:start}
+#phone.expanded>*{grid-column:2}
+#phone.expanded #screen{grid-column:1;grid-row:1 / -1;margin:0;width:calc(var(--phone-h) * var(--ar));max-width:calc(100vw - 352px)}
+@media (max-width:700px){#phone.expanded{display:block;overflow:auto} #phone.expanded #screen{width:100%;max-width:none;margin:8px 0}}
 .btns{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin-top:10px} .btns button{padding:6px 2px;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .typerow{display:flex;gap:6px;margin-top:8px}
 #lastshot img{max-width:120px;border:1px solid var(--line);border-radius:6px;margin-top:8px;display:block}
@@ -187,7 +194,7 @@ button.small{padding:2px 9px;font-size:12px;margin-top:8px;display:block}
   </aside>
   <aside id="phone" class="card" hidden>
     <div class="phonehead"><h2>iPhone</h2><span id="vncstate" class="hint">not connected</span><span class="spacer" style="flex:1"></span>
-      <button id="vncconnect" type="button">Connect</button><button id="phoneclose" type="button" title="Hide the phone panel">×</button></div>
+      <button id="vncconnect" type="button">Connect</button><button id="phoneexpand" type="button" title="Fill the page with the phone (Esc to collapse)">Expand</button><button id="phoneclose" type="button" title="Hide the phone panel">×</button></div>
     <label class="check" title="Clicks tap, drags swipe, keys type, right-click is Home"><input type="checkbox" id="vnccontrol">Control iPhone</label>
     <div class="hint" id="busyhint" hidden>An agent is currently controlling the phone</div>
     <div id="screen">Connect to see the phone over TrollVNC.</div>
@@ -619,8 +626,20 @@ function setPhone(open) {
   document.querySelector(".layout").classList.toggle("with-phone", open);
   $("#phonetoggle").textContent = open ? "Hide phone" : "Live phone";
   store.set("phone", open ? "1" : "0");
-  if (open) { checkBusy(true); if (!rfb) vncConnect(); } else vncDisconnect();
+  if (open) { checkBusy(true); if (!rfb) vncConnect(); } else { vncDisconnect(); setExpanded(false); }
 }
+// Expanded: the phone panel covers the whole page (New run, Runs and logs hidden underneath); noVNC rescales on its own.
+function setExpanded(on) {
+  $("#phone").classList.toggle("expanded", on);
+  document.body.classList.toggle("phone-expanded", on);
+  $("#phoneexpand").textContent = on ? "Collapse" : "Expand";
+  store.set("phoneexp", on ? "1" : "0");
+}
+$("#phoneexpand").onclick = () => setExpanded(!$("#phone").classList.contains("expanded"));
+document.addEventListener("keydown", e => {
+  // Esc collapses, unless it is meant for the phone (keyboard focus in the VNC canvas) or a text field
+  if (e.key === "Escape" && $("#phone").classList.contains("expanded") && !e.target.closest?.("#screen, input, textarea")) setExpanded(false);
+});
 $("#phonetoggle").onclick = () => setPhone($("#phone").hidden);
 $("#phoneclose").onclick = () => setPhone(false);
 const vncState = t => $("#vncstate").textContent = t;
@@ -681,7 +700,7 @@ for (const b of document.querySelectorAll("#phone .btns button")) b.onclick = ()
 $("#typebtn").onclick = () => { const t = $("#typetext").value; if (t) device("type", {text: t}).then(() => $("#typetext").value = ""); };
 $("#typetext").onkeydown = e => { if (e.key === "Enter") { e.preventDefault(); $("#typebtn").click(); } };
 setApp();
-if (store.get("phone") === "1" && form.target.value === "rooted-vnc") setPhone(true);
+if (store.get("phone") === "1" && form.target.value === "rooted-vnc") { setPhone(true); if (store.get("phoneexp") === "1") setExpanded(true); }
 if (store.get("applogs") === "1") setLogs(true);
 
 route();
