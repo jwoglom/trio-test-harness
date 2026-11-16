@@ -20,14 +20,21 @@ header h1{font-size:17px;margin:0} header a{color:inherit;text-decoration:none} 
 @media (max-width:1300px){.layout.with-phone{grid-template-columns:340px minmax(0,1fr)} #phone{grid-column:1}}
 @media (max-width:900px){.layout,.layout.with-phone{grid-template-columns:1fr} #phone{grid-column:auto}}
 #phone{align-self:start;position:sticky;top:12px;padding:10px}
-.phonehead{display:flex;align-items:center;gap:8px;margin-bottom:6px} .phonehead h2{margin:0}
+.phonehead{display:flex;align-items:center;gap:8px;margin-bottom:6px} .phonehead h2{margin:0} .phonehead .spacer{flex:1}
 #screen{aspect-ratio:var(--ar);width:min(100%,calc(var(--phone-h) * var(--ar)));margin:0 auto;background:#000;border-radius:12px;overflow:hidden;display:flex;align-items:center;justify-content:center;color:#8d96a0;font-size:13px}
 #screen.control{outline:2px solid var(--accent);outline-offset:2px}
 /* expanded phone: the panel covers the page (not browser fullscreen) - screen at full height, controls beside it */
 body.phone-expanded{overflow:hidden}
 #phone.expanded{position:fixed;inset:0;z-index:50;border:0;border-radius:0;padding:16px;--phone-h:calc(100dvh - 32px);
   display:grid;grid-template-columns:auto 300px;grid-template-rows:repeat(7,auto) 1fr;column-gap:20px;justify-content:center;align-content:start}
-#phone.expanded>*{grid-column:2}
+#phone.expanded>*{grid-column:2;margin:0}
+#phone.expanded{row-gap:12px}
+/* control column: title + state on one line, then Disconnect / Collapse / × filling the column's width */
+#phone.expanded .phonehead{flex-wrap:wrap;row-gap:10px}
+#phone.expanded .phonehead .spacer{flex:0 0 100%;height:0}
+#phone.expanded .phonehead button{flex:1} #phone.expanded #phoneclose{flex:0 0 auto}
+#phone.expanded .btns{margin:0} #phone.expanded .btns button{padding:7px 2px}
+#phone.expanded label.check{margin:0}
 #phone.expanded #screen{grid-column:1;grid-row:1 / -1;margin:0;width:calc(var(--phone-h) * var(--ar));max-width:calc(100vw - 352px)}
 @media (max-width:700px){#phone.expanded{display:block;overflow:auto} #phone.expanded #screen{width:100%;max-width:none;margin:8px 0}}
 .btns{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin-top:10px} .btns button{padding:6px 2px;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
@@ -193,7 +200,7 @@ button.small{padding:2px 9px;font-size:12px;margin-top:8px;display:block}
       <div class="logbox" hidden><pre id="log-tandem"></pre></div></div>
   </aside>
   <aside id="phone" class="card" hidden>
-    <div class="phonehead"><h2>iPhone</h2><span id="vncstate" class="hint">not connected</span><span class="spacer" style="flex:1"></span>
+    <div class="phonehead"><h2>iPhone</h2><span id="vncstate" class="hint">not connected</span><span class="spacer"></span>
       <button id="vncconnect" type="button">Connect</button><button id="phoneexpand" type="button" title="Fill the page with the phone (Esc to collapse)">Expand</button><button id="phoneclose" type="button" title="Hide the phone panel">×</button></div>
     <label class="check" title="Clicks tap, drags swipe, keys type, right-click is Home"><input type="checkbox" id="vnccontrol">Control iPhone</label>
     <div class="hint" id="busyhint" hidden>An agent is currently controlling the phone</div>
