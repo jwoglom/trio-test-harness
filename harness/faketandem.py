@@ -67,6 +67,21 @@ SCENARIOS = {
     "control-iq": "6 h with Control-IQ on and still on: its rate moving, two automatic boluses; for the walk setup",
     "pump-profile-differs": "6 h on a six-segment pump profile that is not the app's flat 0.85 U/hr",
     "day-of-use": "24 h of boluses, temps and a suspend: four times the setup history load's 6 h window",
+    "clock-spring-forward": "6 h: a pump bolus and a temp, the pump's clock set an hour ahead for DST onto the phone's time, "
+                            "a pump bolus after; about 1.1 U IOB",
+    "clock-fall-back": "6 h: as clock-spring-forward, the pump's clock set an hour back onto the phone's time",
+    "clock-travel-east": "6 h: as clock-spring-forward, the pump's clock set three hours ahead after a trip east",
+    "clock-travel-west": "6 h: as clock-spring-forward, the pump's clock set three hours back after a trip west",
+    "clock-travel-12h-east": "6 h: as clock-spring-forward, the pump's clock set twelve hours ahead, across midnight",
+    "clock-travel-12h-west": "6 h: as clock-spring-forward, the pump's clock set twelve hours back",
+    "clock-73h-ahead": "6 h: as clock-spring-forward, the pump's clock set 73 h ahead and left there; the app has to set it",
+    "clock-73h-behind": "6 h: as clock-spring-forward, the pump's clock set 73 h back and left there; the app has to set it",
+    "clock-reset-2008": "6 h: a pump bolus, a pump reset to 2008-01-01 (ArmInit, no change record, IOB forgotten), a pump "
+                        "bolus on the 2008 clock; about 0.7 U IOB",
+    "clock-reset-2020": "6 h: as clock-reset-2008, the clock restarting at 2020-01-01",
+    "clock-jump-2035": "6 h: a pump bolus, the pump's clock jumping to 2035 with no record, a pump bolus on the 2035 clock",
+    "shelf-mode-wake": "8 h: two pump boluses, a suspend, shelf mode and a reset to 2008, set on the pump to 2020, still "
+                       "suspended; the field report whose old boluses reached Trio dated years ahead",
 }
 TANDEM_PLUGIN_ID = "TandemPumpManager"
 REMOTE = {"faketandem_api"}

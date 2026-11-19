@@ -48,8 +48,10 @@ launch. CI: `pump`, `pump_setup`, `pump_scenario` and `faketandem_ref`; `trio-te
   `scheduled-basal` (basal alone), `pump-boluses` (pump-screen boluses only), `app-doses` (another app's boluses and
   temps, one still running), `suspended-now` (suspended when the app connects), `stopped-boluses` (the last bolus
   stopped at 0 U), `control-iq` (Control-IQ on; walk setup), `pump-profile-differs` (the pump's profile is not the
-  app's) and `day-of-use` (24 hours). They write a BasalDelivery record every 5 minutes at the rate in force. A JSON
-  file works too (faketandem's README, "A pump already in use").
+  app's), `day-of-use` (24 hours), the `clock-*` presets (a DST change, a trip of 3 or 12 hours, the clock set 73 hours
+  off, a reset to 2008 or 2020, an unrecorded jump to 2035, each between two pump boluses) and `shelf-mode-wake` (the
+  field report: shelf mode, a reset to 2008, set on the pump to 2020). They write a BasalDelivery record every 5 minutes
+  at the rate in force. A JSON file works too (faketandem's README, "A pump already in use").
 - `th faketandem status` shows what the pump holds. `history` lists its dose records. `pairing [STATE]` reads or sets
   the pairing step. `api METHOD PATH ['JSON']` makes the pump act on its own, for example
   `POST /api/state/bolus/start '{"units":1}'`, or `POST /api/state/filltubing/button '{"hold_seconds":3}'` to hold the

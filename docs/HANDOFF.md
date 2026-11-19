@@ -173,6 +173,11 @@ until merged: pass `--faketandem-ref` until then).
   and `pump_scenario` is a dropdown of them in the web UI and the e2e workflow (`SCENARIOS` in `harness/faketandem.py`,
   which the workflow's option list mirrors). Verified with faketandem's own tests and by starting the binary with each;
   **not yet run against the app**: none of the new presets has been through a `trio-test-e2e` run.
+- 2026-11-19: twelve presets that change the pump's clock in its history (`clock-spring-forward`, `clock-fall-back`,
+  `clock-travel-east|west`, `clock-travel-12h-east|west`, `clock-73h-ahead|behind`, `clock-reset-2008|2020`,
+  `clock-jump-2035`, `shelf-mode-wake`; README table), built on faketandem's new `clock_change` scenario event, on
+  jwoglom/faketandem branch `claude/clock-change-scenarios` until merged. Verified with faketandem's own tests (each
+  preset's readings and clock records); **not yet run against the app**.
 - Verified on Linux, without a simulator: building faketandem from a checkout, starting it for either setup with a
   scenario, `th faketandem status|history|pairing|api|stop --save`, and the seeded `PumpManagerState.plist` (the key
   faketandem holds, its peripheral id) and basal profile.

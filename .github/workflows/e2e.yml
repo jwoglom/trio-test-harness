@@ -63,7 +63,7 @@ on:
       pump_scenario:
         description: "faketandem only: what the pump did in the hours before the app connects (none: no history). Each preset is described in the README's faketandem section"
         type: choice
-        options: [none, recent-doses, scheduled-basal, pump-boluses, app-doses, suspended-now, stopped-boluses, control-iq, pump-profile-differs, day-of-use]
+        options: [none, recent-doses, scheduled-basal, pump-boluses, app-doses, suspended-now, stopped-boluses, control-iq, pump-profile-differs, day-of-use, clock-spring-forward, clock-fall-back, clock-travel-east, clock-travel-west, clock-travel-12h-east, clock-travel-12h-west, clock-73h-ahead, clock-73h-behind, clock-reset-2008, clock-reset-2020, clock-jump-2035, shelf-mode-wake]
         default: none
       faketandem_ref:
         description: "faketandem branch, tag or commit to build (blank: main)"

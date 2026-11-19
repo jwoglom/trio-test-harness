@@ -138,8 +138,17 @@ own figure with Control-IQ off.
 | `control-iq` | 6 h with Control-IQ on and still on: its rate moving between 0 and 1.4 U/hr, two automatic boluses and one from the pump; TandemKit's setup turns Control-IQ off, so use it with `--pump-setup walk` |
 | `pump-profile-differs` | 6 h on a six-segment pump profile (0.6–1.1 U/hr) that is not the app's: TandemKit writes the app's schedule over it, and a setup history load finds basal the app did not count |
 | `day-of-use` | 24 h of boluses, temps and a suspend: four times the 6 h a setup history load reads |
+| `clock-spring-forward`, `clock-fall-back` | 6 h: a 2.0 U pump bolus and a 150% temp, the pump's clock set an hour ahead (back) on its screen for a DST change, which leaves it on the phone's time, and a 1.0 U pump bolus after; the records either side are stamped on different clocks. About 1.1 U IOB |
+| `clock-travel-east`, `clock-travel-west` | The same across a trip three hours east (west) |
+| `clock-travel-12h-east`, `clock-travel-12h-west` | The same across a trip twelve hours east (west), the set crossing midnight on the pump's clock |
+| `clock-73h-ahead`, `clock-73h-behind` | The same doses, the pump's clock set 73 hours ahead (back) and left there: past the 24 hours TandemKit trusts, so setup or the app's settings have to set it |
+| `clock-reset-2008`, `clock-reset-2020` | 6 h: a 2.0 U pump bolus, then a pump reset whose clock restarts at 2008-01-01 (2020-01-01) with an `ArmInit` record and no `TimeChanged` or `DateChange`, IOB and the last bolus forgotten, and a 1.0 U pump bolus on the restarted clock. About 0.7 U IOB |
+| `clock-jump-2035` | 6 h: a 2.0 U pump bolus, the pump's clock jumping to 2035 with no record at all, a 1.0 U pump bolus on the 2035 clock |
+| `shelf-mode-wake` | 8 h: two pump boluses, a suspend, a `ShelfMode` record and a reset to 2008, the clock set on the pump to 2020 four minutes later, still suspended; no IOB, no last bolus. The field report in which setup's clock write moved the old boluses to 2033 and Trio took them as given at the time they were read |
 
 The presets past `scheduled-basal` need a faketandem that has them (`--faketandem-ref` until they are on its `main`).
+The `clock-*` and `shelf-mode-wake` presets put a change to the pump's clock in its history. TandemKit's conformance
+scenarios G10–G20 and L12–L22 (`docs/conformance-test-plan.md`) run the same changes and say what it should report.
 
 `th faketandem start|stop|status|seed|pairing|history|scenario|api` controls the emulator and reads what the pump
 holds (`th faketandem --help`). The CI agent reaches it through the sim daemon, because the agent's sandbox has no
