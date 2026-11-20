@@ -235,7 +235,7 @@ def link_as_spec(spec: str) -> str:
 def split_branch_spec(spec: str, src: Path) -> tuple[str, str]:
     """A branch spec -> (remote name or fetch URL, branch).
 
-      feat/x                                  origin (falls back to the app's upstream repo if origin lacks it)
+      feat/x                                  the app's repo (nightscout/Trio), else origin if only origin has it
       upstream:feat/x   upstream@feat/x       a remote of the checkout (origin, upstream, ...)
       owner/repo:feat/x owner/repo@feat/x     that GitHub repo
       <git URL>#feat/x                        any repo
@@ -261,28 +261,40 @@ def split_branch_spec(spec: str, src: Path) -> tuple[str, str]:
     return "origin", spec
 
 
-def _fetch_trio_branch(src: Path, br: str, ref: str, app: "str | apps.App | None" = None) -> str:
-    """Fetch branch spec `br` (see split_branch_spec) of the app's repo into `ref`. Returns the remote/URL it came from.
+def _app_repo_remote(src: Path, upstream_repo: str) -> str:
+    """The checkout's remote for the app's own repo (origin or upstream, whichever points there), else its URL."""
+    for r in ("origin", "upstream"):
+        cp = _git(["remote", "get-url", r], src, check=False, quiet=True)
+        if cp.returncode == 0 and _gh_slug(cp.stdout.strip()) == upstream_repo.lower():
+            return r
+    return _gh_repo_url(upstream_repo)
 
-    A bare name comes from origin, else from upstream / the app's repo (nightscout/Trio, LoopKit/LoopWorkspace): origin
-    is often a fork (jwoglom/Trio) that does not carry every upstream branch (e.g. feat/tandem-closed-beta).
+
+def _fetch_trio_branch(src: Path, br: str, ref: str, app: "str | apps.App | None" = None) -> str:
+    """Fetch branch spec `br` (see split_branch_spec) of the app's repo into `ref`. Returns where it came from
+    (owner/repo for a GitHub repo, else the remote or URL), for the log.
+
+    A bare name is a branch of the app's repo (nightscout/Trio, LoopKit/LoopWorkspace) even when origin is a fork
+    (TH_TRIO_ORIGIN=jwoglom/Trio on CI): a fork's copy of an upstream branch can be months stale (jwoglom/Trio's
+    feat/tandem still pinned the deleted loopandlearn/LibreCRKit after nightscout's had moved on). Only a branch the
+    app's repo does not have comes from origin; `origin:feat/x` asks for the fork's copy.
     """
     upstream_repo = _app(app).default_repo
     url, name = split_branch_spec(br, src)
     if (url, name) != ("origin", br):
         _git(["fetch", "--force", url, f"+{name}:{ref}"], src, timeout=900)
-        return url
-    cp = _git(["fetch", "--force", "origin", f"+{br}:{ref}"], src, check=False, timeout=900)
+        return _gh_slug(_origin_url(src) if url == "origin" else url)
+    remote = _app_repo_remote(src, upstream_repo)
+    cp = _git(["fetch", "--force", remote, f"+{br}:{ref}"], src, check=False, timeout=900)
     if cp.returncode == 0:
-        return "origin"
+        return upstream_repo
     out = (cp.stderr or "") + (cp.stdout or "")
-    origin = _origin_url(src)
-    if "couldn't find remote ref" not in out or _gh_slug(origin) == upstream_repo.lower():
-        raise HarnessError(f"git fetch origin {br} failed:\n{out[-2000:]}")
-    upstream = "upstream" if "upstream" in _git(["remote"], src, quiet=True).stdout.split() else _gh_repo_url(upstream_repo)
-    log(f"branch {br} is not on origin ({_gh_slug(origin)}); fetching it from {upstream_repo}")
-    _git(["fetch", "--force", upstream, f"+{br}:{ref}"], src, timeout=900)
-    return upstream_repo
+    if "couldn't find remote ref" not in out or remote == "origin":
+        raise HarnessError(f"git fetch {upstream_repo} {br} failed:\n{out[-2000:]}")
+    origin = _gh_slug(_origin_url(src))
+    log(f"branch {br} is not on {upstream_repo}; fetching it from origin ({origin})")
+    _git(["fetch", "--force", "origin", f"+{br}:{ref}"], src, timeout=900)
+    return origin
 
 
 def pr_metadata(slug: str, number: int) -> dict:
@@ -391,20 +403,17 @@ def resolve_pr_target(pr: str, src: Path, trio_branch: str | None = None, app: "
     if _repo_name(slug) == a.repo_name:
         return {"kind": "trio", "slug": slug, "number": num}
     candidates = [b for b in [trio_branch, a.base_branch, *a.submodule_branches] if b]
-    _git(["fetch", "--quiet", "origin"], src, timeout=900, check=False)
     seen = []
     for br in candidates:
         if br in seen:
             continue
         seen.append(br)
-        cp = _git(["show", f"origin/{br}:.gitmodules"], src, check=False, quiet=True)
-        if cp.returncode != 0 and br in (trio_branch, a.base_branch):
-            # asked for by name, or the base branch: it may be an upstream-only branch (origin is a fork)
-            try:
-                _fetch_trio_branch(src, br, "refs/th/trio-branch", a)
-                cp = _git(["show", "refs/th/trio-branch:.gitmodules"], src, check=False, quiet=True)
-            except HarnessError:
-                pass
+        # read the copy prepare_source will check out (the app's repo before a fork origin's, see _fetch_trio_branch)
+        try:
+            _fetch_trio_branch(src, br, "refs/th/trio-branch", a)
+        except HarnessError:
+            continue
+        cp = _git(["show", "refs/th/trio-branch:.gitmodules"], src, check=False, quiet=True)
         if cp.returncode != 0:
             continue
         for name, m in _parse_gitmodules(cp.stdout).items():
@@ -790,15 +799,15 @@ def prepare_source(*, branch: str | None = None, pr: str | None = None, repo: st
                 _git(["checkout", "--force", "--detach", f"refs/th/pr-{target['number']}"], src)
             else:
                 br = target["trio_branch"]
-                log(f"{target['slug']}#{target['number']} is a PR on submodule {target['submodule']}; using {a.default_repo} {br}")
-                _fetch_trio_branch(src, br, "refs/th/trio-branch", a)
+                came_from = _fetch_trio_branch(src, br, "refs/th/trio-branch", a)
+                log(f"{target['slug']}#{target['number']} is a PR on submodule {target['submodule']}; using {came_from} {br}")
                 _git(["checkout", "--force", "--detach", "refs/th/trio-branch"], src)
                 info["trio_branch"] = br
                 info["submodule_pr"] = target
                 submodules.append(f"{target['submodule']}={_gh_repo_url(target['slug'])}#pull/{target['number']}/head")
         else:
             assert branch
-            _fetch_trio_branch(src, branch, "refs/th/branch", a)
+            log(f"branch {branch} from {_fetch_trio_branch(src, branch, 'refs/th/branch', a)}")
             _git(["checkout", "--force", "--detach", "refs/th/branch"], src)
             info["branch"] = branch
         # remove leftovers from a previous PR/branch (e.g. a submodule dir that does not exist on this branch),
