@@ -366,8 +366,9 @@ gh workflow run e2e.yml -R jwoglom/trio-test-harness -f trio=feat/tandem -f subm
 
 - **Trio PR or branch**: a PR link, `owner/repo#N`, a nightscout/Trio PR number, or a branch. Blank means `dev`,
   or, with a submodule PR, the Trio branch whose `.gitmodules` has that submodule.
-  Branches: `feat/x` (origin, falling back to `upstream`/nightscout/Trio when origin lacks it), `upstream:feat/x` or
-  `origin:feat/x` (a remote of the checkout), `owner/repo:feat/x` (any GitHub repo); `@` works in place of `:`.
+  Branches: `feat/x` (nightscout/Trio's, even when origin is a fork with its own copy; origin's only when nightscout/Trio
+  has no such branch), `upstream:feat/x` or `origin:feat/x` (a remote of the checkout, e.g. the fork's copy),
+  `owner/repo:feat/x` (any GitHub repo); `@` works in place of `:`.
 - **Submodules**: PR links / `owner/repo#N` and `NAME@branch` (or `owner/repo@branch`), space-separated.
 - **The run's PR** (read into `pr.md`, and where a comment goes) is the Trio PR, else the first submodule PR.
   `ci/inputs.py` has the mapping onto `trio-test-e2e` flags.
