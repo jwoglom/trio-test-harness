@@ -164,6 +164,35 @@ every pump bolus once, at the time the preset gave it, nothing from before a res
 future, and IOB near the preset's. TandemKit's conformance scenarios (G, L and M groups in its
 `docs/conformance-test-plan.md`) run the same changes and pin what it should report.
 
+### Several scenarios in one run
+
+`--pump-scenario` takes a comma-separated list (at most 6), or `auto` (`harness/rounds.py`):
+
+```bash
+./trio-test-e2e --mode simulator --pr <TandemKit PR> --pump faketandem --pump-setup walk \
+    --pump-scenario pump-reset,clock-travel-12h-east,clock-73h-ahead
+./trio-test-e2e --mode simulator --pr <TandemKit PR> --pump faketandem --pump-scenario auto
+```
+
+The app is built once and each scenario is a round, tested from a new pump and a reinstalled app (an empty data
+container), so nothing the driver read or Trio stored for one scenario reaches the next. `trio-test-e2e` prepares
+round 1. A job (CI, the web UI) then runs one agent pass per round, each with its own `agent_minutes`, and between
+two passes runs `th rounds next --run <run>`, which saves the pump's side of the finished round into
+`faketandem/<n>-<scenario>/`, starts faketandem on the next scenario (the same binary), reinstalls and seeds the app
+and gets it to its home screen with the simulated CGM. A job's agent cannot run `rounds next` (it replaces what the
+job set up); a terminal session handed the run by `trio-test-e2e` is told to run it itself.
+
+`auto` asks a small model (`harness/scenarioscope.py`, `TH_SCOPE_MODEL`, default haiku) to pick 1 to 4 presets from
+the run's PRs, most telling first; without Claude, history or pump clock code in the changed files picks a reset, a
+12-hour trip, the clock 73 hours ahead and `out-of-shelf-mode`, and anything else `recent-doses` and `app-doses`.
+Under `auto`, the reset and `clock-*` presets are set up in the app (walk) whatever `--pump-setup` says.
+
+One run holds every round: a `round` step opens each in the report, each pass's `run finish` is kept per round
+(`th rounds status`) and the run's status is the worst of them, and `agent-summary.md` has a section per scenario.
+In CI: `pump_scenario` `auto`, or `pump_scenarios` for a list (the job's time limit rises to 6 hours for either). In
+the web UI: "Pump history" `auto`, or "Several, one after another". `trio-test-ci --pump-scenario a,b,c` sends a list
+as `pump_scenarios`.
+
 `th faketandem start|stop|status|seed|pairing|history|scenario|api` controls the emulator and reads what the pump
 holds (`th faketandem --help`). The CI agent reaches it through the sim daemon, because the agent's sandbox has no
 network. `stop --save` writes the pump's state, history log, request log and log into the run's `faketandem/`, and CI

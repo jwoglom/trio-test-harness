@@ -33,6 +33,7 @@ cd ~/repos/trio-test-harness
 | the paired Apple Watch too | `--devices phone+watch` (`auto` lets a small model decide); `--watch-model 40mm` … `49mm` |
 | Pump Simulator + simulated CGM | default (`--no-smoke` stops at the home screen) |
 | Tandem against faketandem | `--pump faketandem [--pump-setup walk] [--pump-scenario recent-doses]` (trio-fake-devices skill) |
+| several pump scenarios | `--pump-scenario pump-reset,clock-fall-back` (one agent pass each; `--agent-minutes` is per scenario), or `auto` |
 | Loop instead of Trio | `--app loop` |
 | walk onboarding | `--walk-onboarding` |
 | what to test | `--instructions "…"`: numbered flows with the expected result of each, what to screenshot, and which phone log lines prove it (`logs trio --grep …`). The agent sees only this and the PR. |

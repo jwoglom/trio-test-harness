@@ -316,7 +316,7 @@ class ScenarioLists(unittest.TestCase):
         workflow = (REPO_ROOT / ".github" / "workflows" / "e2e.yml").read_text()
         block = workflow[workflow.index("pump_scenario:"):]
         options = re.search(r"options: \[([^\]]*)\]", block).group(1).split(", ")
-        self.assertEqual(options, ["none", *SCENARIOS])
+        self.assertEqual(options, ["none", "auto", *SCENARIOS])
 
     def test_history_scenarios_are_presets(self):
         from harness.faketandem import HISTORY_SCENARIOS, SCENARIOS

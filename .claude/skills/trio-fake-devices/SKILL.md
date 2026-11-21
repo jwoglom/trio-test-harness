@@ -31,7 +31,7 @@ relaunches Loop; by hand, tap the glucose HUD ▸ Simulator Settings ▸ Model (
 
 For TandemKit itself (pairing, its setup and settings screens, what the driver reads from and sends to the pump),
 the pump can be a Tandem Mobi emulated by faketandem instead of the Pump Simulator. The app has to be a virtual-pump
-build: `trio-test-e2e --mode simulator --pump faketandem [--pump-setup preseed|walk] [--pump-scenario recent-doses]
+build: `trio-test-e2e --mode simulator --pump faketandem [--pump-setup preseed|walk] [--pump-scenario recent-doses|a,b,c|auto]
 [--faketandem-ref REF]` builds Trio with `TANDEMKIT_VIRTUAL_PUMP` (Debug only; its own DerivedData, `…-virtualpump`),
 starts faketandem (built with Go from jwoglom/faketandem, `TH_FAKETANDEM_*`) and hands the app its address at every
 launch. CI: `pump`, `pump_setup`, `pump_scenario` and `faketandem_ref`; `trio-test-ci --pump faketandem …`.

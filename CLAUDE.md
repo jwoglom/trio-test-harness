@@ -19,7 +19,7 @@ Start here, in order:
 harness CLI. The job marks that agent with `TH_JOB_AGENT=1` (`.github/workflows/e2e.yml`, `harness/webui.py`), and every
 entry point that starts a job refuses under it (`harness/jobguard.py`: `trio-test-e2e`, `trio-test-harness webui`;
 `trio-test-ci` checks it itself, and `GITHUB_ACTIONS`). So does anything that would replace what the job set up outside
-the sandbox (`watch agent start|stop|build`, `watch pair`). Skills that start jobs go in `host-skills/`, never
+the sandbox (`watch agent start|stop|build`, `watch pair`, `rounds next`). Skills that start jobs go in `host-skills/`, never
 `.claude/skills/`, which job agents load. Keep all three when adding a way to start runs; the sandbox
 (`ci/claude-sandbox.py`) blocks these too, but nothing here depends on it.
 

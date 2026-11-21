@@ -232,13 +232,18 @@ def check_scenario(scenario: str | None) -> None:
 
 
 def start(*, setup: str = "preseed", scenario: str | None = None, ref: str | None = None,
-          startup_timeout: float = 60.0) -> dict:
-    """A new faketandem (any running one is stopped) for `setup`, with `scenario` replayed before anything connects."""
+          startup_timeout: float = 60.0, reuse: dict | None = None) -> dict:
+    """A new faketandem (any running one is stopped) for `setup`, with `scenario` replayed before anything connects.
+    `reuse`, an earlier faketandem's record (`current()`), runs its binary without fetching or building again (a
+    run's later rounds)."""
     if setup not in SETUPS:
         raise HarnessError(f"unknown pump setup {setup!r} ({' | '.join(SETUPS)})")
     check_scenario(scenario)
     stop()
-    path, info = binary(ref)
+    if reuse and reuse.get("binary") and Path(reuse["binary"]).exists():
+        path, info = Path(reuse["binary"]), {k: reuse[k] for k in ("source", "ref", "sha") if reuse.get(k)}
+    else:
+        path, info = binary(ref)
     gatt, api_port = f"{HOST}:{_free_port()}", _free_port()
     cmd = [str(path), "-transport", "virtual", "-virtual-addr", gatt, "-api-addr", f"{HOST}:{api_port}", "-q"]
     key = os.urandom(32) if setup == "preseed" else None
@@ -310,8 +315,10 @@ def stop(save_to: Path | None = None) -> bool:
 
 
 def save(run_dir: Path) -> list[Path]:
-    """The pump's side of a run, into its directory: faketandem/state.json, history.json, requests.json and the log."""
-    out = Path(run_dir) / "faketandem"
+    """The pump's side of a run, into its directory: faketandem/state.json, history.json, requests.json and the log;
+    in a run of several pump scenarios, into the current round's faketandem/<n>-<scenario>/ (harness/rounds.py)."""
+    from .rounds import faketandem_save_dir
+    out = faketandem_save_dir(run_dir)
     out.mkdir(parents=True, exist_ok=True)
     written = []
     for name, path in (("state.json", "/api/state"), ("history.json", "/api/history?limit=5000"),

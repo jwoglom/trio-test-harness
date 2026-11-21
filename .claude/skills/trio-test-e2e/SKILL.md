@@ -21,11 +21,17 @@ they say where it is in the app and what it does.
    ./trio-test-e2e --app loop --mode simulator --pr <TandemKit, LoopKit/Loop or LoopWorkspace PR>   # Loop instead of Trio
    ./trio-test-e2e --mode simulator --pr <TandemKit PR> --pump faketandem [--pump-setup walk] [--pump-scenario recent-doses]
                                                             # TandemKit against an emulated Mobi (trio-fake-devices skill)
+   ./trio-test-e2e ... --pump faketandem --pump-scenario pump-reset,clock-fall-back   # or auto: several scenarios,
+                                                            # one after another (README "Several scenarios in one run")
    ```
    `--app loop` tests Loop built from LoopKit/LoopWorkspace (`feat/tandem-closed-beta` has TandemKit) through the same
    stages; the agent hand-off sets `TH_APP=loop`, so every `th` command then acts on Loop and `th docs` reads LoopDocs.
    `rooted-vnc` = the jailbroken iPhone (TrollVNC + SSH), `iphone-usb` = any iPhone through macOS iPhone Mirroring. Inside Claude Code the script never spawns another Claude (it checks
    `CLAUDECODE`); from a plain terminal it hands off to `claude` with this workflow after the smoke test.
+   With several pump scenarios, the prompt you were handed names the one you are on: test it, then run
+   `./trio-test-harness rounds next` (a new faketandem and a reinstalled app) and test the next; `rounds status` lists
+   them, and `run finish` records each one's verdict. A job's agent is refused `rounds next`: it is told to end its
+   session after its scenario, and the job prepares the next one.
    Builds take 30–60 min on this iMac: run it in the background and keep the simulator shut down meanwhile if a
    simulator build is running (`th sim shutdown`); the script boots it when needed.
 2. When it finishes it prints `run:`, `report:` and `pr.md:` paths. If it failed, the run's last screenshots and
