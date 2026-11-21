@@ -173,6 +173,21 @@ until merged: pass `--faketandem-ref` until then).
   and `pump_scenario` is a dropdown of them in the web UI and the e2e workflow (`SCENARIOS` in `harness/faketandem.py`,
   which the workflow's option list mirrors). Verified with faketandem's own tests and by starting the binary with each;
   **not yet run against the app**: none of the new presets has been through a `trio-test-e2e` run.
+- 2026-11-21: seventeen presets of pump resets and clock changes in the pump's history (`HISTORY_SCENARIOS` in
+  `harness/faketandem.py`; README table): `out-of-shelf-mode`, `pump-reset`, `reboot-kept-clock`, `clock-set-back`
+  (faketandem `main`, its #60) and thirteen more `clock-*` (jwoglom/faketandem branch `ccr-8d1f9957-exbmbn` until
+  merged), covering small and large, recorded and unrecorded changes. They replace the unmerged
+  `claude/clock-change-scenarios` branches of both repos, whose `clock_change` event faketandem #60 superseded; its
+  DST, travel, 73-hour and jump presets were ported, and its resets and `shelf-mode-wake` are `pump-reset` and
+  `out-of-shelf-mode`. `trio-test-e2e` warns when one runs with `--pump-setup preseed`, which reports none of the
+  pump's past. Verified with faketandem's tests; **not yet run against the app**.
+- 2026-11-21: several pump scenarios in one run (`harness/rounds.py`, README "Several scenarios in one run"):
+  `--pump-scenario a,b,c` or `auto` (`harness/scenarioscope.py`). One build; each scenario a round from a new
+  faketandem and a reinstalled app; one agent pass per round in CI (`pump_scenarios`, the agent step's loop) and the
+  web UI (`run_job`), with `th rounds next` between them, outside the sandbox. Verified on Linux: unit tests
+  (`tests/test_rounds.py`, `rounds next` with the stages stubbed), and faketandem started, saved into a round's folder
+  and restarted on the next scenario with the same binary. **Not yet run on the macOS workers**: the reinstall, launch
+  and smoke between rounds, the CI loop (perl's alarm as the per-pass limit) and the web UI loop are untested there.
 - Verified on Linux, without a simulator: building faketandem from a checkout, starting it for either setup with a
   scenario, `th faketandem status|history|pairing|api|stop --save`, and the seeded `PumpManagerState.plist` (the key
   faketandem holds, its peripheral id) and basal profile.

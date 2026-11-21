@@ -67,7 +67,43 @@ SCENARIOS = {
     "control-iq": "6 h with Control-IQ on and still on: its rate moving, two automatic boluses; for the walk setup",
     "pump-profile-differs": "6 h on a six-segment pump profile that is not the app's flat 0.85 U/hr",
     "day-of-use": "24 h of boluses, temps and a suspend: four times the setup history load's 6 h window",
+    # Resets and clock changes in the pump's history. What a driver should report is the same in each: every bolus
+    # once, at the instant the pump gave it, and nothing from before a reset.
+    "out-of-shelf-mode": "the field log's Mobi: boluses 201 days ago, ShelfMode, its clock restarted at 2008 and set "
+                         "on the pump to 2020, suspended since; setup has to move the clock 6.9 years. No IOB",
+    "pump-reset": "6 h: pump and app boluses, a suspend and a reset 3 h ago (clock restarted at 2008, no record), "
+                  "resumed, a pump bolus 1 h ago on the 2008 clock; about 1.4 U IOB",
+    "reboot-kept-clock": "6 h: a pump bolus 45 min ago, a reboot that kept the clock (ArmInit), a bolus 10 min ago; "
+                         "TandemKit leaves out the bolus before the ArmInit on purpose; about 3.7 U IOB",
+    "clock-drifted-ahead": "6 h of pump boluses on a clock 7 min ahead with no record of it: past TandemKit's 5 min "
+                           "skew threshold; about 2.5 U IOB",
+    "clock-nudged-back": "6 h: the clock 3 min ahead, set right on the pump between two boluses a minute either side, so "
+                         "the later one is stamped first; about 2.0 U IOB",
+    "clock-set-back": "6 h: the clock set back an hour on the pump, a bolus on that clock, set forward again; about "
+                      "2.0 U IOB",
+    "clock-spring-forward": "6 h: a pump bolus, a 150% temp across the pump's clock set an hour ahead onto the phone's "
+                            "(DST), a bolus after; about 1.1 U IOB",
+    "clock-fall-back": "6 h: as clock-spring-forward, the clock set an hour back onto the phone's",
+    "clock-travel-east": "6 h: as clock-spring-forward, the clock set 3 h ahead onto the phone's after a trip east",
+    "clock-travel-west": "6 h: as clock-spring-forward, the clock set 3 h back onto the phone's after a trip west",
+    "clock-travel-12h-east": "6 h: as clock-spring-forward, the clock set 12 h ahead onto the phone's",
+    "clock-travel-12h-west": "6 h: as clock-spring-forward, the clock set 12 h back onto the phone's",
+    "clock-set-ahead-hours": "6 h: the clock set 6 h ahead on the pump and left there, pump boluses either side: past "
+                             "the skew threshold, inside the 24 h trust limit; about 2.1 U IOB",
+    "clock-73h-ahead": "6 h: as clock-spring-forward, the clock set 73 h ahead and left there, past the 24 h trust "
+                       "limit; the app has to set it",
+    "clock-date-set-back": "6 h: the date set back 31 days on the pump (DateChange only), a bolus after stamped a month "
+                           "early; past the trust limit; about 1.6 U IOB",
+    "clock-jumped-back": "6 h: the clock 2 days back with no record and no reboot; only a stamp running back shows it, "
+                         "and nothing before it can be dated; about 1.1 U IOB",
+    "clock-jumped-ahead": "6 h: the clock 9 years ahead with no record and no reboot, a bolus either side; the app has "
+                          "to set it; about 1.1 U IOB",
 }
+# The presets above whose point is how the driver dates and reports the pump's history. A preseeded driver reports
+# nothing from before it first ran (its ledgers' trackingSince) and skips setup's clock write, so these need
+# --pump-setup walk, which loads the history at setup and sets the pump's clock.
+HISTORY_SCENARIOS = frozenset(k for k in SCENARIOS
+                              if k.startswith("clock-") or k in ("out-of-shelf-mode", "pump-reset", "reboot-kept-clock"))
 TANDEM_PLUGIN_ID = "TandemPumpManager"
 REMOTE = {"faketandem_api"}
 
@@ -196,13 +232,18 @@ def check_scenario(scenario: str | None) -> None:
 
 
 def start(*, setup: str = "preseed", scenario: str | None = None, ref: str | None = None,
-          startup_timeout: float = 60.0) -> dict:
-    """A new faketandem (any running one is stopped) for `setup`, with `scenario` replayed before anything connects."""
+          startup_timeout: float = 60.0, reuse: dict | None = None) -> dict:
+    """A new faketandem (any running one is stopped) for `setup`, with `scenario` replayed before anything connects.
+    `reuse`, an earlier faketandem's record (`current()`), runs its binary without fetching or building again (a
+    run's later rounds)."""
     if setup not in SETUPS:
         raise HarnessError(f"unknown pump setup {setup!r} ({' | '.join(SETUPS)})")
     check_scenario(scenario)
     stop()
-    path, info = binary(ref)
+    if reuse and reuse.get("binary") and Path(reuse["binary"]).exists():
+        path, info = Path(reuse["binary"]), {k: reuse[k] for k in ("source", "ref", "sha") if reuse.get(k)}
+    else:
+        path, info = binary(ref)
     gatt, api_port = f"{HOST}:{_free_port()}", _free_port()
     cmd = [str(path), "-transport", "virtual", "-virtual-addr", gatt, "-api-addr", f"{HOST}:{api_port}", "-q"]
     key = os.urandom(32) if setup == "preseed" else None
@@ -274,8 +315,10 @@ def stop(save_to: Path | None = None) -> bool:
 
 
 def save(run_dir: Path) -> list[Path]:
-    """The pump's side of a run, into its directory: faketandem/state.json, history.json, requests.json and the log."""
-    out = Path(run_dir) / "faketandem"
+    """The pump's side of a run, into its directory: faketandem/state.json, history.json, requests.json and the log;
+    in a run of several pump scenarios, into the current round's faketandem/<n>-<scenario>/ (harness/rounds.py)."""
+    from .rounds import faketandem_save_dir
+    out = faketandem_save_dir(run_dir)
     out.mkdir(parents=True, exist_ok=True)
     written = []
     for name, path in (("state.json", "/api/state"), ("history.json", "/api/history?limit=5000"),

@@ -62,9 +62,11 @@ def parse_args(argv=None) -> argparse.Namespace:
                         "on its virtual pump")
     p.add_argument("--pump-setup", choices=["preseed", "walk"],
                    help="faketandem: preseed (default; the app starts paired) or walk (the agent pairs it in the app)")
-    p.add_argument("--pump-scenario", metavar="NAME",
+    p.add_argument("--pump-scenario", metavar="NAME[,NAME...]|auto",
                    help="faketandem: pump use before the app connects, one of the workflow's pump_scenario presets "
-                        "(SCENARIOS in harness/faketandem.py: recent-doses, pump-boluses, suspended-now, ...; default none)")
+                        "(SCENARIOS in harness/faketandem.py: recent-doses, pump-boluses, suspended-now, ...; default "
+                        "none); several, comma-separated, run one after another with an agent pass each "
+                        "(pump_scenarios); auto lets a small model pick up to 4 from the PRs")
     p.add_argument("--faketandem-ref", metavar="REF", help="faketandem branch, tag or sha (default main)")
     p.add_argument("--devices", choices=["phone", "phone+watch", "auto"],
                    help="phone (default), phone+watch (the app's Watch app on a paired watch simulator), or auto (a small "
@@ -108,7 +110,9 @@ def workflow_fields(a: argparse.Namespace) -> dict[str, str]:
         f["pump"] = a.pump
     if a.pump_setup:
         f["pump_setup"] = a.pump_setup
-    if a.pump_scenario:
+    if a.pump_scenario and "," in a.pump_scenario:
+        f["pump_scenarios"] = a.pump_scenario
+    elif a.pump_scenario:
         f["pump_scenario"] = a.pump_scenario
     if a.faketandem_ref:
         f["faketandem_ref"] = a.faketandem_ref

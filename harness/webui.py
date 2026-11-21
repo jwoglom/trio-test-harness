@@ -320,8 +320,19 @@ class Manager:
         if pump == "faketandem" and (target != "simulator" or conf != "Debug"):
             raise ValueError("pump: faketandem runs on the simulator, in a Debug build")
         pump_scenario, faketandem_ref = text("pump_scenario", 200), text("faketandem_ref", 100)
-        if pump_scenario and pump_scenario not in FT_SCENARIOS:
-            raise ValueError(f"pump_scenario: one of {', '.join(FT_SCENARIOS)}, or blank for none")
+        # several presets, run one after another (harness/rounds.py), override the single choice
+        pump_scenario = text("pump_scenarios", 1000) or pump_scenario
+        if pump_scenario and pump_scenario != "auto":
+            names = [n.strip() for n in pump_scenario.split(",") if n.strip()]
+            if not names or any(n not in FT_SCENARIOS for n in names):
+                raise ValueError(f"pump_scenario: auto, or presets ({', '.join(FT_SCENARIOS)}), comma-separated, "
+                                 "or blank for none")
+            from . import rounds
+            try:
+                rounds.parse(",".join(names))
+            except HarnessError as e:
+                raise ValueError(f"pump_scenario: {e}") from None
+            pump_scenario = ",".join(names)
         if faketandem_ref and not re.fullmatch(r"[\w./-]+", faketandem_ref):
             raise ValueError("faketandem_ref: letters, digits and . / - _ only")
         return {"app": app, "target": target, "trio": text("trio"), "submodules": text("submodules", 1000),
@@ -423,24 +434,32 @@ def run_job(job: Job) -> None:
                                     else ("agent-prompt-rooted-vnc.md", "agent-limits-rooted-vnc.md"))
         if inp.get("app") == "loop":
             prompt_file = prompt_file.replace(".md", "-loop.md")
-        smoke_note = f", with the {' and '.join(sims)} configured" if sims else ""
-        from . import pipeline
+        from . import pipeline, rounds
         # what is under test (titles, links, branches, the commits built, every PR's description) before the focus
         extra = pipeline.pr_context(rd) + extra
-        if inp.get("pump") == "faketandem":
-            from . import faketandem
-            smoke_note += (", and a Tandem pump on faketandem " + ("not set up yet: you walk its setup"
-                           if inp.get("pump_setup") == "walk" else "already paired") + " (see below)")
-            extra += faketandem.agent_notes(rd)
-        extra += pipeline.setup_notes(rd)
+        focus = extra
         # whether trio-test-e2e included the watch (asked for, or decided by --devices auto)
         try:
             watch = bool(json.loads((rd / "run.json").read_text()).get("watch"))
         except (OSError, ValueError):
             watch = False
-        if watch:
-            extra += "\n" + (REPO_ROOT / "ci" / "agent-watch.md").read_text()
-        prompt = (REPO_ROOT / "ci" / prompt_file).read_text().format(run_dir=rd, smoke_note=smoke_note, extra=extra)
+
+        def build_prompt() -> str:
+            """One agent pass's prompt; with several pump scenarios each pass's names its round and that round's
+            pump setup (harness/rounds.py)."""
+            smoke_note = f", with the {' and '.join(sims)} configured" if sims else ""
+            more = focus
+            if inp.get("pump") == "faketandem":
+                from . import faketandem
+                setup = (read_json(rd / "run.json", {}).get("pump") or {}).get("setup") or inp.get("pump_setup")
+                smoke_note += (", and a Tandem pump on faketandem " + ("not set up yet: you walk its setup"
+                               if setup == "walk" else "already paired") + " (see below)")
+                more += faketandem.agent_notes(rd) + rounds.agent_notes(rd)
+            more += pipeline.setup_notes(rd)
+            if watch:
+                more += "\n" + (REPO_ROOT / "ci" / "agent-watch.md").read_text()
+            return (REPO_ROOT / "ci" / prompt_file).read_text().format(run_dir=rd, smoke_note=smoke_note, extra=more)
+
         from . import daemon as D
         # The daemon holds the VNC/WDA connection outside the sandbox. Another session may already run one:
         # use it, and leave it running afterwards.
@@ -450,34 +469,47 @@ def run_job(job: Job) -> None:
         watch_started = False
         if watch and not D.is_running("watch"):
             watch_started = job.sh(["./trio-test-harness", "--target", "watch", "daemon", "start"], env)[0] == 0
-        # A known session id, so "Continue conversation" can resume it (harness/handoff.py).
-        sid = str(uuid.uuid4())
-        job.update(agent_session=sid)
         # The agent drives the device: hold its lock (another run may have taken it since the e2e step ended).
         from . import busy
         lock = busy.hold(target, f"web UI job {job.id}: agent ({job.data.get('pr') or inp['trio'] or 'dev'})",
                          on_wait=lambda h: job.note(f"waiting for {target}: {busy.describe(h)}"),
                          cancelled=lambda: job.cancelled)
         lock.__enter__()
-        # TH_JOB_AGENT: the agent cannot start another job (harness/jobguard.py)
-        agent_env = {**env, "TH_JOB_AGENT": "1", "TH_RUN": str(rd), "PROMPT": prompt, "MODEL": inp["claude_model"],
-                     "SETTINGS": str(settings),
-                     "SID": sid,
-                     "LIMITS": (REPO_ROOT / "ci" / limits_file).read_text(), "OUT": str(rd / "agent-summary.md"), "PY": py}
+        n_rounds = rounds.count(rd)
         arc = -1
         # the sandboxed agent reaches the devices only through these
         missing = [t for t in (target, "watch" if watch else None) if t and not D.is_running(t)]
         try:
             if missing:
                 job.note(f"the {' and '.join(missing)} daemon did not start; the agent did not run (see the log)")
-            else:
-                arc, _ = job.sh(["bash", "-c",
-                             'set -o pipefail; claude -p "$PROMPT" --model "$MODEL" --output-format stream-json --verbose '
-                             '--session-id "$SID" '
-                             '--permission-mode dontAsk --permission-prompts none --settings "$SETTINGS" '
-                             '--append-system-prompt "$LIMITS" '
-                             '--allowedTools "Bash(./trio-test-harness:*)" "Bash(./bin/th:*)" "Bash(sleep:*)" Read Glob Grep '
-                             '| "$PY" ci/agent-stream.py "$OUT"'], agent_env, timeout=inp["agent_minutes"] * 60)
+            for k in range(n_rounds if not missing else 0):
+                if job.cancelled:
+                    break
+                if k:
+                    # the next pump scenario, prepared out here: a new faketandem and a reinstalled app
+                    job.note(f"preparing pump scenario {k + 1} of {n_rounds}")
+                    if job.sh(["./trio-test-harness", "rounds", "next", "--run", str(rd)], env)[0] != 0:
+                        job.note(f"pump scenario {k + 1} was not prepared; the scenarios after it did not run")
+                        arc = arc or 1
+                        break
+                out = rd / (f"agent-summary-{k + 1}.md" if n_rounds > 1 else "agent-summary.md")
+                # A known session id, so "Continue conversation" can resume it (harness/handoff.py): the last pass's.
+                sid = str(uuid.uuid4())
+                job.update(agent_session=sid)
+                # TH_JOB_AGENT: the agent cannot start another job (harness/jobguard.py)
+                agent_env = {**env, "TH_JOB_AGENT": "1", "TH_RUN": str(rd), "PROMPT": build_prompt(),
+                             "MODEL": inp["claude_model"], "SETTINGS": str(settings), "SID": sid,
+                             "LIMITS": (REPO_ROOT / "ci" / limits_file).read_text(), "OUT": str(out), "PY": py}
+                rc_k, _ = job.sh(["bash", "-c",
+                                  'set -o pipefail; claude -p "$PROMPT" --model "$MODEL" --output-format stream-json --verbose '
+                                  '--session-id "$SID" '
+                                  '--permission-mode dontAsk --permission-prompts none --settings "$SETTINGS" '
+                                  '--append-system-prompt "$LIMITS" '
+                                  '--allowedTools "Bash(./trio-test-harness:*)" "Bash(./bin/th:*)" "Bash(sleep:*)" Read Glob Grep '
+                                  '| "$PY" ci/agent-stream.py "$OUT"'], agent_env, timeout=inp["agent_minutes"] * 60)
+                arc = rc_k if arc in (-1, 0) else arc
+            if n_rounds > 1:
+                rounds.combine_summaries(rd)
         finally:
             # crash reports from the agent's session (the e2e step saved those before it)
             job.sh(["./trio-test-harness", "--target", target, "crashes", "--save", "--run", str(rd)], env)

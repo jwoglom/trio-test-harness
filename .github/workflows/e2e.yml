@@ -61,10 +61,13 @@ on:
         default: preseed
       # The presets are faketandem's; keep these in step with SCENARIOS in harness/faketandem.py, which describes each.
       pump_scenario:
-        description: "faketandem only: what the pump did in the hours before the app connects (none: no history). Each preset is described in the README's faketandem section"
+        description: "faketandem only: what the pump did in the hours before the app connects (none: no history; auto: a small model picks up to 4 from the PRs, run one after another). Each preset is described in the README's faketandem section"
         type: choice
-        options: [none, recent-doses, scheduled-basal, pump-boluses, app-doses, suspended-now, stopped-boluses, control-iq, pump-profile-differs, day-of-use]
+        options: [none, auto, recent-doses, scheduled-basal, pump-boluses, app-doses, suspended-now, stopped-boluses, control-iq, pump-profile-differs, day-of-use, out-of-shelf-mode, pump-reset, reboot-kept-clock, clock-drifted-ahead, clock-nudged-back, clock-set-back, clock-spring-forward, clock-fall-back, clock-travel-east, clock-travel-west, clock-travel-12h-east, clock-travel-12h-west, clock-set-ahead-hours, clock-73h-ahead, clock-date-set-back, clock-jumped-back, clock-jumped-ahead]
         default: none
+      pump_scenarios:
+        description: "faketandem only: several presets, comma-separated, tested one after another in this job, each from a new pump and a reinstalled app, with an agent pass each (overrides pump_scenario; at most 6)"
+        type: string
       faketandem_ref:
         description: "faketandem branch, tag or commit to build (blank: main)"
         type: string
@@ -123,7 +126,8 @@ jobs:
   e2e:
     if: ${{ !inputs.comment_on_run }}
     runs-on: [self-hosted, macOS, worker]
-    timeout-minutes: 150
+    # several pump scenarios run an agent pass each (harness/rounds.py)
+    timeout-minutes: ${{ (inputs.pump_scenarios != '' || inputs.pump_scenario == 'auto') && 360 || 150 }}
     env:
       # Inputs reach scripts only through env, never interpolated into them.
       IN_APP: ${{ inputs.app || 'trio' }}
@@ -140,6 +144,8 @@ jobs:
       IN_PUMP: ${{ inputs.pump || 'simulator' }}
       IN_PUMP_SETUP: ${{ inputs.pump_setup || 'preseed' }}
       IN_PUMP_SCENARIO: ${{ inputs.pump_scenario }}
+      IN_PUMP_SCENARIOS: ${{ inputs.pump_scenarios }}
+      IN_AGENT_MINUTES: ${{ inputs.agent_minutes }}
       IN_FAKETANDEM_REF: ${{ inputs.faketandem_ref }}
       IN_WATCH_MODEL: ${{ inputs.watch_model || 'default' }}
       IN_AGENT_INSTRUCTIONS: ${{ inputs.agent_instructions }}
@@ -209,7 +215,8 @@ jobs:
           if [ "$IN_WATCH_MODEL" != default ]; then args+=(--watch-model "$IN_WATCH_MODEL"); fi
           if [ "$IN_PUMP" = faketandem ]; then
             args+=(--pump faketandem --pump-setup "$IN_PUMP_SETUP")
-            [ -z "$IN_PUMP_SCENARIO" ] || [ "$IN_PUMP_SCENARIO" = none ] || args+=(--pump-scenario "$IN_PUMP_SCENARIO")
+            if [ -n "$IN_PUMP_SCENARIOS" ]; then args+=(--pump-scenario "$IN_PUMP_SCENARIOS")
+            elif [ -n "$IN_PUMP_SCENARIO" ] && [ "$IN_PUMP_SCENARIO" != none ]; then args+=(--pump-scenario "$IN_PUMP_SCENARIO"); fi
             [ -z "$IN_FAKETANDEM_REF" ] || args+=(--faketandem-ref "$IN_FAKETANDEM_REF")
           fi
           # The runner's bash has -e; keep going so the run dir is recorded even when the run fails.
@@ -217,42 +224,55 @@ jobs:
           ./trio-test-e2e "${args[@]}" || rc=$?
           run_dir=$(cat runs/.current 2>/dev/null || true)
           echo "run_dir=$run_dir" >> "$GITHUB_OUTPUT"
+          # one agent pass per pump scenario, and 15 minutes to prepare each after the first (harness/rounds.py)
+          rounds=$([ -n "$run_dir" ] && ./trio-test-harness rounds count --run "$run_dir" 2>/dev/null || echo 1)
+          echo "rounds=$rounds" >> "$GITHUB_OUTPUT"
+          echo "agent_timeout=$(( rounds * IN_AGENT_MINUTES + (rounds - 1) * 15 ))" >> "$GITHUB_OUTPUT"
           exit $rc
 
       # No GitHub token here: the agent only drives the simulator through the harness.
       - name: Agent (Claude Code tests what the PR describes)
         id: agent
         if: steps.e2e.outcome == 'success'
-        timeout-minutes: ${{ fromJSON(inputs.agent_minutes) }}
+        timeout-minutes: ${{ fromJSON(steps.e2e.outputs.agent_timeout || inputs.agent_minutes) }}
         continue-on-error: true
         env:
           CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           CLAUDE_MODEL: ${{ inputs.claude_model || 'sonnet' }}
           RUN_DIR: ${{ steps.e2e.outputs.run_dir }}
+          ROUNDS: ${{ steps.e2e.outputs.rounds || '1' }}
         run: |
           set -euo pipefail
           if [ "$IN_APP" = loop ]; then cgm="CGM Simulator" prompt_file=ci/agent-prompt-loop.md
           else cgm="Glucose Simulator" prompt_file=ci/agent-prompt.md; fi
-          pump="Pump Simulator"
-          if [ "$IN_PUMP" = faketandem ]; then
-            pump="Tandem pump on faketandem ($([ "$IN_PUMP_SETUP" = walk ] && echo "not set up yet: you walk its setup" || echo "already paired"); see below)"
-          fi
-          smoke_note=$([ "$IN_SMOKE" = true ] && echo ", with the $cgm and the $pump" || true)
-          extra=$([ -n "$IN_AGENT_INSTRUCTIONS" ] && printf '\nFocus from the person who started this run:\n%s\n' "$IN_AGENT_INSTRUCTIONS" || true)
-          # what is under test, before the focus: titles, links, branches, the commits built, every PR's description (pr.md)
-          extra="$(RUN_DIR="$RUN_DIR" .venv/bin/python -c 'import os; from harness import pipeline; print(pipeline.pr_context(os.environ["RUN_DIR"]))' || echo "::warning::the PR context failed" >&2)$extra"
-          # The notes are optional: one whose helper fails is left out with a warning, and the agent still runs.
-          # the faketandem pump: what it is, its commands and how this run set it up (ci/agent-faketandem*.md)
-          extra="$extra$(RUN_DIR="$RUN_DIR" .venv/bin/python -c 'import os; from harness import faketandem; print(faketandem.agent_notes(os.environ["RUN_DIR"]))' || echo "::warning::the faketandem notes failed" >&2)"
-          # what trio-test-e2e's setup left undone after the launch (harness/pipeline.py setup_notes)
-          extra="$extra$(RUN_DIR="$RUN_DIR" .venv/bin/python -c 'import os; from harness import pipeline; print(pipeline.setup_notes(os.environ["RUN_DIR"]))' || echo "::warning::the setup notes failed" >&2)"
-          # whether trio-test-e2e included the watch (asked for, or decided by --devices auto)
-          watch=$(RUN_DIR="$RUN_DIR" .venv/bin/python -c 'import json, os, pathlib; print(str(json.loads((pathlib.Path(os.environ["RUN_DIR"]) / "run.json").read_text()).get("watch", False)).lower())' || echo false)
-          if [ "$watch" = true ]; then extra="$extra"$'\n'"$(cat ci/agent-watch.md)"; fi
-          prompt=$(RUN_DIR="$RUN_DIR" SMOKE="$smoke_note" EXTRA="$extra" PROMPT_FILE="$prompt_file" .venv/bin/python -c '
+          # The prompt of one agent pass. With several pump scenarios (harness/rounds.py) each pass gets its own: the
+          # round's pump setup, its faketandem notes, what preparing it left undone, and which round it is.
+          build_prompt() {
+            local setup pump smoke_note extra
+            setup=$(RUN_DIR="$RUN_DIR" .venv/bin/python -c 'import json, os, pathlib; print((json.loads((pathlib.Path(os.environ["RUN_DIR"]) / "run.json").read_text()).get("pump") or {}).get("setup") or "")' || echo "$IN_PUMP_SETUP")
+            pump="Pump Simulator"
+            if [ "$IN_PUMP" = faketandem ]; then
+              pump="Tandem pump on faketandem ($([ "$setup" = walk ] && echo "not set up yet: you walk its setup" || echo "already paired"); see below)"
+            fi
+            smoke_note=$([ "$IN_SMOKE" = true ] && echo ", with the $cgm and the $pump" || true)
+            extra=$([ -n "$IN_AGENT_INSTRUCTIONS" ] && printf '\nFocus from the person who started this run:\n%s\n' "$IN_AGENT_INSTRUCTIONS" || true)
+            # what is under test, before the focus: titles, links, branches, the commits built, every PR's description (pr.md)
+            extra="$(RUN_DIR="$RUN_DIR" .venv/bin/python -c 'import os; from harness import pipeline; print(pipeline.pr_context(os.environ["RUN_DIR"]))' || echo "::warning::the PR context failed" >&2)$extra"
+            # The notes are optional: one whose helper fails is left out with a warning, and the agent still runs.
+            # the faketandem pump: what it is, its commands and how this run set it up (ci/agent-faketandem*.md)
+            extra="$extra$(RUN_DIR="$RUN_DIR" .venv/bin/python -c 'import os; from harness import faketandem; print(faketandem.agent_notes(os.environ["RUN_DIR"]))' || echo "::warning::the faketandem notes failed" >&2)"
+            # which pump scenario this pass tests, of several (harness/rounds.py)
+            extra="$extra$(RUN_DIR="$RUN_DIR" .venv/bin/python -c 'import os; from harness import rounds; print(rounds.agent_notes(os.environ["RUN_DIR"]))' || echo "::warning::the rounds notes failed" >&2)"
+            # what trio-test-e2e's setup left undone after the launch (harness/pipeline.py setup_notes)
+            extra="$extra$(RUN_DIR="$RUN_DIR" .venv/bin/python -c 'import os; from harness import pipeline; print(pipeline.setup_notes(os.environ["RUN_DIR"]))' || echo "::warning::the setup notes failed" >&2)"
+            # whether trio-test-e2e included the watch (asked for, or decided by --devices auto)
+            if [ "$watch" = true ]; then extra="$extra"$'\n'"$(cat ci/agent-watch.md)"; fi
+            RUN_DIR="$RUN_DIR" SMOKE="$smoke_note" EXTRA="$extra" PROMPT_FILE="$prompt_file" .venv/bin/python -c '
           import os, pathlib
           t = pathlib.Path(os.environ["PROMPT_FILE"]).read_text()
-          print(t.format(run_dir=os.environ["RUN_DIR"], smoke_note=os.environ["SMOKE"], extra=os.environ["EXTRA"]))')
+          print(t.format(run_dir=os.environ["RUN_DIR"], smoke_note=os.environ["SMOKE"], extra=os.environ["EXTRA"]))'
+          }
+          watch=$(RUN_DIR="$RUN_DIR" .venv/bin/python -c 'import json, os, pathlib; print(str(json.loads((pathlib.Path(os.environ["RUN_DIR"]) / "run.json").read_text()).get("watch", False)).lower())' || echo false)
           # stream-json + ci/agent-stream.py: live progress in this log (model, each tool call, notes),
           # final answer into agent-summary.md for the job summary.
           # Locked down (ci/claude-sandbox.py, ci/agent-limits.md): Bash may only run the harness and sleep,
@@ -270,15 +290,37 @@ jobs:
           fi
           # read by "Fail the job if the agent step failed": a failure before this line is the harness's, not the agent's
           echo "setup=ok" >> "$GITHUB_OUTPUT"
-          # TH_JOB_AGENT: nothing this agent runs may start another job (harness/jobguard.py, trio-test-ci)
-          TH_JOB_AGENT=1 claude -p "$prompt" --model "$CLAUDE_MODEL" --output-format stream-json --verbose \
-            --permission-mode dontAsk --permission-prompts none --settings "$RUNNER_TEMP/claude-settings.json" \
-            --append-system-prompt "$(cat ci/agent-limits.md)" \
-            --allowedTools "Bash(./trio-test-harness:*)" "Bash(./bin/th:*)" "Bash(sleep:*)" Read Glob Grep \
-            | python3 ci/agent-stream.py "$RUN_DIR/agent-summary.md"
+          # One agent pass per pump scenario, each up to agent_minutes (perl's alarm: macOS has no timeout(1)). Between
+          # two, `rounds next` prepares the next scenario out here, where it can restart faketandem and reinstall the app.
+          failed=0
+          for ((k = 1; k <= ROUNDS; k++)); do
+            if [ "$k" -gt 1 ]; then
+              echo "::group::preparing pump scenario $k of $ROUNDS"
+              if ! ./trio-test-harness rounds next --run "$RUN_DIR"; then
+                echo "::warning title=Pump scenario $k not prepared::see the agent step log; the scenarios after it did not run"
+                echo "::endgroup::"; failed=1; break
+              fi
+              echo "::endgroup::"
+            fi
+            out="$RUN_DIR/agent-summary.md"
+            [ "$ROUNDS" -gt 1 ] && out="$RUN_DIR/agent-summary-$k.md"
+            prompt=$(build_prompt)
+            # TH_JOB_AGENT: nothing this agent runs may start another job (harness/jobguard.py, trio-test-ci)
+            if ! TH_JOB_AGENT=1 perl -e 'alarm shift; exec @ARGV or die "exec: $!"' "$(( IN_AGENT_MINUTES * 60 ))" \
+                claude -p "$prompt" --model "$CLAUDE_MODEL" --output-format stream-json --verbose \
+                --permission-mode dontAsk --permission-prompts none --settings "$RUNNER_TEMP/claude-settings.json" \
+                --append-system-prompt "$(cat ci/agent-limits.md)" \
+                --allowedTools "Bash(./trio-test-harness:*)" "Bash(./bin/th:*)" "Bash(sleep:*)" Read Glob Grep \
+                | python3 ci/agent-stream.py "$out"; then
+              echo "::warning title=Agent pass $k of $ROUNDS failed or ran out of time::see the agent step log"
+              failed=1
+            fi
+          done
+          [ "$ROUNDS" -gt 1 ] && ./trio-test-harness rounds summaries --run "$RUN_DIR" >/dev/null || true
           # crash reports from the agent's session into the run (trio-test-e2e saved those before it)
           ./trio-test-harness --target sim crashes --save --run "$RUN_DIR" || true
           ./trio-test-harness report html --run "$RUN_DIR" >/dev/null
+          exit $failed
 
       # The pump's side of the run (its state, history log, request log and log) goes into the run directory.
       - name: Stop faketandem

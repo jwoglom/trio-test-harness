@@ -90,6 +90,29 @@ def decide_devices(args, info: dict, src: Path) -> dict:
     return d
 
 
+def decide_rounds(args, info: dict, src: Path) -> dict | None:
+    """Settle --pump-scenario: one scenario stays args.pump_scenario; several (named, or picked by `auto`) become
+    rounds (harness/rounds.py), round 1 in args.pump_scenario/pump_setup. Returns run.json's `rounds`, or None."""
+    from . import rounds as R
+    names, by, reason = args.pump_scenarios, "option", ""
+    if names == "auto":
+        from . import scenarioscope
+        app = _app()
+        d = scenarioscope.decide(info, src, app.base_branch, app.key)
+        names, by, reason = d["scenarios"], d["by"], d["reason"]
+        log(f"pump scenarios: {', '.join(names)} ({by}: {reason})")
+    if not names:
+        args.pump_scenario = None
+        return None
+    plan = R.plan(names, args.pump_setup, walk_history=by != "option")
+    for w in R.preseed_warnings(plan):
+        log(f"warning: {w}")
+    args.pump_scenario, args.pump_setup = plan[0]["scenario"], plan[0]["setup"]
+    if len(plan) == 1:
+        return None
+    return {"plan": plan, "current": 0, "by": by, "reason": reason, "args": R.saved_args(args)}
+
+
 def write_pr_notes(run, info: dict) -> Path:
     """runs/<run>/pr.md: PR title + description + what the agent should test. Also printed."""
     app = _app()
@@ -291,7 +314,8 @@ def stage_faketandem(args, drv, bi, run) -> dict:
     if not bi.virtual_pump:
         raise HarnessError(f"the {_app().name} build at {bi.app_path} is not a virtual-pump build; build it with "
                            "--pump faketandem")
-    state = FT.start(setup=args.pump_setup, scenario=args.pump_scenario, ref=args.faketandem_ref)
+    state = FT.start(setup=args.pump_setup, scenario=args.pump_scenario, ref=args.faketandem_ref,
+                     reuse=getattr(args, "faketandem_reuse", None))
     seeded = F.preseed_virtual_pump(drv, bi.bundle_id,
                                     FT.paired_pump_manager_state(state) if args.pump_setup == "preseed" else None,
                                     onboarding=args.onboarding == "preseed")
@@ -457,6 +481,8 @@ def hand_off_to_agent(run, pr_url: str | None, mode: str, *, watch: bool = False
               + (" The pump is a Tandem Mobi emulated by faketandem (trio-fake-devices skill, faketandem section): "
                  "`./trio-test-harness faketandem status` says what it holds; pr.md says whether it is pre-paired or "
                  "left for you to set up in the app." if pump else ""))
+    from . import rounds as R
+    prompt += R.agent_notes(run.path, job=False)
     os.execv(claude, [claude, prompt])
 
 
@@ -475,9 +501,14 @@ def run_stages(args):
     if args.checkout_only:
         print(json.dumps(info, indent=2, default=str)); return 0, None, None, None
     info["devices"] = decide_devices(args, info, src)
+    rounds_meta = decide_rounds(args, info, src) if args.pump == "faketandem" else None
     if args.pump == "faketandem":
         info["pump"] = (f"Tandem on faketandem, {'pre-paired' if args.pump_setup == 'preseed' else 'to be set up in the app'}"
-                        + (f", scenario {args.pump_scenario}" if args.pump_scenario else ""))
+                        + (f", scenario {args.pump_scenario}" if args.pump_scenario and not rounds_meta else ""))
+        if rounds_meta:
+            info["pump"] += (f"; {len(rounds_meta['plan'])} scenarios, one after another from a new pump and a "
+                             "reinstalled app: " + ", ".join(f"{r['scenario']} ({r['setup']})" for r in rounds_meta["plan"])
+                             + (f" (chosen by {rounds_meta['by']}: {rounds_meta['reason']})" if rounds_meta.get("reason") else ""))
     name = (f"pr-{info['pr'].split('#')[-1]}" if info.get("pr") else (info.get("branch") or "inplace")).replace("/", "-")
     if info.get("cherry_picks") or info.get("submodule_cherry_picks"):
         name += "-picks"
@@ -490,6 +521,10 @@ def run_stages(args):
                                              "devices": info.get("devices"),
                                              "title": f"{app.name} test: {info.get('pr_title') or info.get('branch') or 'in-place'} ({args.mode})",
                                              "pr_url": pr_url})
+    if rounds_meta:
+        from . import rounds as R
+        run.update_meta(rounds=rounds_meta)
+        R.log_round(run, rounds_meta)
     notes = write_pr_notes(run, info)
     print(f"\n--- {notes} ---\n" + notes.read_text() + "\n---\n")
     # Up to a running app, a failure ends the run: nothing can be tested without it. After that, what fails is driving
@@ -581,9 +616,12 @@ def main(argv=None) -> int:
     p.add_argument("--pump-setup", choices=["preseed", "walk"], default="preseed",
                    help="with --pump faketandem: preseed (default) starts the app with the pump already paired; walk "
                         "leaves it to be added and paired in the app (the agent walks TandemKit's setup)")
-    p.add_argument("--pump-scenario", metavar="NAME|FILE",
+    p.add_argument("--pump-scenario", metavar="NAME[,NAME...]|auto",
                    help="with --pump faketandem: hours of pump use replayed before the app connects (faketandem "
-                        "-scenario): a preset (" + ", ".join(SCENARIOS) + ") or a scenario JSON file")
+                        "-scenario): a preset (" + ", ".join(SCENARIOS) + ") or a scenario JSON file. Several, "
+                        "comma-separated, run one after another in this run, each from a new pump and a reinstalled "
+                        "app (harness/rounds.py); auto lets a small model pick up to 4 from the run's PRs, set up in "
+                        "the app (walk) for the ones that test history dating")
     p.add_argument("--faketandem-ref", metavar="REF",
                    help="faketandem branch, tag or sha to build (default $TH_FAKETANDEM_REF, else main)")
     p.add_argument("--skip-build", action="store_true", help="reuse build/last-build.json")
@@ -621,9 +659,8 @@ def main(argv=None) -> int:
                            "CoreBluetooth only in a Debug build, and faketandem is reached over the Mac's loopback")
     if args.pump != "faketandem" and (args.pump_scenario or args.pump_setup != "preseed"):
         raise HarnessError("--pump-setup and --pump-scenario are for --pump faketandem")
-    if args.pump_scenario:
-        from .faketandem import check_scenario
-        check_scenario(args.pump_scenario)       # a typo fails now, not after the build
+    from . import rounds as R
+    args.pump_scenarios = R.parse(args.pump_scenario)    # a typo fails now, not after the build; settled after checkout
     if args.watch_model and args.target == "sim":
         from . import watch as WT
         args.watch_model = WT.resolve_model(args.watch_model)    # a typo fails now, not after the build

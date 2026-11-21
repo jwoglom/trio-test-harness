@@ -138,8 +138,60 @@ own figure with Control-IQ off.
 | `control-iq` | 6 h with Control-IQ on and still on: its rate moving between 0 and 1.4 U/hr, two automatic boluses and one from the pump; TandemKit's setup turns Control-IQ off, so use it with `--pump-setup walk` |
 | `pump-profile-differs` | 6 h on a six-segment pump profile (0.6–1.1 U/hr) that is not the app's: TandemKit writes the app's schedule over it, and a setup history load finds basal the app did not count |
 | `day-of-use` | 24 h of boluses, temps and a suspend: four times the 6 h a setup history load reads |
+| `out-of-shelf-mode` | The field log's Mobi: boluses 201 days ago, a `ShelfMode` record, its clock restarted at 2008 (no record) and set on the pump to 2020, suspended for 7 h since. Setup has to move the clock 6.9 years forward; nothing from before shelf mode may reach the app. No IOB |
+| `pump-reset` | 6 h: pump and app boluses, a suspend and a reset 3 h ago (clock restarted at 2008, no record), resumed, a 1.5 U pump bolus 1 h ago on that clock. Only that bolus should reach the app, at its real time. About 1.4 U IOB |
+| `reboot-kept-clock` | 6 h: a 2.0 U pump bolus 45 min ago, a reboot that kept the clock (`ArmInit`, no clock change), 1.0 U 10 min ago. TandemKit takes every `ArmInit` as a reset and leaves the 2.0 U out on purpose. About 3.7 U IOB |
+| `clock-drifted-ahead` | 6 h of pump boluses on a clock 7 minutes ahead with no record of it: past TandemKit's 5-minute skew threshold, so the app should show its clock alert. About 2.5 U IOB |
+| `clock-nudged-back` | 6 h: the clock 3 minutes ahead, set right on the pump between two boluses a minute either side, so the later bolus is stamped first. About 2.0 U IOB |
+| `clock-set-back` | 6 h: the clock set back an hour on the pump, 1.5 U on that clock, set forward again; 1.0 U after. About 2.0 U IOB |
+| `clock-spring-forward`, `clock-fall-back` | 6 h: a 2.0 U pump bolus and a 150% temp running across a DST change the phone made on its own and the user then made on the pump's screen (an hour ahead / back), which leaves the pump on the phone's time; 1.0 U after. About 1.1 U IOB |
+| `clock-travel-east`, `clock-travel-west` | The same across a trip three hours east (west), the phone already moved |
+| `clock-travel-12h-east`, `clock-travel-12h-west` | The same across a trip of twelve hours (a `DateChange` too when the change crosses midnight) |
+| `clock-set-ahead-hours` | 6 h: the clock set 6 hours ahead on the pump and left there, pump boluses either side: past the skew threshold, inside the 24-hour trust limit. About 2.1 U IOB |
+| `clock-73h-ahead` | The `clock-spring-forward` doses, the clock set 73 hours ahead and left there: past the 24-hour trust limit, so setup or the app's settings have to set it. A bolus read while it is that far off is a case TandemKit still misdates (its conformance G7, G16) |
+| `clock-date-set-back` | 6 h: the date set back 31 days on the pump (a `DateChange` alone), and a bolus after it stamped a month early. Past the trust limit. About 1.6 U IOB |
+| `clock-jumped-back` | 6 h: the clock goes 2 days back with no record and no reboot; only a stamp running back shows it, and nothing before it can be dated. About 1.1 U IOB |
+| `clock-jumped-ahead` | 6 h: the clock goes 9 years ahead with no record and no reboot, a bolus either side; the app has to set it, and a driver that carries that change back to the first bolus dates it 9 years early (TandemKit conformance L22, still open). About 1.1 U IOB |
 
 The presets past `scheduled-basal` need a faketandem that has them (`--faketandem-ref` until they are on its `main`).
+`out-of-shelf-mode`, `pump-reset`, `reboot-kept-clock` and `clock-set-back` are on its `main`; the other `clock-*`
+presets are on jwoglom/faketandem branch `ccr-8d1f9957-exbmbn` until merged.
+
+The reset and `clock-*` presets (`HISTORY_SCENARIOS`) test how TandemKit dates and reports the pump's history. Run
+them with `--pump-setup walk`: a preseeded driver reports nothing from before it first ran and never runs setup's clock
+write, so they show nothing there (`trio-test-e2e` warns). What to check is the same in each: in Trio's treatments
+every pump bolus once, at the time the preset gave it, nothing from before a reset or shelf mode, nothing in the
+future, and IOB near the preset's. TandemKit's conformance scenarios (G, L and M groups in its
+`docs/conformance-test-plan.md`) run the same changes and pin what it should report.
+
+### Several scenarios in one run
+
+`--pump-scenario` takes a comma-separated list (at most 6), or `auto` (`harness/rounds.py`):
+
+```bash
+./trio-test-e2e --mode simulator --pr <TandemKit PR> --pump faketandem --pump-setup walk \
+    --pump-scenario pump-reset,clock-travel-12h-east,clock-73h-ahead
+./trio-test-e2e --mode simulator --pr <TandemKit PR> --pump faketandem --pump-scenario auto
+```
+
+The app is built once and each scenario is a round, tested from a new pump and a reinstalled app (an empty data
+container), so nothing the driver read or Trio stored for one scenario reaches the next. `trio-test-e2e` prepares
+round 1. A job (CI, the web UI) then runs one agent pass per round, each with its own `agent_minutes`, and between
+two passes runs `th rounds next --run <run>`, which saves the pump's side of the finished round into
+`faketandem/<n>-<scenario>/`, starts faketandem on the next scenario (the same binary), reinstalls and seeds the app
+and gets it to its home screen with the simulated CGM. A job's agent cannot run `rounds next` (it replaces what the
+job set up); a terminal session handed the run by `trio-test-e2e` is told to run it itself.
+
+`auto` asks a small model (`harness/scenarioscope.py`, `TH_SCOPE_MODEL`, default haiku) to pick 1 to 4 presets from
+the run's PRs, most telling first; without Claude, history or pump clock code in the changed files picks a reset, a
+12-hour trip, the clock 73 hours ahead and `out-of-shelf-mode`, and anything else `recent-doses` and `app-doses`.
+Under `auto`, the reset and `clock-*` presets are set up in the app (walk) whatever `--pump-setup` says.
+
+One run holds every round: a `round` step opens each in the report, each pass's `run finish` is kept per round
+(`th rounds status`) and the run's status is the worst of them, and `agent-summary.md` has a section per scenario.
+In CI: `pump_scenario` `auto`, or `pump_scenarios` for a list (the job's time limit rises to 6 hours for either). In
+the web UI: "Pump history" `auto`, or "Several, one after another". `trio-test-ci --pump-scenario a,b,c` sends a list
+as `pump_scenarios`.
 
 `th faketandem start|stop|status|seed|pairing|history|scenario|api` controls the emulator and reads what the pump
 holds (`th faketandem --help`). The CI agent reaches it through the sim daemon, because the agent's sandbox has no

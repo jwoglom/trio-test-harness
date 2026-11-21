@@ -1078,6 +1078,41 @@ def cmd_ocr(args):
 
 # ---------------- runs / reports -----------------
 
+def cmd_rounds(args):
+    """Pump scenario rounds of a run (harness/rounds.py)."""
+    from . import rounds
+    from .report import Run
+    run = Run.current(args.run)
+    if args.sub == "next":
+        from .jobguard import refuse_inside_job_agent
+        refuse_inside_job_agent("rounds next", "it reinstalls the app and restarts faketandem, which the job set up "
+                                "outside this sandbox; the job prepares the next round itself after your session ends")
+        r = rounds.next_round(run.path)
+        print(f"prepared round {run.meta['rounds']['current'] + 1}: {r['scenario']} ({r['setup']})")
+        return 0
+    if args.sub == "count":
+        print(rounds.count(run.path))
+        return 0
+    if args.sub == "notes":
+        print(rounds.agent_notes(run.path, job=not args.interactive))
+        return 0
+    if args.sub == "summaries":
+        out = rounds.combine_summaries(run.path)
+        print(out or "a run of one scenario: nothing to combine")
+        return 0
+    r = rounds.state(run.path)
+    if not r:
+        print("a run of one pump scenario (or none)")
+        return 0
+    for k, x in enumerate(r["plan"]):
+        mark = ">" if k == r["current"] else " "
+        res = x.get("result") or {}
+        print(f"{mark} {k + 1}. {x['scenario']:24} {x['setup']:8} {res.get('status', '')}")
+    if r.get("reason"):
+        print(f"chosen {r.get('by')}: {r['reason']}")
+    return 0
+
+
 def cmd_run(args):
     from .report import Run, CURRENT
     if args.sub == "new":
@@ -1095,7 +1130,13 @@ def cmd_run(args):
     elif args.sub == "note":
         r = Run.current(args.run); r.log_step("note", args.text); print("ok")
     elif args.sub == "finish":
-        r = Run.current(args.run); r.finish(args.status, args.summary or ""); print(r.path)
+        from . import rounds
+        r = Run.current(args.run)
+        if rounds.state(r.path):
+            rounds.finish(r, args.status, args.summary or "")
+        else:
+            r.finish(args.status, args.summary or "")
+        print(r.path)
     elif args.sub == "list":
         for p in sorted(CONFIG.runs_dir.iterdir()):
             if p.is_dir():
@@ -1629,6 +1670,15 @@ def build_parser() -> argparse.ArgumentParser:
     rf = rs.add_parser("finish"); rf.add_argument("status", choices=["passed", "failed", "partial"]); rf.add_argument("--summary"); rf.add_argument("--run")
     rst = rs.add_parser("steps"); rst.add_argument("--run")
     r.set_defaults(fn=cmd_run)
+
+    rd = sp.add_parser("rounds", help="pump scenario rounds of a run: status, next (prepare the next scenario: "
+                                      "a new faketandem and a reinstalled app), count, notes, summaries")
+    rds = rd.add_subparsers(dest="sub", required=True)
+    for name in ("status", "next", "count", "summaries"):
+        rds.add_parser(name).add_argument("--run")
+    rdn = rds.add_parser("notes"); rdn.add_argument("--run")
+    rdn.add_argument("--interactive", action="store_true", help="for a session that runs `rounds next` itself")
+    rd.set_defaults(fn=cmd_rounds)
 
     rp = sp.add_parser("report", help="render/post reports"); rps = rp.add_subparsers(dest="sub", required=True)
     rh = rps.add_parser("html"); rh.add_argument("--run"); rh.add_argument("--out")
