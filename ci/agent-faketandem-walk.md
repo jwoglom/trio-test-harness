@@ -17,5 +17,11 @@ every screen:
    - The app's treatment or insulin history lists the boluses `faketandem history` shows, from before the pairing
      when they were loaded.
    - The app's IOB.
+   - When the scenario resets the pump or changes its clock (`out-of-shelf-mode`, `pump-reset`, `reboot-kept-clock`,
+     `clock-*`): setup sets the pump's clock to the phone's (a far-off clock must be set before the app doses), every
+     pump bolus `faketandem history` shows after the last reset appears once in the app, at the time the scenario gave
+     it, nothing from before a reset or shelf mode appears, and nothing is dated in the future. A bolus in the app
+     at the wrong time, twice, or from before a reset is a finding: note its amount, the time the app shows and the
+     time `faketandem history` gives it.
    Take screenshots of each.
 If a step fails, take a screenshot, read `logs tandem --since 10m`, write a note, and try that step once more.

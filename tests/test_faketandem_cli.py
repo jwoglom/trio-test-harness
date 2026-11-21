@@ -306,3 +306,20 @@ class AgainstAFakePump(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ScenarioLists(unittest.TestCase):
+    def test_the_e2e_workflow_offers_every_preset_in_order(self):
+        import re
+        from harness.config import REPO_ROOT
+        from harness.faketandem import SCENARIOS
+        workflow = (REPO_ROOT / ".github" / "workflows" / "e2e.yml").read_text()
+        block = workflow[workflow.index("pump_scenario:"):]
+        options = re.search(r"options: \[([^\]]*)\]", block).group(1).split(", ")
+        self.assertEqual(options, ["none", *SCENARIOS])
+
+    def test_history_scenarios_are_presets(self):
+        from harness.faketandem import HISTORY_SCENARIOS, SCENARIOS
+        self.assertLessEqual(HISTORY_SCENARIOS, set(SCENARIOS))
+        self.assertIn("pump-reset", HISTORY_SCENARIOS)
+        self.assertNotIn("recent-doses", HISTORY_SCENARIOS)

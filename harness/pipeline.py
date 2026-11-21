@@ -622,8 +622,12 @@ def main(argv=None) -> int:
     if args.pump != "faketandem" and (args.pump_scenario or args.pump_setup != "preseed"):
         raise HarnessError("--pump-setup and --pump-scenario are for --pump faketandem")
     if args.pump_scenario:
-        from .faketandem import check_scenario
+        from .faketandem import HISTORY_SCENARIOS, check_scenario
         check_scenario(args.pump_scenario)       # a typo fails now, not after the build
+        if args.pump_scenario in HISTORY_SCENARIOS and args.pump_setup == "preseed":
+            log(f"warning: --pump-scenario {args.pump_scenario} tests how history is dated, which a preseeded pump "
+                "never reports (nothing from before the driver first ran) and whose clock setup never sets; "
+                "use --pump-setup walk")
     if args.watch_model and args.target == "sim":
         from . import watch as WT
         args.watch_model = WT.resolve_model(args.watch_model)    # a typo fails now, not after the build
