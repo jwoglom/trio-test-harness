@@ -153,9 +153,8 @@ own figure with Control-IQ off.
 | `clock-jumped-back` | 6 h: the clock goes 2 days back with no record and no reboot; only a stamp running back shows it, and nothing before it can be dated. About 1.1 U IOB |
 | `clock-jumped-ahead` | 6 h: the clock goes 9 years ahead with no record and no reboot, a bolus either side; the app has to set it, and a driver that carries that change back to the first bolus dates it 9 years early (TandemKit conformance L22, still open). About 1.1 U IOB |
 
-The presets past `scheduled-basal` need a faketandem that has them (`--faketandem-ref` until they are on its `main`).
-`out-of-shelf-mode`, `pump-reset`, `reboot-kept-clock` and `clock-set-back` are on its `main`; the other `clock-*`
-presets are on jwoglom/faketandem branch `ccr-8d1f9957-exbmbn` until merged.
+Every preset is on faketandem's `main` (the reset and clock presets since its #60 and #61); a `--faketandem-ref` older
+than a preset refuses it at start.
 
 The reset and `clock-*` presets (`HISTORY_SCENARIOS`) test how TandemKit dates and reports the pump's history. Run
 them with `--pump-setup walk`: a preseeded driver reports nothing from before it first ran and never runs setup's clock

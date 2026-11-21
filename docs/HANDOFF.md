@@ -175,8 +175,7 @@ until merged: pass `--faketandem-ref` until then).
   **not yet run against the app**: none of the new presets has been through a `trio-test-e2e` run.
 - 2026-11-21: seventeen presets of pump resets and clock changes in the pump's history (`HISTORY_SCENARIOS` in
   `harness/faketandem.py`; README table): `out-of-shelf-mode`, `pump-reset`, `reboot-kept-clock`, `clock-set-back`
-  (faketandem `main`, its #60) and thirteen more `clock-*` (jwoglom/faketandem branch `ccr-8d1f9957-exbmbn` until
-  merged), covering small and large, recorded and unrecorded changes. They replace the unmerged
+  (faketandem #60) and thirteen more `clock-*` (faketandem #61; both on its `main`), covering small and large, recorded and unrecorded changes. They replace the unmerged
   `claude/clock-change-scenarios` branches of both repos, whose `clock_change` event faketandem #60 superseded; its
   DST, travel, 73-hour and jump presets were ported, and its resets and `shelf-mode-wake` are `pump-reset` and
   `out-of-shelf-mode`. `trio-test-e2e` warns when one runs with `--pump-setup preseed`, which reports none of the
