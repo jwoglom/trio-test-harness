@@ -185,8 +185,13 @@ until merged: pass `--faketandem-ref` until then).
   faketandem and a reinstalled app; one agent pass per round in CI (`pump_scenarios`, the agent step's loop) and the
   web UI (`run_job`), with `th rounds next` between them, outside the sandbox. Verified on Linux: unit tests
   (`tests/test_rounds.py`, `rounds next` with the stages stubbed), and faketandem started, saved into a round's folder
-  and restarted on the next scenario with the same binary. **Not yet run on the macOS workers**: the reinstall, launch
-  and smoke between rounds, the CI loop (perl's alarm as the per-pass limit) and the web UI loop are untested there.
+  and restarted on the next scenario with the same binary.
+  **Verified on the macOS workers, 2026-11-22** (CI run 44962418286, jwoglom/TandemKit#673, `pump_scenario: auto`,
+  walk): `auto` picked recent-doses, pump-reset, out-of-shelf-mode and clock-73h-ahead; `rounds next` reinstalled and
+  relaunched between them (about 50 s each) and four agent passes ran in 31 minutes. Its PR comment showed what this
+  fixed: two passes never ran `run finish` (they had been told only to end their session), the last recapped all
+  four (it had been told to sum up), the verdicts were joined into one paragraph, and the screenshot review's JSON
+  failed on a quoted alert name. The web UI loop is still untested there.
 - Verified on Linux, without a simulator: building faketandem from a checkout, starting it for either setup with a
   scenario, `th faketandem status|history|pairing|api|stop --save`, and the seeded `PumpManagerState.plist` (the key
   faketandem holds, its peripheral id) and basal profile.

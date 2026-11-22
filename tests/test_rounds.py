@@ -71,23 +71,61 @@ class State(unittest.TestCase):
             job = R.agent_notes(tmp)
             self.assertIn("scenario 1 of 3: pump-reset", job.lower())
             self.assertIn("end your session", job)
+            self.assertIn("run finish", job)
+            self.assertIn("do not restate the others", job)
             self.assertIn("rounds next", R.agent_notes(tmp, job=False))
             make_run(tmp, PLAN, current=2)
-            self.assertIn("last scenario", R.agent_notes(tmp))
+            last = R.agent_notes(tmp)
+            self.assertIn("last scenario", last)
+            self.assertIn("run finish", last)
+            self.assertNotIn("summing up every scenario", last)
 
-    def test_finish_keeps_the_worst_verdict_and_each_rounds_summary(self):
+    def test_finish_keeps_the_worst_verdict_and_lists_each_round_on_a_line(self):
         with tempfile.TemporaryDirectory() as tmp:
             run = make_run(tmp, PLAN, current=0)
             R.finish(run, "failed", "reset bolus reported twice")
             m = run.meta
             m["rounds"]["current"] = 1
             run.update_meta(rounds=m["rounds"])
-            R.finish(run, "passed", "fine")
+            R.finish(run, "passed", "fine\nreally")
             meta = Run(Path(tmp)).meta
             self.assertEqual(meta["status"], "failed")
-            self.assertIn("1. pump-reset: failed", meta["summary"])
-            self.assertIn("2. recent-doses: passed", meta["summary"])
+            self.assertEqual(meta["summary"].splitlines(), [
+                "Pump scenarios:",
+                "- **1. pump-reset**: failed. reset bolus reported twice",
+                "- **2. recent-doses**: passed. fine really",
+            ])
             self.assertEqual(meta["rounds"]["plan"][0]["result"]["status"], "failed")
+
+    def test_a_round_without_a_verdict_is_listed_and_makes_the_run_partial(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            run = make_run(tmp, PLAN, current=1)
+            R.finish(run, "passed", "fine")
+            meta = Run(Path(tmp)).meta
+            self.assertEqual(meta["status"], "partial")
+            self.assertIn("- **1. pump-reset**: no verdict recorded", meta["summary"])
+            self.assertNotIn("clock-73h-ahead", meta["summary"])
+
+    def test_settling_at_the_end_lists_rounds_that_never_ran(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            plan = [dict(PLAN[0], result={"status": "passed", "summary": "ok"}), PLAN[1], PLAN[2]]
+            run = make_run(tmp, plan, current=1)
+            R.settle(run, final=True)
+            lines = Run(Path(tmp)).meta["summary"].splitlines()
+            self.assertEqual(lines[1:], ["- **1. pump-reset**: passed. ok",
+                                         "- **2. recent-doses**: no verdict recorded",
+                                         "- **3. clock-73h-ahead**: not run"])
+            self.assertEqual(Run(Path(tmp)).meta["status"], "partial")
+
+    def test_rounds_summaries_settles_the_run(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            plan = [dict(x, result={"status": "passed", "summary": x["scenario"]}) for x in PLAN]
+            make_run(tmp, plan, current=2)
+            rc, _, _ = th("rounds", "summaries", "--run", tmp)
+            self.assertEqual(rc, 0)
+            meta = Run(Path(tmp)).meta
+            self.assertEqual(meta["status"], "passed")
+            self.assertEqual(len(meta["summary"].splitlines()), 4)
 
     def test_run_finish_goes_through_the_rounds(self):
         with tempfile.TemporaryDirectory() as tmp:

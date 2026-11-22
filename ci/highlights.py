@@ -20,7 +20,37 @@ def parse(raw: str) -> dict:
     start, end = raw.find("{"), raw.rfind("}")
     if start < 0 or end <= start:
         raise ValueError("no JSON object in the answer")
-    return json.loads(raw[start:end + 1])
+    text = raw[start:end + 1]
+    try:
+        return json.loads(text, strict=False)    # strict=False: a raw newline inside a string is kept, not refused
+    except ValueError:
+        # A reviewer quoting a label in its prose ("Pump Event Not Counted") leaves the quotes unescaped.
+        return json.loads(escape_stray_quotes(text), strict=False)
+
+
+def escape_stray_quotes(text: str) -> str:
+    """Escapes a double quote inside a JSON string that is not followed by what can come after a string's end
+    (`,` `:` `}` `]` or the end), which is how an unescaped quote in prose looks."""
+    out, in_string, i = [], False, 0
+    while i < len(text):
+        c = text[i]
+        if in_string and c == "\\":
+            out.append(text[i:i + 2])
+            i += 2
+            continue
+        if c == '"':
+            if not in_string:
+                in_string = True
+            else:
+                rest = text[i + 1:].lstrip()
+                if rest and rest[0] not in ",:}]":
+                    out.append('\\"')
+                    i += 1
+                    continue
+                in_string = False
+        out.append(c)
+        i += 1
+    return "".join(out)
 
 
 def validate(doc: dict, run: Path) -> dict:

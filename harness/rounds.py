@@ -176,12 +176,17 @@ def agent_notes(run_dir, *, job: bool = True) -> str:
     lines.append("Test what the change under test means for this scenario: what the pump did before the app "
                  "connected is in `faketandem history`. Start each step's note with the scenario's name, so the report "
                  "tells the rounds apart.")
+    # Each pass records its own verdict: the run's summary lists every scenario's (`finish`, `settle`).
+    lines.append("When you are done with this scenario, record its verdict with `./trio-test-harness run finish "
+                 "passed|failed|partial --summary \"...\"`, about this scenario alone: it is kept as this scenario's "
+                 "result, and the run's summary lists each scenario's on a line of its own, so do not restate the "
+                 "others'.")
     if i + 1 < len(p):
-        lines.append(("When you are done with this scenario, end your session; the job then prepares the next one."
-                      if job else "When you are done with this scenario, run `./trio-test-harness rounds next` to "
-                      "prepare the next one (it reinstalls the app and restarts faketandem), then test it."))
+        lines.append(("Then end your session; the job prepares the next scenario." if job else
+                      "Then run `./trio-test-harness rounds next` to prepare the next one (it reinstalls the app and "
+                      "restarts faketandem), and test it."))
     else:
-        lines.append("This is the last scenario; finish the run as usual, summing up every scenario's result.")
+        lines.append("This is the last scenario.")
     return "\n".join(lines) + "\n"
 
 
@@ -189,16 +194,34 @@ RANK = {"passed": 0, "partial": 1, "failed": 2}
 
 
 def finish(run, status: str, summary: str) -> None:
-    """`run finish` in a run of rounds: the verdict goes on the current round, and the run's status is the worst of
-    the rounds finished so far, its summary each one's, so a later round's pass does not hide an earlier failure."""
+    """`run finish` in a run of rounds: the verdict goes on the current round, and `settle` sums up the rounds."""
     rounds = run.meta["rounds"]
-    i = rounds["current"]
-    rounds["plan"][i]["result"] = {"status": status, "summary": summary}
-    done = [(k, x) for k, x in enumerate(rounds["plan"]) if x.get("result")]
-    worst = max((x["result"]["status"] for _, x in done), key=lambda st: RANK.get(st, 1))
+    rounds["plan"][rounds["current"]]["result"] = {"status": status, "summary": summary}
     run.update_meta(rounds=rounds)
-    run.finish(worst, " ".join(f"[{k + 1}. {x['scenario']}: {x['result']['status']}] {x['result']['summary']}".strip()
-                               for k, x in done))
+    settle(run)
+
+
+def settle(run, *, final: bool = False) -> None:
+    """The run's status and summary from its rounds: the worst verdict, so a later round's pass does not hide an
+    earlier failure, and a summary listing each round on a line of its own. A round up to the current one without a
+    verdict (its agent never ran `run finish`) makes the run partial at best; with `final` (the job is done), so does
+    a round that never ran."""
+    rounds = run.meta.get("rounds")
+    if not rounds:
+        return
+    last = len(rounds["plan"]) - 1 if final else rounds["current"]
+    lines, statuses = ["Pump scenarios:"], []
+    for k, x in enumerate(rounds["plan"][:last + 1]):
+        res = x.get("result")
+        if res:
+            statuses.append(res["status"])
+            text = " ".join(str(res.get("summary") or "").split())
+            lines.append(f"- **{k + 1}. {x['scenario']}**: {res['status']}" + (f". {text}" if text else ""))
+        else:
+            statuses.append("partial")
+            lines.append(f"- **{k + 1}. {x['scenario']}**: "
+                         + ("no verdict recorded" if k <= rounds["current"] else "not run"))
+    run.finish(max(statuses, key=lambda st: RANK.get(st, 1)), "\n".join(lines))
 
 
 def combine_summaries(run_dir) -> Path | None:

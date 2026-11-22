@@ -186,8 +186,10 @@ the run's PRs, most telling first; without Claude, history or pump clock code in
 12-hour trip, the clock 73 hours ahead and `out-of-shelf-mode`, and anything else `recent-doses` and `app-doses`.
 Under `auto`, the reset and `clock-*` presets are set up in the app (walk) whatever `--pump-setup` says.
 
-One run holds every round: a `round` step opens each in the report, each pass's `run finish` is kept per round
-(`th rounds status`) and the run's status is the worst of them, and `agent-summary.md` has a section per scenario.
+One run holds every round: a `round` step opens each in the report, and each pass records its own scenario's verdict
+with `run finish`, kept per round (`th rounds status`). The run's status is the worst of them, partial at best when a
+round has no verdict or never ran, and its summary (the PR comment's) lists each scenario's verdict on a line of its
+own. `agent-summary.md` has a section per scenario.
 In CI: `pump_scenario` `auto`, or `pump_scenarios` for a list (the job's time limit rises to 6 hours for either). In
 the web UI: "Pump history" `auto`, or "Several, one after another". `trio-test-ci --pump-scenario a,b,c` sends a list
 as `pump_scenarios`.
