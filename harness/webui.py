@@ -510,6 +510,8 @@ def run_job(job: Job) -> None:
                 arc = rc_k if arc in (-1, 0) else arc
             if n_rounds > 1:
                 rounds.combine_summaries(rd)
+                from .report import Run
+                rounds.settle(Run(rd), final=True)
         finally:
             # crash reports from the agent's session (the e2e step saved those before it)
             job.sh(["./trio-test-harness", "--target", target, "crashes", "--save", "--run", str(rd)], env)

@@ -1098,6 +1098,8 @@ def cmd_rounds(args):
         return 0
     if args.sub == "summaries":
         out = rounds.combine_summaries(run.path)
+        if out:
+            rounds.settle(run, final=True)    # the job is done: every round's verdict, or why it has none
         print(out or "a run of one scenario: nothing to combine")
         return 0
     r = rounds.state(run.path)

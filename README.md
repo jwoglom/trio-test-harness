@@ -153,9 +153,8 @@ own figure with Control-IQ off.
 | `clock-jumped-back` | 6 h: the clock goes 2 days back with no record and no reboot; only a stamp running back shows it, and nothing before it can be dated. About 1.1 U IOB |
 | `clock-jumped-ahead` | 6 h: the clock goes 9 years ahead with no record and no reboot, a bolus either side; the app has to set it, and a driver that carries that change back to the first bolus dates it 9 years early (TandemKit conformance L22, still open). About 1.1 U IOB |
 
-The presets past `scheduled-basal` need a faketandem that has them (`--faketandem-ref` until they are on its `main`).
-`out-of-shelf-mode`, `pump-reset`, `reboot-kept-clock` and `clock-set-back` are on its `main`; the other `clock-*`
-presets are on jwoglom/faketandem branch `ccr-8d1f9957-exbmbn` until merged.
+Every preset is on faketandem's `main` (the reset and clock presets since its #60 and #61); a `--faketandem-ref` older
+than a preset refuses it at start.
 
 The reset and `clock-*` presets (`HISTORY_SCENARIOS`) test how TandemKit dates and reports the pump's history. Run
 them with `--pump-setup walk`: a preseeded driver reports nothing from before it first ran and never runs setup's clock
@@ -187,8 +186,10 @@ the run's PRs, most telling first; without Claude, history or pump clock code in
 12-hour trip, the clock 73 hours ahead and `out-of-shelf-mode`, and anything else `recent-doses` and `app-doses`.
 Under `auto`, the reset and `clock-*` presets are set up in the app (walk) whatever `--pump-setup` says.
 
-One run holds every round: a `round` step opens each in the report, each pass's `run finish` is kept per round
-(`th rounds status`) and the run's status is the worst of them, and `agent-summary.md` has a section per scenario.
+One run holds every round: a `round` step opens each in the report, and each pass records its own scenario's verdict
+with `run finish`, kept per round (`th rounds status`). The run's status is the worst of them, partial at best when a
+round has no verdict or never ran, and its summary (the PR comment's) lists each scenario's verdict on a line of its
+own. `agent-summary.md` has a section per scenario.
 In CI: `pump_scenario` `auto`, or `pump_scenarios` for a list (the job's time limit rises to 6 hours for either). In
 the web UI: "Pump history" `auto`, or "Several, one after another". `trio-test-ci --pump-scenario a,b,c` sends a list
 as `pump_scenarios`.
