@@ -397,6 +397,152 @@ def cmd_faketandem(args):
     return FTC.run(FT, args)
 
 
+def _kv_pairs(items: list[str] | None, what: str) -> dict:
+    """KEY=VALUE options into a dict; KEY= (empty) removes the key."""
+    out = {}
+    for item in items or []:
+        if "=" not in item:
+            raise HarnessError(f"{what}: {item!r} is not KEY=VALUE (KEY= removes the key)")
+        k, v = item.split("=", 1)
+        out[k.strip()] = v if v != "" else None
+    return out
+
+
+def versionmock_spec(args) -> dict:
+    """`th versionmock set`'s options as a versionmock spec (harness/versionmock.py build_config)."""
+    from . import versionmock as VM
+    spec: dict = {}
+    for f in ("version", "build_number", "branch", "sha", "latest", "latest_dev"):
+        if getattr(args, f, None) is not None:
+            spec[f] = getattr(args, f)
+    if args.build_detail:
+        spec["build_details"] = _kv_pairs(args.build_detail, "--build-detail")
+    if args.info:
+        spec["info"] = _kv_pairs(args.info, "--info")
+    if args.blacklist and args.blacklist_entry:
+        raise HarnessError("give --blacklist FILE or --blacklist-entry JSON (repeatable), not both")
+    if args.blacklist:
+        spec["blacklist"] = sys.stdin.read() if args.blacklist == "-" else VM.entries_from(args.blacklist)
+    elif args.blacklist_entry:
+        try:
+            spec["blacklist"] = VM.blacklist_json([json.loads(e) for e in args.blacklist_entry])
+        except ValueError as e:
+            raise HarnessError(f"--blacklist-entry: not JSON: {e}") from e
+    if args.blacklist_status:
+        spec["blacklist_status"] = args.blacklist_status
+    if args.fail:
+        spec["fail"] = sorted(set(args.fail))
+    routes = []
+    for url, src in args.route or []:
+        if src.startswith("status:"):
+            routes.append({"url": url, "status": int(src.split(":", 1)[1]), "body": ""})
+        elif src in ("offline", "timeout", "cannot-find-host"):
+            routes.append({"url": url, "error": src})
+        elif Path(src).expanduser().is_file():
+            routes.append({"url": url, "status": 200, "body_text": Path(src).expanduser().read_text()})
+        else:
+            raise HarnessError(f"--route {url} {src}: give a file, status:N, offline, timeout or cannot-find-host")
+    if routes:
+        spec["routes"] = routes
+    if args.reset_every_launch:
+        spec["reset_every_launch"] = True
+    if "latest" not in spec and spec.get("version") and not args.real_config:
+        spec["latest"] = spec["version"]         # no "Update Available" unless --latest asks for one
+    return spec
+
+
+def _bundle_for(target: str) -> str:
+    from .build import BuildInfo
+    bi = BuildInfo.load()
+    return bi.bundle_id if bi else CONFIG.bundle_id(target)
+
+
+def _versionmock_driver(target: str):
+    if target not in ("sim", "rooted-vnc"):
+        raise HarnessError("versionmock: --target sim or rooted-vnc (the shim cannot be loaded into an app on a "
+                           "phone without a jailbreak)")
+    return get_driver(target)
+
+
+def cmd_versionmock(args):
+    from . import versionmock as VM
+    target = _target(args)
+    if args.sub == "build":
+        print(VM.shim_path(target if target in VM.SDKS else "sim"))
+        return 0
+    if args.sub == "show":
+        state = VM.current()
+        if not state:
+            print("no version mock set")
+            return 0
+        from .util import read_json
+        cfg = read_json(VM.ACTIVE_DIR / "config.json", {})
+        print(json.dumps({**state, "config": cfg}, indent=2) if args.json else
+              f"{state['bundle_id']} on {state['target']}: {state['summary']}\nconfig: {VM.ACTIVE_DIR / 'config.json'}")
+        return 0
+    drv = _versionmock_driver(target)
+    bundle = args.bundle_id or _bundle_for(target)
+    if args.sub == "set":
+        spec = versionmock_spec(args)
+        if target == "sim":
+            drv.boot()
+        state = VM.activate(spec, target=target, bundle_id=bundle, drv=drv)
+        print(f"version mock set for {bundle} on {target}: {state['summary']}")
+        if args.relaunch:
+            VM.relaunch(drv, target, bundle, _app().name)
+            print("relaunched")
+        else:
+            print("takes effect at the next launch (`th launch`, or `th versionmock set ... --relaunch`)")
+        return 0
+    if args.sub == "clear":
+        state = VM.deactivate(target=target, drv=drv, remove_shim=args.remove_shim)
+        print("cleared" + (f" ({state['summary']})" if state else " (none was set)")
+              + "; the running app keeps it until it is relaunched")
+        return 0
+    if args.sub == "reset":
+        VM.new_token()
+        VM.resync(target=target, drv=drv)
+        print("the next launch removes the version checker's cached answer and alert stamps again")
+        if args.relaunch:
+            VM.relaunch(drv, target, bundle, _app().name)
+        return 0
+    if args.sub == "log":
+        evs = VM.events(drv, target, bundle)
+        if args.json:
+            print(json.dumps(evs, indent=2))
+        for e in evs if not args.json else []:
+            detail = e.get("status", e.get("error", "")) if e.get("event") == "request" else \
+                     {k: v for k, v in e.items() if k not in ("t", "event")}
+            print(f"{e.get('t', '?')}  {e.get('event', '?'):<15} {e.get('url', '')} {detail}")
+        return 0
+    if args.sub == "check":
+        from .flows import trio as FT
+        from .report import Run
+        try:
+            r = Run.current(args.run)
+        except HarnessError:
+            r = None
+        shot = (r.shot_path("version-check") if r else tmp_path("versionmock-check.png"))
+        alert, reqs = VM.wait_for_result(drv, target, bundle, timeout=args.timeout, shot=shot)
+        expect = {}
+        if args.expect or args.message is not None or args.no_message:
+            expect["alert"] = args.expect or "update-required"
+        if args.message is not None:
+            expect["message"] = args.message
+        elif args.no_message:
+            expect["message"] = None
+        ok, why = VM.verdict(expect, alert) if expect else (True, (alert or {}).get("kind", "none"))
+        out = {"alert": alert, "requests": [{k: e.get(k) for k in ("url", "status", "error") if k in e} for e in reqs],
+               "ok": ok, "verdict": why}
+        if r:
+            r.log_step("version-check", f"{'PASS' if ok else 'FAIL'}: {why}", shot, versionmock=out)
+        print(json.dumps(out, indent=2))
+        if alert and args.dismiss:
+            FT.settle(drv, r, labels=["OK"])
+        return 0 if ok else 1
+    raise HarnessError(f"versionmock {args.sub}?")
+
+
 def cmd_faceid(args):
     if _target(args) != "sim":
         raise HarnessError("faceid is for the simulator (--target sim)")
@@ -1311,8 +1457,96 @@ def cmd_wait(args):
     return 0
 
 
+def cmd_version_check(args):
+    """`th test version-check --scenarios FILE`: for each scenario, set the version mock, relaunch the app, read the
+    version alert off the screen (and the Settings warning with --settings), compare with the scenario's `expect`."""
+    from . import versionmock as VM
+    from .report import Run, render_html
+    a = _app()
+    F = a.flows
+    target = _target(args)
+    drv = _versionmock_driver(target)
+    bundle = _bundle_for(target)
+    data, scenarios = VM.load_scenarios(Path(args.scenarios))
+    if args.only:
+        scenarios = [s for s in scenarios if s["name"] in set(args.only)]
+        if not scenarios:
+            raise HarnessError(f"--only: no scenario named {', '.join(args.only)}")
+    r = Run.new(args.name or f"version-check-{target}",
+                {"target": target, "app": a.key, "title": data.get("title") or f"{a.name} version check ({target})",
+                 "scenarios": str(args.scenarios)})
+    if target == "sim":
+        drv.boot()
+        if not drv.is_installed(bundle):
+            raise HarnessError(f"{a.name} is not installed on the simulator; run `th build && th install`")
+    results = []
+    try:
+        token = None
+        for i, sc in enumerate(scenarios):
+            name = sc["name"]
+            expect = (sc.get("expect_legacy") if args.legacy and "expect_legacy" in sc else sc.get("expect")) or {}
+            spec = VM.spec_of(sc)
+            # "reset": false keeps the previous scenario's token: the checker's cache from it stays (cache tests)
+            state = VM.activate(spec, target=target, bundle_id=bundle, drv=drv, install_shim=(i == 0),
+                                token=token if sc.get("reset") is False else None)
+            token = state["token"]
+            VM.relaunch(drv, target, bundle, a.name)
+            time.sleep(args.settle)
+            shot = r.shot_path(name)
+            alert, reqs = VM.wait_for_result(drv, target, bundle, timeout=args.timeout, shot=shot)
+            ok, why = VM.verdict(expect, alert)
+            served = [f"{e.get('url', '').rsplit('/', 1)[-1]} {e.get('status', e.get('error', ''))}" for e in reqs]
+            # expect.fetch: whether the app must ask for the blacklist this launch (default: when it is mocked); false
+            # for a launch that should answer from the checker's cache
+            fetched = VM.URLS["blacklist"] in [e.get("url") for e in reqs]
+            want_fetch = expect.get("fetch", spec.get("blacklist") is not None or "blacklist" in (spec.get("fail") or []))
+            if fetched != want_fetch and ("fetch" in expect or want_fetch):
+                ok, why = False, why + ("; the app never fetched the mocked blacklist" if want_fetch else
+                                        "; the app fetched the blacklist, expected its cached answer")
+            note = (f"{'PASS' if ok else 'FAIL'} {name}: {VM.describe(spec)} → expected {expect.get('alert', 'none')}"
+                    + (f" with {expect['message']!r}" if expect.get("message") else "") + f"; {why}")
+            if sc.get("note"):
+                note += f" ({sc['note']})"
+            r.log_step(f"scenario-{name}", note, shot, scenario=name, ok=ok, alert=alert, served=served)
+            log(note)
+            if alert:
+                F.settle(drv, None, labels=["OK"])
+            if args.settings:
+                F.open_settings(drv)
+                time.sleep(3)
+                warned = bool(drv.find(VM.SETTINGS_WARNING)) or drv.wait_for_text(VM.SETTINGS_WARNING, timeout=2)
+                want = expect.get("alert") == "update-required"
+                sok = warned == want
+                ok = ok and sok
+                F.step(r, drv, f"scenario-{name}-settings",
+                       f"{'PASS' if sok else 'FAIL'} Settings: {'shows' if warned else 'no'} “{VM.SETTINGS_WARNING}”"
+                       f" (expected {'it' if want else 'none'})")
+            results.append({"name": name, "ok": ok, "why": why})
+        failed = [x for x in results if not x["ok"]]
+        summary = (f"{len(results) - len(failed)}/{len(results)} version-check scenarios as expected"
+                   + (": failed " + ", ".join(x["name"] for x in failed) if failed else "."))
+        r.finish("passed" if not failed else "failed", summary)
+    except Exception as e:  # noqa: BLE001
+        F.step(r, drv, "failure", str(e)[:200])
+        r.finish("failed", f"{type(e).__name__}: {e}")
+        render_html(r)
+        raise
+    finally:
+        if not args.keep:
+            VM.deactivate(target=target, drv=drv)
+    for x in results:
+        print(f"{'PASS' if x['ok'] else 'FAIL'}  {x['name']}: {x['why']}")
+    print(render_html(r))
+    print(r.path)
+    return 0 if all(x["ok"] for x in results) else 1
+
+
 def cmd_test(args):
     """Smoke test: launch the app, get to the home screen, add fake CGM + pump, screenshot everything."""
+    if args.kind == "version-check":
+        if not args.scenarios:
+            raise HarnessError("test version-check needs --scenarios FILE (e.g. harness/scenarios/versionmock-branch-sha.json)")
+        return cmd_version_check(args)
     from .report import Run, render_html
     from .build import BuildInfo
     a = _app()
@@ -1723,9 +1957,64 @@ def build_parser() -> argparse.ArgumentParser:
                            help="TandemKit's settings screen is already showing (skips Settings ▸ Devices ▸ Insulin Pump)")
     fl.set_defaults(fn=cmd_flow)
 
-    te = sp.add_parser("test", help="end-to-end smoke test on the installed build")
-    te.add_argument("kind", choices=["smoke"]); te.add_argument("--name"); te.add_argument("--no-preseed", dest="preseed", action="store_false")
-    te.add_argument("--no-devices", dest="devices", action="store_false"); te.set_defaults(fn=cmd_test)
+    te = sp.add_parser("test", help="smoke: end-to-end smoke test on the installed build; version-check: run a "
+                                    "versionmock scenario file (blacklist / update alerts against mocked builds)")
+    te.add_argument("kind", choices=["smoke", "version-check"]); te.add_argument("--name"); te.add_argument("--no-preseed", dest="preseed", action="store_false")
+    te.add_argument("--no-devices", dest="devices", action="store_false")
+    te.add_argument("--scenarios", metavar="FILE", help="version-check: the scenario file (see harness/scenarios/)")
+    te.add_argument("--only", action="append", metavar="NAME", help="version-check: run only this scenario (repeatable)")
+    te.add_argument("--settings", action="store_true", help="version-check: also open Settings after each scenario "
+                    "and check its \"Known issues\" warning")
+    te.add_argument("--timeout", type=float, default=25.0, help="version-check: seconds to wait for an alert (default 25)")
+    te.add_argument("--settle", type=float, default=3.0, help="version-check: seconds after each launch before looking")
+    te.add_argument("--keep", action="store_true", help="version-check: leave the last scenario's mock set")
+    te.add_argument("--legacy", action="store_true", help="version-check: compare with each scenario's "
+                    "expect_legacy (a build from before the change under test) where it has one")
+    te.set_defaults(fn=cmd_test)
+
+    vm = sp.add_parser("versionmock", help="make the app report another version / branch / commit and answer its "
+                       "version check (blacklist, latest version) from fixtures: a shim loaded at launch, sim and "
+                       "rooted-vnc (harness/versionmock.py)")
+    vms = vm.add_subparsers(dest="sub", required=True)
+    vset = vms.add_parser("set", help="set the mock for the app's next launch (replaces any earlier one)")
+    vset.add_argument("--version", help="CFBundleShortVersionString the app reports, e.g. 0.6.0.12")
+    vset.add_argument("--build-number", help="CFBundleVersion")
+    vset.add_argument("--branch", help="BuildDetails.plist com-trio-branch (\"\" = none recorded)")
+    vset.add_argument("--sha", help="BuildDetails.plist com-trio-commit-sha (\"\" = none recorded)")
+    vset.add_argument("--build-detail", action="append", metavar="KEY=VALUE", help="any BuildDetails.plist key; KEY= removes it")
+    vset.add_argument("--info", action="append", metavar="KEY=VALUE", help="any Info.plist key; KEY= removes it")
+    vset.add_argument("--blacklist", metavar="FILE", help="serve this file as blacklisted-versions.json (- = stdin)")
+    vset.add_argument("--blacklist-entry", action="append", metavar="JSON", help="serve a blacklist of these entries, "
+                      "e.g. '{\"version\": \"\", \"sha\": \"a1b2c3d\", \"message\": \"...\"}' (repeatable)")
+    vset.add_argument("--blacklist-status", type=int, help="HTTP status for the blacklist (default 200)")
+    vset.add_argument("--latest", help="APP_VERSION of main's Config.xcconfig (default: --version, so no update alert)")
+    vset.add_argument("--latest-dev", help="APP_DEV_VERSION of dev's Config.xcconfig")
+    vset.add_argument("--real-config", action="store_true", help="fetch the real Config.xcconfig even with --version")
+    vset.add_argument("--fail", action="append", choices=["blacklist", "config", "dev-config"],
+                      help="that request fails as if offline (repeatable)")
+    vset.add_argument("--route", nargs=2, action="append", metavar=("URL", "FILE|status:N|offline|timeout"),
+                      help="answer another URL (a trailing * matches a prefix)")
+    vset.add_argument("--reset-every-launch", action="store_true", help="drop the checker's cache at every launch, "
+                      "not only the first after this set")
+    vset.add_argument("--relaunch", action="store_true", help="relaunch the app now")
+    vcl = vms.add_parser("clear", help="stop mocking (the app keeps it until relaunched)")
+    vcl.add_argument("--remove-shim", action="store_true", help="rooted-vnc: also delete the shim from the phone")
+    vrs = vms.add_parser("reset", help="drop the version checker's cache and alert stamps again at the next launch")
+    vrs.add_argument("--relaunch", action="store_true")
+    vlg = vms.add_parser("log", help="what the shim did: what it overrode at launch and each request it answered")
+    vlg.add_argument("--json", action="store_true")
+    vsh = vms.add_parser("show", help="the mock in force"); vsh.add_argument("--json", action="store_true")
+    vms.add_parser("build", help="compile the shim for --target (done on first use)")
+    vck = vms.add_parser("check", help="wait for the version alert (or for the blacklist to be served and none to "
+                         "come), screenshot it into the run, compare with --expect; exit 1 on a mismatch")
+    vck.add_argument("--expect", choices=["update-required", "update-available", "none"])
+    vck.add_argument("--message", help="the entry message the Update Required alert must carry")
+    vck.add_argument("--no-message", action="store_true", help="the alert must carry only the standard text")
+    vck.add_argument("--timeout", type=float, default=25.0); vck.add_argument("--dismiss", action="store_true", help="tap OK after")
+    vck.add_argument("--run")
+    for x in (vset, vcl, vrs, vlg, vck):
+        x.add_argument("--bundle-id", help="default: the last build's")
+    vm.set_defaults(fn=cmd_versionmock, bundle_id=None)
 
     wt = sp.add_parser("wait", help=f"wait N seconds in the foreground (1-{WAIT_MAX}), e.g. to let a timeout pass; "
                                     "or --until \"SUBCOMMAND\" --matches REGEX: poll a subcommand until its output "

@@ -52,7 +52,7 @@ HOME_MARKERS = ["Adjustments", "History", "Add Treatment", "Settings"]
 # Deliberately excludes Cancel/Close/Back so we never dismiss a sheet the test itself opened.
 INTERSTITIAL_BUTTONS = ["OK", "Allow", "Allow While Using App", "Continue", "Not Now", "Later", "Dismiss", "Got it", "Got It"]
 # Alert titles worth logging when seen
-INTERSTITIAL_TITLES = ["Update Available", "Would Like to", "Bluetooth Required", "Low Glucose", "High Glucose"]
+INTERSTITIAL_TITLES = ["Update Available", "Update Required", "Would Like to", "Bluetooth Required", "Low Glucose", "High Glucose"]
 
 
 def step(run: Run | None, drv: Driver, action: str, note: str = "", *, pause: float = 0.0) -> Path | None:

@@ -201,6 +201,50 @@ and the web UI do that at the end of a job. In CI: `pump`, `pump_setup`, `pump_s
 Go set up by `actions/setup-go`. In the web UI: "Pump (simulator)". Only emulated values are used. faketandem's
 serial number, key and history are made up.
 
+## Version check and blacklist (`th versionmock`)
+
+Trio's version checker (`Trio/Sources/Services/AppVersionChecker/AppVersionChecker.swift`) fetches
+`blacklisted-versions.json` and `Config.xcconfig` from raw.githubusercontent.com at every activation and compares them
+with the build's version and, since nightscout/Trio#1798, the branch and commit in `BuildDetails.plist`; a blacklisted
+build gets an "Update Required" alert (at most once a day) and Settings shows "Warning: Known issues. Update now.".
+`th versionmock` tests that against any build and any blacklist without changing the app: a shim
+(`harness/shims/THVersionMock.m`, compiled on first use with `xcrun clang`) is loaded into the app at launch, answers
+those requests from fixtures and overrides what the app reads as its version, branch and SHA.
+
+```bash
+th versionmock set --version 0.6.0.12 --branch dev --sha a1b2c3d \
+    --blacklist-entry '{"version": "", "sha": "a1b2c3d", "message": "Fixes a bolus issue."}' --relaunch
+th versionmock check --expect update-required --message "Fixes a bolus issue." --dismiss   # exit 1 on a mismatch
+th versionmock log            # what the shim overrode, and every request it answered
+th versionmock clear          # stop (the running app keeps it until relaunched)
+
+th test version-check --scenarios harness/scenarios/versionmock-branch-sha.json [--settings] [--only NAME]
+th test version-check --scenarios ... --legacy   # on a build from before #1798: each scenario's expect_legacy
+```
+
+- `set`: `--version`/`--build-number` (Info.plist), `--branch`/`--sha` (`""` = none recorded), `--build-detail K=V`,
+  `--info K=V` (`K=` removes a key); `--blacklist FILE` or `--blacklist-entry JSON` (repeatable), `--blacklist-status N`;
+  `--latest`/`--latest-dev` (APP_VERSION in main's / dev's Config.xcconfig; `--latest` defaults to `--version`, so no
+  "Update Available" unless asked for); `--fail blacklist|config|dev-config` (a network error); `--route URL
+  FILE|status:N|offline|timeout` for any other URL. What is not given is not touched: without `--blacklist*` the real
+  file is fetched.
+- Each `set` (and `reset`) has the shim remove the checker's cached answer and its "last shown" stamps once, at the next
+  launch (`--reset-every-launch`: at every launch); without that a cached answer up to 24 hours old and the once-a-day
+  limit would hide the result.
+- Simulator: every `simctl launch` of the app the mock was set for (`th launch`, the daemon's, the pipeline's) gets
+  `SIMCTL_CHILD_DYLD_INSERT_LIBRARIES`, and the config goes into the app's data container (`Library/th-versionmock/`),
+  so it survives a reinstall. Phone (rooted-vnc): the shim is installed as a MobileSubstrate/ElleKit library filtered to
+  the app's bundle id (`/var/jb/Library/MobileSubstrate/DynamicLibraries/THVersionMock.*`, inert without a config;
+  `clear --remove-shim` deletes it) and the config is copied into the container over SSH. iphone-usb cannot load it.
+- A scenario file (`harness/scenarios/versionmock-branch-sha.json`, covering every entry shape #1798 supports, malformed
+  entries, offline/404, and the cache being keyed on the SHA) lists builds and what each should show. `test
+  version-check` sets, relaunches, waits for the alert (or for the blacklist to be served and none to follow), checks the
+  alert's kind and appended message, and with `--settings` the Settings warning; one screenshot step per scenario.
+  `expect.fetch` says whether the app must fetch the blacklist on that launch, and `"reset": false` keeps the previous
+  scenario's cache. `tests/test_versionmock.py` checks the file's expectations against #1798's matching rules.
+- The alert does not show when something else is presented at activation (`showAlert` gives up); the harness builds
+  with `DEV_BRANCH_WARNING_DISABLED`, so a mocked branch does not raise the development-branch warning.
+
 ## How it works
 
 Three connection modes (`--mode` / `--target`):
@@ -300,7 +344,8 @@ Mode, and the phone unlocked while installing. Install only — driving the phon
 `doctor` · `build` · `install` · `launch` · `sim {list,runtimes,install-runtime,boot,shutdown,erase,container,defaults,openurl}` ·
 `device {list,vnc-check,serve-ipa,wake,ssh,diag,vnc-restart,kill,apps}` · `faketandem {start,stop,seed,status,pairing,history,scenario,api,fault,clock,set,suspend,resume,alert,alarm,malfunction,reminder,cgmalert,cartridge,bolus,tempbasal,log,transport}` · `faceid {enroll,match,nomatch}` · `daemon {start,stop,status,restart}` · `wda {build,start,stop,status}` · `watch {pair,status,agent}` · `shot` · `tap` · `swipe` · `drag` · `scroll` · `type` · `key [--count N]` · `home` · `crown` · `tap-text` · `find` ·
 `tree` · `wait-text` · `ocr` · `logs [trio|tandem|watch|all] [--count]` · `db {stores,tables,schema,query,exec}` · `oslog` · `crashes` · `files {ls,cat}` · `perf` · `run {new,current,use,note,finish,list,steps}` · `report {html,pr,markdown}` ·
-`flow {onboarding-walk,add-cgm-sim,add-pump-sim,back-home,dismiss,at-home,tandem-feature-flags,tandem-feature-flag}` · `test smoke`
+`flow {onboarding-walk,add-cgm-sim,add-pump-sim,back-home,dismiss,at-home,tandem-feature-flags,tandem-feature-flag}` · `test {smoke,version-check}` ·
+`versionmock {set,check,log,show,reset,clear,build}`
 
 `--target`, `--app` and `--git-protocol` work before or after the subcommand (`th faketandem status --target sim`).
 `th wait N` waits; `th wait --until "logs trio --since 2m" --matches REGEX [--timeout N] [--every S]` re-runs a harness

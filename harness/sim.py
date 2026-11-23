@@ -155,9 +155,11 @@ class SimulatorDriver(Driver):
     def launch(self, bundle_id: str, *, terminate_first: bool = True) -> None:
         if terminate_first:
             self._simctl(["terminate", self.udid, bundle_id], check=False, quiet=True)
-        # simctl passes SIMCTL_CHILD_* on to the app without the prefix: a virtual-pump build finds faketandem there
-        from . import faketandem
-        child = {f"SIMCTL_CHILD_{k}": v for k, v in faketandem.launch_env().items()}
+        # simctl passes SIMCTL_CHILD_* on to the app without the prefix: a virtual-pump build finds faketandem there,
+        # and a `th versionmock set` loads its shim (DYLD_INSERT_LIBRARIES) into the app it was set for
+        from . import faketandem, versionmock
+        app_env = {**faketandem.launch_env(), **versionmock.simulator_launch_env(self, bundle_id)}
+        child = {f"SIMCTL_CHILD_{k}": v for k, v in app_env.items()}
         run(["xcrun", "simctl", "launch", self.udid, bundle_id], env={**self._env, **child})
 
     def terminate(self, bundle_id: str) -> None:
