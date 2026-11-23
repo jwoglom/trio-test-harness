@@ -15,6 +15,10 @@ description: Turn a Trio (or Trio submodule) pull request into a concrete, scree
    and Limits → Max Bolus), defaults, limits and what it does. Put that path in the check. The docs can lag the PR.
 3. Write the plan as numbered checks with expected results into `runs/<run>/pr.md` under "Test plan", each mapped to
    `th` actions (tap-text labels, values to type, what to screenshot). Include a negative check where the PR fixes a bug.
+   For a PR touching the version check (`AppVersionChecker`, `blacklisted-versions.json`, `BuildDetails`, the update /
+   "Update Required" alerts), plan scenarios for `th versionmock` / `th test version-check` (README "Version check and
+   blacklist"): it fakes the build's version, branch and SHA and serves any blacklist or latest version, so each entry
+   shape and the alert's text can be checked; extend `harness/scenarios/versionmock-branch-sha.json` or write a new one.
 4. State what cannot be tested with fake devices (real pump/CGM protocol paths, Nightscout, HealthKit) so the report is honest.
 Trio facts that matter: only the device picker has accessibility identifiers (`devicePickerItem-<id>`); everything else is
 matched by visible label; the home has tabs Main/History/Add Treatment/Adjustments/Settings; simulator = iOS 26 UI, phone = iOS 18 UI.

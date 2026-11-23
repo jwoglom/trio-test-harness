@@ -295,6 +295,19 @@ until merged: pass `--faketandem-ref` until then).
   cartridge-change API), with cookbook entries for them, the refusals and `connection.subscribed`. Stub faketandem only.
 
 ## Still unverified
+- `th versionmock` / `th test version-check` (`harness/versionmock.py`, `harness/shims/THVersionMock.m`, 2026-11-23,
+  for nightscout/Trio#1798's blacklist entries by branch and SHA): written in a Linux session with no Mac. Checked: the
+  Python side with unit tests (config, CLI options, container sync, launch env, alert reading, and the scenario file's
+  expectations against #1798's matching rules in `tests/test_versionmock.py`), and the shim's Objective-C syntax against
+  GNUstep headers with stubs for the Apple-only APIs. Never run: compiling the shim with `xcrun clang` for either SDK,
+  `DYLD_INSERT_LIBRARIES` through `simctl launch` (expected to work: simulator apps take it), whether
+  `NSURLProtocol registerClass` reaches `URLSession.shared` in the app (expected), whether the Info.plist /
+  `BuildDetails.plist` swizzles reach Trio's `Bundle.main.infoDictionary` and `Bundle.main.url(forResource:)` (expected:
+  both are NSBundle methods), how WebDriverAgent shows the alert's message (one StaticText with the whole message is
+  assumed), and all of the phone path: ElleKit/Substrate loading an ad-hoc-signed dylib from `/var/jb/...`, its filter
+  plist, `sudo -n` on the phone. First thing to do on the Mac: `th versionmock build`, then `th versionmock set
+  --version 0.5.0 --blacklist-entry '{"version": "0.5.0", "message": "x"}' --relaunch`, `th versionmock log` (expect a
+  `loaded` and a `request` line) and `th versionmock check --expect update-required --message x`.
 - `th oref` (`harness/oref.py`, 2026-11-09; first `th loop`, renamed so it is not taken for the Loop app): forces a
   Trio oref cycle with the home screen's pull-down and checks each stage from Trio's log. Checked against fake logs and
   a fake driver only: that the pull (22% to 57% of the screen down, 0.3 s press) arms Trio's 70 pt pull-to-loop on the

@@ -236,6 +236,13 @@ def ssh_pull(remote_paths: list[str], dest: Path, *, timeout: int = 180, mux: bo
         timeout=timeout, quiet=True)
 
 
+def ssh_push(local_paths: list[Path], remote_dir: str, *, timeout: int = 180) -> None:
+    """Copy local files into the directory `remote_dir` on the phone (scp)."""
+    user, host, port = ssh_target()
+    run(["scp", *_ssh_opts(False), "-q", "-P", port, *[str(p) for p in local_paths], f"{user}@{host}:{remote_dir}"],
+        timeout=timeout, quiet=True)
+
+
 def ssh_ok() -> bool:
     return ssh_run("echo ok", check=False, timeout=20).returncode == 0
 
