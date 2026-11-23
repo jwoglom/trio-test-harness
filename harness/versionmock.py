@@ -78,6 +78,7 @@ def build_config(spec: dict, token: str | None = None) -> tuple[dict, dict[str, 
     """The shim's config.json and the body files it names ({relative path: text}) for a spec:
 
     version, build_number, branch, sha          the build the app reports ("" for branch/sha: not recorded)
+    dev_version                                  Info.plist AppDevVersion, what Settings shows (default: version)
     build_details, info                          more BuildDetails.plist / Info.plist keys (None removes one)
     blacklist                                    the blacklist file's text (None: the real one is fetched)
     blacklist_status                             HTTP status for it (default 200)
@@ -89,6 +90,10 @@ def build_config(spec: dict, token: str | None = None) -> tuple[dict, dict[str, 
     info = dict(spec.get("info") or {})
     if spec.get("version"):
         info["CFBundleShortVersionString"] = spec["version"]
+    # AppDevVersion (APP_DEV_VERSION) is what Settings and the loading screen show; a dev build has a four-part one
+    # (1.0.2.83) while CFBundleShortVersionString (APP_VERSION, what the checker compares) stays the release's
+    if spec.get("dev_version") or spec.get("version"):
+        info["AppDevVersion"] = spec.get("dev_version") or spec["version"]
     if spec.get("build_number"):
         info["CFBundleVersion"] = spec["build_number"]
     details = dict(spec.get("build_details") or {})
@@ -134,7 +139,7 @@ def build_config(spec: dict, token: str | None = None) -> tuple[dict, dict[str, 
 
 def describe(spec: dict) -> str:
     parts = []
-    for field in ("version", "build_number", "branch", "sha"):
+    for field in ("version", "dev_version", "build_number", "branch", "sha"):
         if spec.get(field) is not None:
             parts.append(f"{field}={spec[field] or '(none)'}")
     for k, v in (spec.get("build_details") or {}).items():
@@ -509,7 +514,7 @@ def part(scenarios: list[dict], spec: str) -> list[dict]:
     return parts[i - 1]
 
 
-SPEC_KEYS = ("version", "build_number", "branch", "sha", "build_details", "info", "blacklist", "blacklist_status",
+SPEC_KEYS = ("version", "dev_version", "build_number", "branch", "sha", "build_details", "info", "blacklist", "blacklist_status",
              "latest", "latest_dev", "fail", "routes", "reset_every_launch")
 
 

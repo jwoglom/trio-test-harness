@@ -10,95 +10,473 @@
     "whether the app must fetch the blacklist this launch. expect_legacy is what a build from before #1798 shows",
     "(version-only matching, no message, no SHA in the cache key): use it with --legacy on a build of main.",
     "Entry messages start with a letter so the screenshot shows which entry fired; with several matches the first",
-    "in file order supplies the message."
+    "in file order supplies the message.",
+    "dev_version sets AppDevVersion, what Settings shows (default: version). A real dev build has CFBundleShortVersionString = APP_VERSION (the release, e.g. 1.0.2) and AppDevVersion = APP_DEV_VERSION (1.0.2.83); the checker compares the first."
   ],
   "defaults": {
     "blacklist": [
-      { "version": "0.5.0", "message": "A: every 0.5.0 build" },
-      { "version": "", "sha": "a1b2c3d", "message": "B: commit a1b2c3d, any version" },
-      { "version": "SKIP", "sha": "0123456789abcdef0123456789abcdef01234567", "message": "C: full-length sha, any version" },
-      { "version": "0.6.0.12", "branch": "dev", "message": "D: 0.6.0.12 from dev" },
-      { "version": "", "branch": "feat/broken", "message": "E: every build from feat/broken" },
-      { "version": "0.7.0", "sha": "b2c3d4e", "message": "G: 0.7.0 at b2c3d4e", "reason": "extra key" },
-      { "version": "0.8.0", "branch": "dev", "sha": "c3d4e5f", "message": "H: 0.8.0 from dev at c3d4e5f" },
-      { "version": "0.9.0" },
-      { "version": "", "branch": "", "sha": "", "message": "X: nothing specified, never fires" },
-      { "version": "SKIP", "branch": "SKIP", "sha": "SKIP", "message": "Y: all SKIP, never fires" }
+      {
+        "version": "0.5.0",
+        "message": "A: every 0.5.0 build"
+      },
+      {
+        "version": "",
+        "sha": "a1b2c3d",
+        "message": "B: commit a1b2c3d, any version"
+      },
+      {
+        "version": "SKIP",
+        "sha": "0123456789abcdef0123456789abcdef01234567",
+        "message": "C: full-length sha, any version"
+      },
+      {
+        "version": "0.6.0.12",
+        "branch": "dev",
+        "message": "D: 0.6.0.12 from dev"
+      },
+      {
+        "version": "",
+        "branch": "feat/broken",
+        "message": "E: every build from feat/broken"
+      },
+      {
+        "version": "0.7.0",
+        "sha": "b2c3d4e",
+        "message": "G: 0.7.0 at b2c3d4e",
+        "reason": "extra key"
+      },
+      {
+        "version": "0.8.0",
+        "branch": "dev",
+        "sha": "c3d4e5f",
+        "message": "H: 0.8.0 from dev at c3d4e5f"
+      },
+      {
+        "version": "0.9.0"
+      },
+      {
+        "version": "",
+        "branch": "",
+        "sha": "",
+        "message": "X: nothing specified, never fires"
+      },
+      {
+        "version": "SKIP",
+        "branch": "SKIP",
+        "sha": "SKIP",
+        "message": "Y: all SKIP, never fires"
+      }
     ]
   },
   "scenarios": [
-    { "name": "version-only", "version": "0.5.0", "branch": "main", "sha": "1111111",
-      "expect": { "alert": "update-required", "message": "A: every 0.5.0 build" },
-      "expect_legacy": { "alert": "update-required", "message": null } },
-    { "name": "version-only-no-message", "version": "0.9.0", "branch": "main", "sha": "9999999",
-      "expect": { "alert": "update-required", "message": null },
-      "expect_legacy": { "alert": "update-required", "message": null } },
-    { "name": "sha-any-version", "version": "1.0.0", "branch": "main", "sha": "a1b2c3d",
-      "expect": { "alert": "update-required", "message": "B: commit a1b2c3d, any version" },
-      "expect_legacy": { "alert": "none" } },
-    { "name": "sha-case-and-longer-build-sha", "version": "1.0.0", "branch": "dev", "sha": "A1B2C3D4E5",
-      "expect": { "alert": "update-required", "message": "B: commit a1b2c3d, any version" },
-      "expect_legacy": { "alert": "none" } },
-    { "name": "sha-off-by-one", "version": "1.0.0", "branch": "dev", "sha": "a1b2c3e",
-      "expect": { "alert": "none" }, "expect_legacy": { "alert": "none" } },
-    { "name": "sha-build-too-short", "version": "1.0.0", "branch": "dev", "sha": "a1b2c3",
-      "expect": { "alert": "none" }, "expect_legacy": { "alert": "none" } },
-    { "name": "short-build-sha-vs-full-entry", "version": "2.0.0", "branch": "main", "sha": "0123456",
-      "expect": { "alert": "update-required", "message": "C: full-length sha, any version" },
-      "expect_legacy": { "alert": "none" } },
-    { "name": "version-and-branch", "version": "0.6.0.12", "branch": "dev", "sha": "1111111",
-      "expect": { "alert": "update-required", "message": "D: 0.6.0.12 from dev" },
-      "expect_legacy": { "alert": "update-required", "message": null } },
-    { "name": "version-and-other-branch", "version": "0.6.0.12", "branch": "main", "sha": "1111111",
-      "expect": { "alert": "none" },
-      "expect_legacy": { "alert": "update-required", "message": null },
-      "note": "older builds warn on the version alone" },
-    { "name": "branch-case-differs", "version": "0.6.0.12", "branch": "Dev", "sha": "1111111",
-      "expect": { "alert": "none" }, "expect_legacy": { "alert": "update-required", "message": null } },
-    { "name": "no-build-details", "version": "0.6.0.12", "branch": "", "sha": "",
-      "expect": { "alert": "none" }, "expect_legacy": { "alert": "update-required", "message": null },
-      "note": "BuildDetails.plist without branch and commit" },
-    { "name": "branch-any-version", "version": "3.1.0", "branch": "feat/broken", "sha": "1111111",
-      "expect": { "alert": "update-required", "message": "E: every build from feat/broken" },
-      "expect_legacy": { "alert": "none" } },
-    { "name": "branch-prefix-only", "version": "3.1.0", "branch": "feat/broken-fix", "sha": "1111111",
-      "expect": { "alert": "none" }, "expect_legacy": { "alert": "none" } },
-    { "name": "version-and-sha", "version": "0.7.0", "branch": "main", "sha": "b2c3d4e",
-      "expect": { "alert": "update-required", "message": "G: 0.7.0 at b2c3d4e" },
-      "expect_legacy": { "alert": "update-required", "message": null } },
-    { "name": "version-and-other-sha", "version": "0.7.0", "branch": "main", "sha": "1111111",
-      "expect": { "alert": "none" }, "expect_legacy": { "alert": "update-required", "message": null } },
-    { "name": "version-branch-sha", "version": "0.8.0", "branch": "dev", "sha": "c3d4e5f",
-      "expect": { "alert": "update-required", "message": "H: 0.8.0 from dev at c3d4e5f" },
-      "expect_legacy": { "alert": "update-required", "message": null } },
-    { "name": "version-branch-other-sha", "version": "0.8.0", "branch": "dev", "sha": "1111111",
-      "expect": { "alert": "none" }, "expect_legacy": { "alert": "update-required", "message": null } },
-    { "name": "two-entries-first-message-wins", "version": "0.6.0.12", "branch": "dev", "sha": "a1b2c3d",
-      "expect": { "alert": "update-required", "message": "B: commit a1b2c3d, any version" },
-      "expect_legacy": { "alert": "update-required", "message": null } },
-    { "name": "clean-release-build", "version": "1.0.2", "branch": "main", "sha": "fedcba9",
-      "expect": { "alert": "none" }, "expect_legacy": { "alert": "none" } },
-    { "name": "update-available", "version": "1.0.0", "branch": "main", "sha": "fedcba9", "latest": "1.1.0",
-      "expect": { "alert": "update-available" }, "expect_legacy": { "alert": "update-available" } },
-    { "name": "blacklisted-beats-update-available", "version": "0.5.0", "branch": "main", "sha": "1111111",
+    {
+      "name": "version-only",
+      "version": "0.5.0",
+      "branch": "main",
+      "sha": "1111111",
+      "expect": {
+        "alert": "update-required",
+        "message": "A: every 0.5.0 build"
+      },
+      "expect_legacy": {
+        "alert": "update-required",
+        "message": null
+      }
+    },
+    {
+      "name": "version-only-no-message",
+      "version": "0.9.0",
+      "branch": "main",
+      "sha": "9999999",
+      "expect": {
+        "alert": "update-required",
+        "message": null
+      },
+      "expect_legacy": {
+        "alert": "update-required",
+        "message": null
+      }
+    },
+    {
+      "name": "sha-any-version",
+      "version": "1.0.0",
+      "branch": "main",
+      "sha": "a1b2c3d",
+      "expect": {
+        "alert": "update-required",
+        "message": "B: commit a1b2c3d, any version"
+      },
+      "expect_legacy": {
+        "alert": "none"
+      }
+    },
+    {
+      "name": "sha-case-and-longer-build-sha",
+      "version": "1.0.0",
+      "branch": "dev",
+      "sha": "A1B2C3D4E5",
+      "expect": {
+        "alert": "update-required",
+        "message": "B: commit a1b2c3d, any version"
+      },
+      "expect_legacy": {
+        "alert": "none"
+      }
+    },
+    {
+      "name": "sha-off-by-one",
+      "version": "1.0.0",
+      "branch": "dev",
+      "sha": "a1b2c3e",
+      "expect": {
+        "alert": "none"
+      },
+      "expect_legacy": {
+        "alert": "none"
+      }
+    },
+    {
+      "name": "sha-build-too-short",
+      "version": "1.0.0",
+      "branch": "dev",
+      "sha": "a1b2c3",
+      "expect": {
+        "alert": "none"
+      },
+      "expect_legacy": {
+        "alert": "none"
+      }
+    },
+    {
+      "name": "short-build-sha-vs-full-entry",
+      "version": "2.0.0",
+      "branch": "main",
+      "sha": "0123456",
+      "expect": {
+        "alert": "update-required",
+        "message": "C: full-length sha, any version"
+      },
+      "expect_legacy": {
+        "alert": "none"
+      }
+    },
+    {
+      "name": "version-and-branch",
+      "version": "0.6.0.12",
+      "branch": "dev",
+      "sha": "1111111",
+      "expect": {
+        "alert": "update-required",
+        "message": "D: 0.6.0.12 from dev"
+      },
+      "expect_legacy": {
+        "alert": "update-required",
+        "message": null
+      }
+    },
+    {
+      "name": "version-and-other-branch",
+      "version": "0.6.0.12",
+      "branch": "main",
+      "sha": "1111111",
+      "expect": {
+        "alert": "none"
+      },
+      "expect_legacy": {
+        "alert": "update-required",
+        "message": null
+      },
+      "note": "older builds warn on the version alone"
+    },
+    {
+      "name": "branch-case-differs",
+      "version": "0.6.0.12",
+      "branch": "Dev",
+      "sha": "1111111",
+      "expect": {
+        "alert": "none"
+      },
+      "expect_legacy": {
+        "alert": "update-required",
+        "message": null
+      }
+    },
+    {
+      "name": "no-build-details",
+      "version": "0.6.0.12",
+      "branch": "",
+      "sha": "",
+      "expect": {
+        "alert": "none"
+      },
+      "expect_legacy": {
+        "alert": "update-required",
+        "message": null
+      },
+      "note": "BuildDetails.plist without branch and commit"
+    },
+    {
+      "name": "branch-any-version",
+      "version": "3.1.0",
+      "branch": "feat/broken",
+      "sha": "1111111",
+      "expect": {
+        "alert": "update-required",
+        "message": "E: every build from feat/broken"
+      },
+      "expect_legacy": {
+        "alert": "none"
+      }
+    },
+    {
+      "name": "branch-prefix-only",
+      "version": "3.1.0",
+      "branch": "feat/broken-fix",
+      "sha": "1111111",
+      "expect": {
+        "alert": "none"
+      },
+      "expect_legacy": {
+        "alert": "none"
+      }
+    },
+    {
+      "name": "version-and-sha",
+      "version": "0.7.0",
+      "branch": "main",
+      "sha": "b2c3d4e",
+      "expect": {
+        "alert": "update-required",
+        "message": "G: 0.7.0 at b2c3d4e"
+      },
+      "expect_legacy": {
+        "alert": "update-required",
+        "message": null
+      }
+    },
+    {
+      "name": "version-and-other-sha",
+      "version": "0.7.0",
+      "branch": "main",
+      "sha": "1111111",
+      "expect": {
+        "alert": "none"
+      },
+      "expect_legacy": {
+        "alert": "update-required",
+        "message": null
+      }
+    },
+    {
+      "name": "version-branch-sha",
+      "version": "0.8.0",
+      "branch": "dev",
+      "sha": "c3d4e5f",
+      "expect": {
+        "alert": "update-required",
+        "message": "H: 0.8.0 from dev at c3d4e5f"
+      },
+      "expect_legacy": {
+        "alert": "update-required",
+        "message": null
+      }
+    },
+    {
+      "name": "version-branch-other-sha",
+      "version": "0.8.0",
+      "branch": "dev",
+      "sha": "1111111",
+      "expect": {
+        "alert": "none"
+      },
+      "expect_legacy": {
+        "alert": "update-required",
+        "message": null
+      }
+    },
+    {
+      "name": "two-entries-first-message-wins",
+      "version": "0.6.0.12",
+      "branch": "dev",
+      "sha": "a1b2c3d",
+      "expect": {
+        "alert": "update-required",
+        "message": "B: commit a1b2c3d, any version"
+      },
+      "expect_legacy": {
+        "alert": "update-required",
+        "message": null
+      }
+    },
+    {
+      "name": "clean-release-build",
+      "version": "1.0.2",
+      "branch": "main",
+      "sha": "fedcba9",
+      "expect": {
+        "alert": "none"
+      },
+      "expect_legacy": {
+        "alert": "none"
+      }
+    },
+    {
+      "name": "update-available",
+      "version": "1.0.0",
+      "branch": "main",
+      "sha": "fedcba9",
       "latest": "1.1.0",
-      "expect": { "alert": "update-required", "message": "A: every 0.5.0 build" },
-      "expect_legacy": { "alert": "update-required", "message": null } },
-    { "name": "blacklist-offline", "version": "0.5.0", "branch": "main", "sha": "1111111", "fail": ["blacklist"],
-      "expect": { "alert": "none" }, "expect_legacy": { "alert": "none" } },
-    { "name": "blacklist-http-404", "version": "0.5.0", "branch": "main", "sha": "1111111", "blacklist_status": 404,
-      "expect": { "alert": "none" }, "expect_legacy": { "alert": "none" } },
-    { "name": "malformed-entries-skipped", "version": "0.6.0", "branch": "main", "sha": "1111111",
-      "blacklist": [ { "version": "0.5.0", "message": "A" }, { "sha": 12 }, "junk", 7, { "version": "0.6.0" } ],
-      "expect": { "alert": "update-required", "message": null },
-      "expect_legacy": { "alert": "none" },
-      "note": "an entry without a version empties the whole list for older builds" },
-    { "name": "cache-seeded", "version": "1.0.0", "branch": "main", "sha": "1111111",
-      "expect": { "alert": "none" }, "expect_legacy": { "alert": "none" },
-      "note": "fills the checker's cache for 1.0.0 at 1111111" },
-    { "name": "cache-keyed-on-sha", "version": "1.0.0", "branch": "main", "sha": "a1b2c3d", "reset": false,
-      "expect": { "alert": "update-required", "message": "B: commit a1b2c3d, any version", "fetch": true },
-      "expect_legacy": { "alert": "none", "fetch": false },
-      "note": "same version, another commit, cache kept: #1798 fetches again; older builds answer from the cache" }
+      "expect": {
+        "alert": "update-available"
+      },
+      "expect_legacy": {
+        "alert": "update-available"
+      }
+    },
+    {
+      "name": "blacklisted-beats-update-available",
+      "version": "0.5.0",
+      "branch": "main",
+      "sha": "1111111",
+      "latest": "1.1.0",
+      "expect": {
+        "alert": "update-required",
+        "message": "A: every 0.5.0 build"
+      },
+      "expect_legacy": {
+        "alert": "update-required",
+        "message": null
+      }
+    },
+    {
+      "name": "blacklist-offline",
+      "version": "0.5.0",
+      "branch": "main",
+      "sha": "1111111",
+      "fail": [
+        "blacklist"
+      ],
+      "expect": {
+        "alert": "none"
+      },
+      "expect_legacy": {
+        "alert": "none"
+      }
+    },
+    {
+      "name": "blacklist-http-404",
+      "version": "0.5.0",
+      "branch": "main",
+      "sha": "1111111",
+      "blacklist_status": 404,
+      "expect": {
+        "alert": "none"
+      },
+      "expect_legacy": {
+        "alert": "none"
+      }
+    },
+    {
+      "name": "malformed-entries-skipped",
+      "version": "0.6.0",
+      "branch": "main",
+      "sha": "1111111",
+      "blacklist": [
+        {
+          "version": "0.5.0",
+          "message": "A"
+        },
+        {
+          "sha": 12
+        },
+        "junk",
+        7,
+        {
+          "version": "0.6.0"
+        }
+      ],
+      "expect": {
+        "alert": "update-required",
+        "message": null
+      },
+      "expect_legacy": {
+        "alert": "none"
+      },
+      "note": "an entry without a version empties the whole list for older builds"
+    },
+    {
+      "name": "cache-seeded",
+      "version": "1.0.0",
+      "branch": "main",
+      "sha": "1111111",
+      "expect": {
+        "alert": "none"
+      },
+      "expect_legacy": {
+        "alert": "none"
+      },
+      "note": "fills the checker's cache for 1.0.0 at 1111111"
+    },
+    {
+      "name": "cache-keyed-on-sha",
+      "version": "1.0.0",
+      "branch": "main",
+      "sha": "a1b2c3d",
+      "reset": false,
+      "expect": {
+        "alert": "update-required",
+        "message": "B: commit a1b2c3d, any version",
+        "fetch": true
+      },
+      "expect_legacy": {
+        "alert": "none",
+        "fetch": false
+      },
+      "note": "same version, another commit, cache kept: #1798 fetches again; older builds answer from the cache"
+    },
+    {
+      "name": "dev-build-four-part-version",
+      "version": "1.0.2",
+      "dev_version": "1.0.2.83",
+      "branch": "dev",
+      "sha": "3e3f58e",
+      "blacklist": [
+        {
+          "version": "1.0.2.83",
+          "branch": "dev",
+          "message": "J: dev build 1.0.2.83"
+        }
+      ],
+      "expect": {
+        "alert": "none"
+      },
+      "expect_legacy": {
+        "alert": "none"
+      },
+      "note": "a dev build's four-part number is only in AppDevVersion: an entry naming it never matches"
+    },
+    {
+      "name": "dev-build-release-version-and-branch",
+      "version": "1.0.2",
+      "dev_version": "1.0.2.83",
+      "branch": "dev",
+      "sha": "3e3f58e",
+      "blacklist": [
+        {
+          "version": "1.0.2",
+          "branch": "dev",
+          "message": "K: 1.0.2 from dev"
+        }
+      ],
+      "expect": {
+        "alert": "update-required",
+        "message": "K: 1.0.2 from dev"
+      },
+      "expect_legacy": {
+        "alert": "update-required",
+        "message": null
+      },
+      "note": "dev builds match on the release version they carry (every dev build since 1.0.2) plus the branch"
+    }
   ]
 }

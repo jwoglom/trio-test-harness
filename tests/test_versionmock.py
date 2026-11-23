@@ -32,7 +32,10 @@ class BuildConfig(unittest.TestCase):
     def test_build_overrides(self):
         cfg, files = VM.build_config({"version": "0.6.0.12", "build_number": "42", "branch": "dev", "sha": "a1b2c3d",
                                       "build_details": {"com-trio-build-date": "x"}}, token="t")
-        self.assertEqual(cfg["info"], {"CFBundleShortVersionString": "0.6.0.12", "CFBundleVersion": "42"})
+        self.assertEqual(cfg["info"], {"CFBundleShortVersionString": "0.6.0.12", "AppDevVersion": "0.6.0.12",
+                                       "CFBundleVersion": "42"})
+        dev, _ = VM.build_config({"version": "1.0.2", "dev_version": "1.0.2.83"})
+        self.assertEqual(dev["info"], {"CFBundleShortVersionString": "1.0.2", "AppDevVersion": "1.0.2.83"})
         self.assertEqual(cfg["plists"], {"BuildDetails.plist": {"com-trio-build-date": "x", "com-trio-branch": "dev",
                                                                 "com-trio-commit-sha": "a1b2c3d"}})
         self.assertEqual((cfg["reset_token"], cfg["reset_every_launch"]), ("t", False))

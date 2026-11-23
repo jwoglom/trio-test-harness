@@ -412,7 +412,7 @@ def versionmock_spec(args) -> dict:
     """`th versionmock set`'s options as a versionmock spec (harness/versionmock.py build_config)."""
     from . import versionmock as VM
     spec: dict = {}
-    for f in ("version", "build_number", "branch", "sha", "latest", "latest_dev"):
+    for f in ("version", "dev_version", "build_number", "branch", "sha", "latest", "latest_dev"):
         if getattr(args, f, None) is not None:
             spec[f] = getattr(args, f)
     if args.build_detail:
@@ -2000,6 +2000,8 @@ def build_parser() -> argparse.ArgumentParser:
     vms = vm.add_subparsers(dest="sub", required=True)
     vset = vms.add_parser("set", help="set the mock for the app's next launch (replaces any earlier one)")
     vset.add_argument("--version", help="CFBundleShortVersionString the app reports, e.g. 0.6.0.12")
+    vset.add_argument("--dev-version", help="Info.plist AppDevVersion, what Settings shows; a dev build's four-part "
+                      "number, e.g. 1.0.2.83 with --version 1.0.2 (default: --version)")
     vset.add_argument("--build-number", help="CFBundleVersion")
     vset.add_argument("--branch", help="BuildDetails.plist com-trio-branch (\"\" = none recorded)")
     vset.add_argument("--sha", help="BuildDetails.plist com-trio-commit-sha (\"\" = none recorded)")

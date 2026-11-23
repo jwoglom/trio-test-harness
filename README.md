@@ -222,7 +222,8 @@ th test version-check --scenarios harness/scenarios/versionmock-branch-sha.json 
 th test version-check --scenarios ... --legacy   # on a build from before #1798: each scenario's expect_legacy
 ```
 
-- `set`: `--version`/`--build-number` (Info.plist), `--branch`/`--sha` (`""` = none recorded), `--build-detail K=V`,
+- `set`: `--version`/`--build-number` (Info.plist; `--dev-version` = `AppDevVersion`, what Settings shows,
+  default `--version`: a dev build is `--version 1.0.2 --dev-version 1.0.2.83`), `--branch`/`--sha` (`""` = none recorded), `--build-detail K=V`,
   `--info K=V` (`K=` removes a key); `--blacklist FILE` or `--blacklist-entry JSON` (repeatable), `--blacklist-status N`;
   `--latest`/`--latest-dev` (APP_VERSION in main's / dev's Config.xcconfig; `--latest` defaults to `--version`, so no
   "Update Available" unless asked for); `--fail blacklist|config|dev-config` (a network error); `--route URL
