@@ -241,7 +241,8 @@ th test version-check --scenarios ... --legacy   # on a build from before #1798:
   version-check` sets, relaunches, waits for the alert (or for the blacklist to be served and none to follow), checks the
   alert's kind and appended message, and with `--settings` the Settings warning; one screenshot step per scenario.
   `expect.fetch` says whether the app must fetch the blacklist on that launch, and `"reset": false` keeps the previous
-  scenario's cache. `tests/test_versionmock.py` checks the file's expectations against #1798's matching rules.
+  scenario's cache. It records into the current run (a job's, or `--run`; `--new-run` for one of its own), and `--part I/N`
+  runs one of N slices, for a job's agent, which has 5 minutes per command. `tests/test_versionmock.py` checks the file's expectations against #1798's matching rules.
 - The alert does not show when something else is presented at activation (`showAlert` gives up); the harness builds
   with `DEV_BRANCH_WARNING_DISABLED`, so a mocked branch does not raise the development-branch warning.
 

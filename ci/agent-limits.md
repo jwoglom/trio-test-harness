@@ -56,7 +56,7 @@ try to work around them.
   --branch B --sha S --blacklist-entry '{"version": "", "sha": "S", "message": "..."}' --relaunch` makes the app report
   that build and fetch that blacklist (no network needed); `versionmock check --expect update-required --message "..."`
   reads the alert; `test version-check --scenarios harness/scenarios/versionmock-branch-sha.json` runs a whole matrix
-  (`versionmock --help`). Screenshots then show made-up versions and SHAs: say so in your notes.
+  in slices that fit a command's 5 minutes, `--part 1/5` to `--part 5/5` (`versionmock --help`). Screenshots then show made-up versions and SHAs: say so in your notes.
 - Docs: `./trio-test-harness docs search "<words>"`, `docs toc`, `docs page <path or URL>[#section]` read the app's
   official documentation as text: https://triodocs.org for Trio, LoopDocs (https://loopkit.github.io/loopdocs/) for
   Loop. **Always look a setting or option up there first** to learn which screen it is on, what it is called and

@@ -484,6 +484,31 @@ def load_scenarios(path: Path) -> tuple[dict, list[dict]]:
     return data, out
 
 
+def part(scenarios: list[dict], spec: str) -> list[dict]:
+    """The I-th of N consecutive parts ("I/N", 1-based) of the scenarios, of near-equal length; a scenario with
+    "reset": false stays in the same part as the one before it (it tests that one's cache)."""
+    try:
+        i, n = (int(x) for x in spec.split("/"))
+    except ValueError:
+        raise HarnessError(f"--part {spec!r}: I/N, e.g. 2/4") from None
+    if not 1 <= i <= n:
+        raise HarnessError(f"--part {spec!r}: I from 1 to N")
+    units: list[list[dict]] = []
+    for sc in scenarios:
+        if sc.get("reset") is False and units:
+            units[-1].append(sc)
+        else:
+            units.append([sc])
+    total = len(scenarios)
+    parts: list[list[dict]] = [[] for _ in range(n)]
+    done = 0
+    for u in units:
+        k = min(n - 1, done * n // total) if total else 0
+        parts[k].extend(u)
+        done += len(u)
+    return parts[i - 1]
+
+
 SPEC_KEYS = ("version", "build_number", "branch", "sha", "build_details", "info", "blacklist", "blacklist_status",
              "latest", "latest_dev", "fail", "routes", "reset_every_launch")
 

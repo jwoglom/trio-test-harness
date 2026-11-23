@@ -1472,9 +1472,23 @@ def cmd_version_check(args):
         scenarios = [s for s in scenarios if s["name"] in set(args.only)]
         if not scenarios:
             raise HarnessError(f"--only: no scenario named {', '.join(args.only)}")
-    r = Run.new(args.name or f"version-check-{target}",
-                {"target": target, "app": a.key, "title": data.get("title") or f"{a.name} version check ({target})",
-                 "scenarios": str(args.scenarios)})
+    if args.part:
+        scenarios = VM.part(scenarios, args.part)
+    # Into the current run (a job's, or one made with `run new`) unless --new-run or there is none: a job's report and
+    # PR comment show only its own run. A run this command did not make is not finished by it.
+    own = args.new_run
+    r = None
+    if not own:
+        try:
+            r = Run.current(args.run)
+        except HarnessError:
+            own = True
+    if own:
+        r = Run.new(args.name or f"version-check-{target}",
+                    {"target": target, "app": a.key, "title": data.get("title") or f"{a.name} version check ({target})",
+                     "scenarios": str(args.scenarios)})
+    r.log_step("version-check", f"{len(scenarios)} scenario(s) from {args.scenarios}"
+               + (f", part {args.part}" if args.part else "") + (" (expect_legacy)" if args.legacy else ""))
     if target == "sim":
         drv.boot()
         if not drv.is_installed(bundle):
@@ -1525,11 +1539,15 @@ def cmd_version_check(args):
         failed = [x for x in results if not x["ok"]]
         summary = (f"{len(results) - len(failed)}/{len(results)} version-check scenarios as expected"
                    + (": failed " + ", ".join(x["name"] for x in failed) if failed else "."))
-        r.finish("passed" if not failed else "failed", summary)
+        if own:
+            r.finish("passed" if not failed else "failed", summary)
+        else:
+            r.log_step("version-check-summary", summary)
     except Exception as e:  # noqa: BLE001
         F.step(r, drv, "failure", str(e)[:200])
-        r.finish("failed", f"{type(e).__name__}: {e}")
-        render_html(r)
+        if own:
+            r.finish("failed", f"{type(e).__name__}: {e}")
+            render_html(r)
         raise
     finally:
         if not args.keep:
@@ -1968,6 +1986,10 @@ def build_parser() -> argparse.ArgumentParser:
     te.add_argument("--timeout", type=float, default=25.0, help="version-check: seconds to wait for an alert (default 25)")
     te.add_argument("--settle", type=float, default=3.0, help="version-check: seconds after each launch before looking")
     te.add_argument("--keep", action="store_true", help="version-check: leave the last scenario's mock set")
+    te.add_argument("--part", metavar="I/N", help="version-check: run only the I-th of N parts of the file (a job's "
+                    "agent has 5 minutes per command; a scenario with \"reset\": false stays with the one before it)")
+    te.add_argument("--run", help="version-check: record into this run (default: $TH_RUN / the current run)")
+    te.add_argument("--new-run", action="store_true", help="version-check: record into a new run of its own")
     te.add_argument("--legacy", action="store_true", help="version-check: compare with each scenario's "
                     "expect_legacy (a build from before the change under test) where it has one")
     te.set_defaults(fn=cmd_test)

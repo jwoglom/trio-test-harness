@@ -180,6 +180,19 @@ class ScenarioFile(unittest.TestCase):
                 legacy = "update-required" if legacy_hit else ("update-available" if newer else "none")
                 self.assertEqual(s["expect_legacy"]["alert"], legacy)
 
+    def test_parts_cover_everything_once_and_keep_cache_pairs(self):
+        _, scenarios = VM.load_scenarios(SCENARIOS)
+        for n in (1, 3, 5, 7):
+            parts = [VM.part(scenarios, f"{i}/{n}") for i in range(1, n + 1)]
+            self.assertEqual([s["name"] for p in parts for s in p], [s["name"] for s in scenarios])
+            for p in parts:
+                self.assertFalse(p and p[0].get("reset") is False, f"{n} parts: a cache scenario opens a part")
+                self.assertLessEqual(len(p), len(scenarios) // n + 2)
+        with self.assertRaises(HarnessError):
+            VM.part(scenarios, "0/3")
+        with self.assertRaises(HarnessError):
+            VM.part(scenarios, "x")
+
     def test_bad_expect(self):
         with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False) as f:
             json.dump({"scenarios": [{"name": "x", "expect": {"alert": "maybe"}}]}, f)
