@@ -1446,7 +1446,7 @@ def build_parser() -> argparse.ArgumentParser:
                                     "(filter, tail, save); Loop: TandemKit's and the device log",
                        description=_applogs_doc(),
                        formatter_class=argparse.RawDescriptionHelpFormatter)
-    lg.add_argument("which", nargs="*", metavar="{trio,tandem,device,watch,all}",
+    lg.add_argument("which", nargs="*", metavar="{trio,tandem,device,watch,flexkit,all}",
                     help="which log(s), several or comma-separated allowed (default all, merged by time); "
                          "device: every pump and CGM driver's entries")
     lg.add_argument("-g", "--grep", metavar="REGEX", help="only entries matching (Python regex; multi-line entries match as a whole)")
