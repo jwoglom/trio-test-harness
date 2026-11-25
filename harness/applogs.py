@@ -12,6 +12,8 @@ The logs:
   tandem  TandemKit's: info, warnings and errors (its debug lines go to the system log only: `th oslog`).
   device  the device log: every pump and CGM driver's entries, each as "[driver/type] message".
   watch   the Watch app's log, as far as the watch has sent it to the phone (every 3 min or 100 entries).
+  flexkit the MiniMed Flex driver's own log (flexkit/flexkit_log.txt), all levels including debug — the BLE/MTS/TLS
+          wire trace. Use `th logs flexkit --grep TLS` or `--since 5m` to follow a pairing/secure-link attempt.
 Loop has tandem and device only. Each log reaches back about two days. The output is the last -n entries (default
 200) after the filters; `all` merges the logs by time and prefixes each entry with its log's name. A line the app
 keeps in two places (TandemKit's are in the device log too) shows once, under the first log that has it; a line the
@@ -39,20 +41,24 @@ from .util import HarnessError
 #           sends its info/warning/error lines there as "delegate" entries (TandemKit 56dcb3c on).
 #   tandem  tandem/tandem_log.txt (+ _prev); where neither file is there, TandemKit's entries in the device log.
 #   watch   logs/watch_log.txt (+ _prev).
+#   flexkit FlexKit's (MiniMed Flex driver) own text log: flexkit/flexkit_log.txt (+ _prev), written by FlexKitLogWriter.
+#           All levels incl. debug; same "[ts LEVEL] File - func#line: msg" format as TandemKit.
 # Text files start at local midnight and rotate to *_prev once a day; the stores are read for their last SQLITE_DAYS.
 SOURCES = {
     "trio": ["logs/log_prev.txt", "logs/log.txt", "logs/AppLog.sqlite"],
     "tandem": ["tandem/tandem_log_prev.txt", "tandem/tandem_log.txt"],
     "device": ["logs/DeviceLog.sqlite", "DeviceLog/Storage.sqlite"],
     "watch": ["logs/watch_log_prev.txt", "logs/watch_log.txt"],
+    "flexkit": ["flexkit/flexkit_log_prev.txt", "flexkit/flexkit_log.txt"],
 }
-APP_LOGS = {"trio": ("trio", "tandem", "device", "watch"), "loop": ("tandem", "device")}
+APP_LOGS = {"trio": ("trio", "tandem", "device", "watch", "flexkit"), "loop": ("tandem", "device")}
 # the live pane follows one source at a time, the current one first; True: TandemKit's entries of the device log only
 TAIL_SOURCES = {
     "trio": [("logs/AppLog.sqlite", False), ("logs/log.txt", False)],
     "tandem": [("tandem/tandem_log.txt", False), ("logs/DeviceLog.sqlite", True), ("DeviceLog/Storage.sqlite", True)],
     "device": [("logs/DeviceLog.sqlite", False), ("DeviceLog/Storage.sqlite", False)],
     "watch": [("logs/watch_log.txt", False)],
+    "flexkit": [("flexkit/flexkit_log.txt", False)],
 }
 TANDEM_MANAGER = re.compile(r"^\[[^\]]* [A-Z]+\] \[[^/\]]*tandem[^/\]]*/", re.I)
 
